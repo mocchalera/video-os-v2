@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -266,7 +266,200 @@ describe("visual quality measurement stage", () => {
       exposure: false,
     });
   });
+
+  it.each([
+    { concurrency: 1, expectedMax: 1 },
+    { concurrency: 99, expectedMax: 3 },
+  ])("bounds work by asset and preserves output order at concurrency=$concurrency", async ({ concurrency, expectedMax }) => {
+    const dir = makeTempDir();
+    const segmentsPath = path.join(dir, "segments.json");
+    const items = [
+      { ...makeSegment(), segment_id: "SEG_A_1", asset_id: "AST_A" },
+      { ...makeSegment(), segment_id: "SEG_A_2", asset_id: "AST_A" },
+      { ...makeSegment(), segment_id: "SEG_B_1", asset_id: "AST_B" },
+      { ...makeSegment(), segment_id: "SEG_C_1", asset_id: "AST_C" },
+    ];
+    const segmentsJson: SegmentsJson = {
+      project_id: "visual-quality-bounds",
+      artifact_version: "2.0.0",
+      items,
+    };
+    let active = 0;
+    let maxActive = 0;
+    const activeByAsset = new Map<string, number>();
+    let sameAssetOverlap = false;
+
+    const result = await runVisualQualityMeasurementStage({
+      segmentsJson,
+      sourceFileMap: new Map([
+        ["AST_A", "/tmp/a.mp4"],
+        ["AST_B", "/tmp/b.mp4"],
+        ["AST_C", "/tmp/c.mp4"],
+      ]),
+      segmentsOutputPath: segmentsPath,
+      policyHash: "policy",
+      concurrency,
+      analyzeFn: async (_sourcePath, current) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        const assetActive = (activeByAsset.get(current.asset_id) ?? 0) + 1;
+        activeByAsset.set(current.asset_id, assetActive);
+        sameAssetOverlap ||= assetActive > 1;
+        await new Promise((resolve) => setTimeout(resolve, current.asset_id === "AST_A" ? 8 : 2));
+        active -= 1;
+        activeByAsset.set(current.asset_id, assetActive - 1);
+        return successfulMeasurement();
+      },
+    });
+
+    expect(maxActive).toBe(expectedMax);
+    expect(sameAssetOverlap).toBe(false);
+    expect(result.segmentsJson.items.map((item) => item.segment_id)).toEqual([
+      "SEG_A_1", "SEG_A_2", "SEG_B_1", "SEG_C_1",
+    ]);
+    expect(result.summary.measuredSegments).toBe(4);
+  });
+
+  it("isolates failures while keeping other asset measurements", async () => {
+    const dir = makeTempDir();
+    const segmentsPath = path.join(dir, "segments.json");
+    const segmentsJson: SegmentsJson = {
+      project_id: "visual-quality-failure",
+      artifact_version: "2.0.0",
+      items: [
+        { ...makeSegment(), segment_id: "SEG_GOOD", asset_id: "AST_GOOD" },
+        { ...makeSegment(), segment_id: "SEG_BAD", asset_id: "AST_BAD" },
+      ],
+    };
+
+    const result = await runVisualQualityMeasurementStage({
+      segmentsJson,
+      sourceFileMap: new Map([
+        ["AST_GOOD", "/tmp/good.mp4"],
+        ["AST_BAD", "/tmp/bad.mp4"],
+      ]),
+      segmentsOutputPath: segmentsPath,
+      policyHash: "policy",
+      concurrency: 2,
+      analyzeFn: async (_sourcePath, current) => {
+        if (current.asset_id === "AST_BAD") throw new Error("controlled failure");
+        return successfulMeasurement();
+      },
+    });
+
+    expect(result.summary.measuredSegments).toBe(1);
+    expect(result.summary.failedSegments).toEqual([
+      expect.objectContaining({ segment_id: "SEG_BAD", error: "controlled failure" }),
+    ]);
+  });
+
+  it("stops new assets at the deadline and prevents late canonical mutation", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let now = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const dir = makeTempDir();
+      const segmentsPath = path.join(dir, "segments.json");
+      const segmentsJson: SegmentsJson = {
+        project_id: "visual-quality-deadline",
+        artifact_version: "2.0.0",
+        items: Array.from({ length: 4 }, (_, index) => ({
+          ...makeSegment(),
+          segment_id: `SEG_${index}`,
+          asset_id: `AST_${index}`,
+        })),
+      };
+      fs.writeFileSync(segmentsPath, JSON.stringify(segmentsJson, null, 2), "utf-8");
+      let calls = 0;
+      let completed = 0;
+      let resolveCallsStarted!: () => void;
+      const callsStarted = new Promise<void>((resolve) => {
+        resolveCallsStarted = resolve;
+      });
+      let releaseAnalysis!: () => void;
+      const lateAnalysis = new Promise<void>((resolve) => {
+        releaseAnalysis = resolve;
+      });
+
+      const resultPromise = runVisualQualityMeasurementStage({
+        segmentsJson,
+        sourceFileMap: new Map(segmentsJson.items.map((item) => [item.asset_id, `/tmp/${item.asset_id}.mp4`])),
+        segmentsOutputPath: segmentsPath,
+        policyHash: "policy",
+        concurrency: 2,
+        deadlineAtMs: 5,
+        analyzeFn: async () => {
+          calls += 1;
+          if (calls === 2) resolveCallsStarted();
+          await lateAnalysis;
+          completed += 1;
+          return successfulMeasurement();
+        },
+      });
+
+      // Both workers have entered before the controlled clock reaches the
+      // deadline; the test never relies on wall-clock scheduling for that.
+      await callsStarted;
+      now = 5;
+      await vi.advanceTimersByTimeAsync(5);
+      const result = await resultPromise;
+
+      expect(calls).toBe(2);
+      expect(result.summary.timedOut).toBe(true);
+      expect(result.summary.measuredSegments).toBe(0);
+      expect(result.summary.skippedSegments).toBe(4);
+      releaseAnalysis();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(completed).toBe(2);
+      expect(calls).toBe(2);
+      const written = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as SegmentsJson;
+      expect(written.items.every((item) => item.visual_quality_measurements === undefined)).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
+
+function successfulMeasurement(): VisualQualityMeasurements {
+  return {
+    measured: true,
+    connector_version: "ffmpeg-motion-test",
+    method: "ffmpeg_sampled_signals",
+    sample_fps: 2,
+    max_width: 160,
+    duration_us: 1_000_000,
+    metrics_measured: { shake: true, sharpness: true, exposure: true },
+    shake: {
+      measured: true,
+      score: 0.4,
+      sample_count: 2,
+      bins: [{ start_us: 0, end_us: 1_000_000, energy: 0.4 }],
+      average_energy: 0.4,
+      peak_energy: 0.4,
+      peak_timestamp_us: 500_000,
+    },
+    sharpness: {
+      measured: true,
+      sharpness_score: 0.8,
+      blur_score: 0.2,
+      blur_mean: 4,
+      method: "blurdetect",
+      sample_count: 2,
+    },
+    exposure: {
+      measured: true,
+      exposure_score: 0.9,
+      black_clip_ratio: 0.05,
+      white_clip_ratio: 0.01,
+      avg_luma: 120,
+      underexposed: false,
+      overexposed: false,
+      sample_count: 2,
+    },
+  };
+}
 
 function makeSegment(): SegmentItem {
   return {

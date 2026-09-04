@@ -1,0 +1,11 @@
+{
+  "version": "platform-safe-zone-qa/v1",
+  "profile_id": "synthetic-platform-profile",
+  "profile_hash": "sha256:5b10bd32d54792e868562402f528c2aef7527d76d5558fb68e4e3eed6aa57efd",
+  "status": "human_hold",
+  "human_preview_required": true,
+  "checks": [
+    { "id": "geometry_unknown", "status": "unknown", "reason": "profile geometry is unknown; human platform preview is required" }
+  ],
+  "receipt_hash": "sha256:6d5dea70cd92000a372b42e27b595adeaaeefe2bbf484e708dc59ed220f7d25b"
+}

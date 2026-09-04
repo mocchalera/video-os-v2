@@ -1,0 +1,29 @@
+version: platform-safe-zone-profile/v1
+profile_id: fixture-fallback-v1
+platform: fixture
+surface: fixture
+delivery_variant: fallback
+evidence_status: partial
+source_references:
+  - url: https://www.w3.org/TR/SVG/
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: video-os-test-fixture
+    evidence_kind: decision_hold
+    notes: Safe identity fallback is registered; no platform coordinates are asserted.
+measured_at: null
+geometry:
+  status: unknown
+  coordinate_system: normalized_top_left
+  viewport: { status: unknown }
+  ui_regions: { unknown: true, regions: [] }
+  safe_regions: { unknown: true, regions: [] }
+  method: unknown
+  confidence: unknown
+device_evidence: { status: unknown }
+screenshot_evidence: { status: unknown }
+supersession: { state: active }
+fallback:
+  mode: safe_identity_layout
+  human_preview_required: true
+  reason: Use conservative identity layout and require human platform preview.

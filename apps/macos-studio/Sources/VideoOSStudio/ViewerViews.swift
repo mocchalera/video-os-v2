@@ -1400,3 +1400,276 @@ struct MediaAudioPlayer: View {
         player.volume = max(0, min(volume, 1))
     }
 }
+
+// MARK: - Canonical graphical caption projection
+
+/// A projection of the service-resolved caption treatment. This view owns no
+/// style registry or safe-zone policy; it only renders the typed canonical
+/// input and reports a local drag/resize candidate back to the session.
+struct CaptionCanonicalTreatmentOverlay: View {
+    let text: String
+    let projection: CaptionVisualResolvedProjection
+    let operation: CaptionVisualTreatmentOperation
+    let input: CaptionVisualTreatmentInputDocument
+    let safeZoneProfile: CaptionSafeZoneProfileDocument?
+    let status: CaptionVisualTreatmentStatus
+    let reasons: [String]
+    let showsSafeZoneOverlay: Bool
+    let isEditable: Bool
+    let onOperationChanged: (CaptionVisualTreatmentOperation) -> Void
+    let onOperationCommitted: (CaptionVisualTreatmentOperation) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @State private var dragOrigin: CaptionVisualRect?
+    @State private var resizeOrigin: CaptionVisualRect?
+    @State private var gestureState = CaptionVisualGestureCommitState()
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                if showsSafeZoneOverlay {
+                    CaptionSafeZoneProfileOverlay(profile: safeZoneProfile)
+                }
+
+                let rect = resolvedRect
+                treatmentCard(rect: rect, in: geometry.size)
+                    .position(
+                        x: geometry.size.width * (rect.x + rect.width / 2),
+                        y: geometry.size.height * (rect.y + rect.height / 2)
+                    )
+
+                VStack {
+                    HStack(alignment: .top, spacing: 6) {
+                        Label(status.localizedLabel, systemImage: statusIcon)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(statusColor)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(.thinMaterial, in: Capsule())
+                        Spacer()
+                        Label(
+                            safeZoneProfile == nil
+                                ? "safe-zone unknown"
+                                : (safeZoneProfile?.isHumanHold == true ? "safe-zone HOLD" : "safe-zone measured"),
+                            systemImage: safeZoneProfile?.isHumanHold == true ? "hand.raised.fill" : "viewfinder"
+                        )
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(safeZoneProfile?.isHumanHold == true || safeZoneProfile == nil ? .orange : .green)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 5)
+                        .background(.thinMaterial, in: Capsule())
+                    }
+                    .padding(9)
+                    Spacer()
+                    if !reasons.isEmpty {
+                        Text(reasons.joined(separator: " / "))
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
+                            .padding(7)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(9)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityIdentifier("CaptionCanonicalTreatmentOverlay.\(operation.captionID)")
+        }
+    }
+
+    private var resolvedRect: CaptionVisualRect {
+        operation.rect ?? CaptionVisualRect(x: 0.14, y: 0.76, width: 0.72, height: 0.14)
+    }
+
+    @ViewBuilder
+    private func treatmentCard(rect: CaptionVisualRect, in size: CGSize) -> some View {
+        let fontSize = max(9, projection.fontSizePx1080 * size.height / 1080 * (operation.referenceScale ?? 1) * projection.emphasisScale)
+        let fillColor = canonicalColor(projection.fillRGBA) ?? Color.primary
+        let outlineColor = canonicalColor(projection.outlineRGBA) ?? Color.secondary
+        let panelColor: Color = projection.panelEnabled ? outlineColor.opacity(0.68) : .clear
+        let strokeColor: Color = projection.outlineEnabled ? outlineColor : .clear
+        let card = ZStack(alignment: .bottomTrailing) {
+            if StudioBundledFontRegistry.registrationReport.canRenderCustomFont(family: projection.fontFamily) {
+                Text(text)
+                    .font(.custom(projection.fontFamily, size: fontSize).weight(viewerSwiftUIWeight))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(fillColor)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.72)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(width: max(30, size.width * rect.width), height: max(24, size.height * rect.height))
+                    .background(panelColor, in: RoundedRectangle(cornerRadius: 7))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(strokeColor, lineWidth: max(0.8, projection.outlinePx1080 * size.height / 1080))
+                    }
+                    .shadow(color: projection.shadowEnabled ? outlineColor.opacity(0.72) : .clear, radius: max(2, projection.shadowPx1080 * size.height / 1080))
+            } else {
+                Label("選択fontを登録できないためcanonical previewを停止しました", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .frame(width: max(30, size.width * rect.width), height: max(24, size.height * rect.height))
+                    .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 7))
+            }
+            if isEditable {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .padding(5)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
+                    .gesture(resizeGesture(in: size))
+                    .accessibilityLabel("caption treatmentのsizeを変更")
+            }
+        }
+        .frame(width: max(30, size.width * rect.width), height: max(24, size.height * rect.height))
+        .contentShape(Rectangle())
+
+        if isEditable {
+            card
+                .gesture(dragGesture(in: size))
+                .onHover { hovering in
+                    (hovering ? NSCursor.openHand : NSCursor.arrow).set()
+                }
+        } else {
+            card
+        }
+    }
+
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                if dragOrigin == nil { dragOrigin = resolvedRect }
+                guard var next = dragOrigin else { return }
+                next.x = clamped(value: next.x + Double(value.translation.width / max(size.width, 1)), lower: 0, upper: 1 - next.width)
+                next.y = clamped(value: next.y + Double(value.translation.height / max(size.height, 1)), lower: 0, upper: 1 - next.height)
+                var updated = gestureState.pendingOperation ?? operation
+                updated.rect = next
+                gestureState.changed(updated)
+                onOperationChanged(updated)
+            }
+            .onEnded { _ in
+                if let gestureOperation = gestureState.ended() { onOperationCommitted(gestureOperation) }
+                dragOrigin = nil
+            }
+    }
+
+    private func resizeGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                if resizeOrigin == nil { resizeOrigin = resolvedRect }
+                guard let origin = resizeOrigin else { return }
+                let width = clamped(value: origin.width + Double(value.translation.width / max(size.width, 1)), lower: 0.12, upper: 0.92)
+                let height = clamped(value: origin.height + Double(value.translation.height / max(size.height, 1)), lower: 0.08, upper: 0.72)
+                var updated = gestureState.pendingOperation ?? operation
+                updated.rect = CaptionVisualRect(
+                    x: min(origin.x, 1 - width),
+                    y: min(origin.y, 1 - height),
+                    width: width,
+                    height: height
+                )
+                let originWidth = max(origin.width, 0.01)
+                updated.referenceScale = min(max((updated.referenceScale ?? 1) * width / originWidth, 0.25), 4)
+                gestureState.changed(updated)
+                onOperationChanged(updated)
+            }
+            .onEnded { _ in
+                if let gestureOperation = gestureState.ended() { onOperationCommitted(gestureOperation) }
+                resizeOrigin = nil
+            }
+    }
+
+    private func clamped(value: Double, lower: Double, upper: Double) -> Double {
+        min(max(value, lower), upper)
+    }
+
+    private var statusIcon: String {
+        switch status {
+        case .ready: return "checkmark.circle.fill"
+        case .fallback: return "arrow.triangle.branch"
+        case .humanHold: return "hand.raised.fill"
+        case .blocked: return "xmark.octagon.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .ready: return .green
+        case .fallback, .humanHold: return .orange
+        case .blocked: return .red
+        }
+    }
+
+    private var accessibilityLabel: String {
+        let identity = input.identity(for: operation.captionID)
+        let timing = identity.map { "IN \($0.timelineInFrame)、\($0.timelineDurationFrames)フレーム" } ?? "timing unknown"
+        return "canonical caption treatment、\(operation.captionID)、\(timing)、style \(projection.styleRef)、effect \(projection.effectRef ?? "none")、\(status.localizedLabel)"
+    }
+
+    private var viewerSwiftUIWeight: Font.Weight {
+        switch projection.fontWeight {
+        case 900...: return .black
+        case 800...: return .heavy
+        case 700...: return .bold
+        default: return .regular
+        }
+    }
+
+    private func canonicalColor(_ rgba: String) -> Color? {
+        guard rgba.count == 8,
+              let value = UInt32(rgba, radix: 16)
+        else { return nil }
+        return Color(
+            red: Double((value >> 24) & 0xFF) / 255,
+            green: Double((value >> 16) & 0xFF) / 255,
+            blue: Double((value >> 8) & 0xFF) / 255,
+            opacity: Double(value & 0xFF) / 255
+        )
+    }
+}
+
+struct CaptionSafeZoneProfileOverlay: View {
+    let profile: CaptionSafeZoneProfileDocument?
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                if let profile {
+                    ForEach(profile.geometry.safeRegions.regions) { region in
+                        Rectangle()
+                            .stroke(Color.green.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                            .frame(
+                                width: geometry.size.width * region.rect.width,
+                                height: geometry.size.height * region.rect.height
+                            )
+                            .position(
+                                x: geometry.size.width * (region.rect.x + region.rect.width / 2),
+                                y: geometry.size.height * (region.rect.y + region.rect.height / 2)
+                            )
+                            .accessibilityHidden(true)
+                    }
+                    ForEach(profile.geometry.uiRegions.regions) { region in
+                        Rectangle()
+                            .stroke(Color.orange.opacity(0.68), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                            .frame(
+                                width: geometry.size.width * region.rect.width,
+                                height: geometry.size.height * region.rect.height
+                            )
+                            .position(
+                                x: geometry.size.width * (region.rect.x + region.rect.width / 2),
+                                y: geometry.size.height * (region.rect.y + region.rect.height / 2)
+                            )
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}

@@ -114,6 +114,8 @@ metadata:
 
 ## 推奨出力
 
+<!-- artifact-producer: agent -->
+
 ```text
 projects/<project>/
 ├── 03_analysis/
@@ -160,4 +162,3 @@ projects/<project>/
 - 元アスペクト維持の有無と検証結果
 - 出力フォルダ、ZIP、確認シート、レポートのパス
 - やりすぎ防止のため据え置いた写真があること
-

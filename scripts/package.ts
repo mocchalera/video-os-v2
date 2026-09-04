@@ -53,7 +53,25 @@ import {
   verifyExistingPackage,
   type PackageVerificationResult,
 } from "../runtime/packaging/package-verification.js";
-import { resolveDeliveryArtifactPaths } from "../runtime/packaging/active-delivery.js";
+import { resolveDeliveryArtifactPathsStrict } from "../runtime/packaging/active-delivery.js";
+import { buildPackagePreflightFromStrictPointer } from "../runtime/packaging/package-preflight-core.js";
+import {
+  errorMessage,
+  toProjectRelative,
+  type PackagePreflight,
+  type PackagePreflightArtifactPaths,
+  type PackagePreflightDecision,
+  type PackagePreflightIdentitySource,
+  type PackagePreflightProjectIdentity,
+} from "../runtime/packaging/package-preflight-core.js";
+
+export type {
+  PackagePreflight,
+  PackagePreflightArtifactPaths,
+  PackagePreflightDecision,
+  PackagePreflightIdentitySource,
+  PackagePreflightProjectIdentity,
+};
 import { inspectFinalRenderApproval } from "../runtime/packaging/final-render-approval.js";
 import { assertNoLegacyClipCaptionsForPackage } from "../runtime/render/legacy-caption-guard.js";
 import { assertCaptionFontContractReady } from "../runtime/caption/font-contract.js";
@@ -70,6 +88,7 @@ const USAGE = [
   "  --assembly-path <path>                           Use a supplied assembly.mp4 path",
   "  --assembly-engine <auto|ffmpeg|remotion>         Select assembly engine (default: auto)",
   "  --supplied-final <path>                          Use a supplied final.mp4 for nle_finishing",
+  "  --repo-sfx-root <directory>                       Explicit repo_common SFX authority root",
   "  --created-at <iso-date>                          Timestamp override",
   "  --preflight-only                                 Evaluate Gate 10 without writing project artifacts",
   "  --verify-existing                                Verify an existing package without writing project artifacts",
@@ -78,6 +97,7 @@ const USAGE = [
 
 export interface PackageCliArgs {
   projectDir: string;
+  repoSfxRoot?: string;
   sourceOfTruth?: SourceOfTruth;
   autonomyMode?: AutonomyMode;
   skipRender: boolean;
@@ -91,59 +111,6 @@ export interface PackageCliArgs {
   json: boolean;
 }
 
-export interface PackagePreflight {
-  version: "package-preflight/v2";
-  decision: PackagePreflightDecision;
-  project_identity: PackagePreflightProjectIdentity;
-  structured_issues: PackagePreflightIssue[];
-  next_action: PackagePreflightNextAction;
-  /** @deprecated Kept for package-preflight/v1 consumers. Use decision instead. */
-  ok: boolean;
-  projectDir: string;
-  /** @deprecated Kept for package-preflight/v1 consumers. Use structured_issues instead. */
-  issues: string[];
-  /** @deprecated Kept for package-preflight/v1 consumers. Use next_action instead. */
-  nextSteps: string[];
-  sourceOfTruth?: SourceOfTruth;
-  autonomyMode?: AutonomyMode;
-  projectId?: string;
-  currentState?: string;
-  visualQaSummary: string;
-}
-
-export interface PackagePreflightArtifactPaths {
-  captionApprovalPath: string;
-  qaReportPath: string;
-  packageManifestPath: string;
-  finalRenderApprovalPath?: string;
-}
-
-export type PackagePreflightDecision = "ready_to_run" | "blocked";
-
-export type PackagePreflightIdentityStatus =
-  | "confirmed"
-  | "inferred"
-  | "unresolved"
-  | "conflict";
-
-export interface PackagePreflightIdentitySource {
-  artifact: "timeline" | "state" | "qa" | "manifest";
-  path: string;
-  status: "present" | "missing" | "empty" | "malformed";
-  project_id?: string;
-}
-
-export interface PackagePreflightProjectIdentity {
-  status: PackagePreflightIdentityStatus;
-  project_id?: string;
-  evidence_count: number;
-  sources: PackagePreflightIdentitySource[];
-}
-
-export interface PackagePreflightIssue {
-  code: string;
-  message: string;
-}
 
 export interface PackagePreflightNextAction {
   code: "run_package" | "resolve_project_identity" | "resolve_preflight_issues";
@@ -181,6 +148,7 @@ export interface EnsureAssemblyResult {
 export function parseArgs(argv: string[]): PackageCliArgs {
   const args = argv.slice(2);
   let projectDir = "";
+  let repoSfxRoot: string | undefined;
   let sourceOfTruth: SourceOfTruth | undefined;
   let autonomyMode: AutonomyMode | undefined;
   let skipRender = false;
@@ -206,6 +174,8 @@ export function parseArgs(argv: string[]): PackageCliArgs {
       autonomyMode = parseAutonomyMode(args[++i]);
     } else if (arg === "--skip-render") {
       skipRender = true;
+    } else if (arg === "--repo-sfx-root" && i + 1 < args.length) {
+      repoSfxRoot = args[++i];
     } else if (arg === "--no-assembly") {
       noAssembly = true;
     } else if ((arg === "--assembly-path" || arg === "--assembly") && i + 1 < args.length) {
@@ -246,6 +216,7 @@ export function parseArgs(argv: string[]): PackageCliArgs {
 
   return {
     projectDir,
+    repoSfxRoot,
     sourceOfTruth,
     autonomyMode,
     skipRender,
@@ -263,139 +234,10 @@ export function parseArgs(argv: string[]): PackageCliArgs {
 export function buildPackagePreflight(
   projectDir: string,
   args: Pick<PackageCliArgs, "sourceOfTruth" | "autonomyMode"> = {},
-  artifactPaths?: PackagePreflightArtifactPaths,
 ): PackagePreflight {
-  const absDir = path.resolve(projectDir);
-  const resolvedDelivery = resolveDeliveryArtifactPaths(absDir, { verifyHashes: true });
-  const deliveryPaths = artifactPaths ?? {
-    captionApprovalPath: resolvedDelivery.captionApprovalPath,
-    qaReportPath: resolvedDelivery.qaReportPath,
-    packageManifestPath: resolvedDelivery.packageManifestPath,
-  };
-  const issues: string[] = [];
-  const timelinePath = path.join(absDir, "05_timeline", "timeline.json");
-  const blueprintPath = path.join(absDir, "04_plan", "edit_blueprint.yaml");
-
-  const doc = readStateForPreflight(absDir, issues);
-  if (
-    doc &&
-    doc.current_state !== "approved" &&
-    doc.current_state !== "packaged"
-  ) {
-    issues.push(
-      `current_state must be "approved" or "packaged", got "${doc.current_state}"`,
-    );
-  }
-  const autonomyMode = readAutonomyForPreflight(absDir, issues);
-  if (args.autonomyMode && autonomyMode && args.autonomyMode !== autonomyMode) {
-    issues.push(
-      `creative_brief autonomy.mode is "${autonomyMode}", not requested "${args.autonomyMode}"`,
-    );
-  }
-
-  const timeline = readJsonForPreflight<
-    import("../runtime/compiler/types.js").TimelineIR
-  >(timelinePath, issues);
-  const currentTimelineVersion =
-    typeof timeline?.version === "string" ? timeline.version : timeline ? "1" : undefined;
-  const blueprint = readYamlForPreflight<{
-    caption_policy?: { source?: string; styling_class?: string };
-  }>(blueprintPath, issues);
-  if (timeline) {
-    try {
-      assertNoLegacyClipCaptionsForPackage(timeline);
-    } catch (error) {
-      issues.push(error instanceof Error ? error.message : String(error));
-    }
-  }
-  const captionApproval = readOptionalJson(deliveryPaths.captionApprovalPath);
-  const approvedCaptionPolicy = (
-    captionApproval as { caption_policy?: { source?: string; styling_class?: string } } | null
-  )?.caption_policy;
-  const effectiveCaptionPolicy = approvedCaptionPolicy ?? blueprint?.caption_policy;
-  if (
-    effectiveCaptionPolicy?.source
-    && effectiveCaptionPolicy.source !== "none"
-    && effectiveCaptionPolicy.styling_class
-  ) {
-    try {
-      assertCaptionFontContractReady(effectiveCaptionPolicy.styling_class);
-    } catch (error) {
-      issues.push(error instanceof Error ? error.message : String(error));
-    }
-  }
-  const musicCues = readOptionalJson(path.join(absDir, "07_package", "music_cues.json"));
-  const musicEligibility = assessMusicAssetEligibility(absDir, musicCues);
-  if (!musicEligibility.eligible && musicEligibility.message) {
-    issues.push(`music_cues BGM asset is not eligible: ${musicEligibility.message}`);
-  }
-  const reviewReport = readReviewReport(absDir, issues);
-  const visualQaSummary = summarizeVisualQA(reviewReport);
-  const projectIdentity = resolvePackagePreflightProjectIdentity(absDir, {
-    timeline,
-    state: doc,
-  }, deliveryPaths);
-  issues.push(...identityIssues(projectIdentity));
-  const finalRenderApproval = inspectFinalRenderApproval(absDir, {
-    ...(deliveryPaths.finalRenderApprovalPath
-      ? { approvalPath: deliveryPaths.finalRenderApprovalPath }
-      : {}),
-    captionApprovalPath: deliveryPaths.captionApprovalPath,
-  });
-  if (!finalRenderApproval.ready) {
-    issues.push(
-      `final_render_approval ${finalRenderApproval.status}: ${finalRenderApproval.issues.join("; ")}`,
-    );
-  }
-
-  let sourceOfTruth: SourceOfTruth | undefined;
-  if (doc && autonomyMode && timeline && blueprint) {
-    const gate = checkGate10(doc, {
-      autonomyMode,
-      currentTimelineVersion,
-      blueprint,
-      captionApproval,
-      musicCues,
-      reviewReport,
-      visualQaApplicable: timelineHasVisualClips(timelinePath),
-    });
-    issues.push(...gate.errors);
-    sourceOfTruth = gate.source_of_truth ?? inferSourceOfTruth(doc, autonomyMode);
-  } else if (doc && autonomyMode) {
-    sourceOfTruth = inferSourceOfTruth(doc, autonomyMode);
-  }
-
-  if (args.sourceOfTruth && sourceOfTruth && args.sourceOfTruth !== sourceOfTruth) {
-    issues.push(
-      `handoff_resolution.source_of_truth_decision is "${sourceOfTruth}", not requested "${args.sourceOfTruth}"`,
-    );
-  }
-
-  const uniqueIssues = unique(issues);
-  const decision: PackagePreflightDecision = uniqueIssues.length === 0
-    ? "ready_to_run"
-    : "blocked";
-  const structuredIssues = uniqueIssues.map((message) => ({
-    code: issueCode(message),
-    message,
-  }));
-  const nextSteps = nextStepsForIssues(uniqueIssues);
-  return {
-    version: "package-preflight/v2",
-    decision,
-    project_identity: projectIdentity,
-    structured_issues: structuredIssues,
-    next_action: nextActionForPreflight(decision, projectIdentity, nextSteps),
-    ok: decision === "ready_to_run",
-    projectDir: absDir,
-    issues: uniqueIssues,
-    nextSteps,
-    sourceOfTruth,
-    autonomyMode,
-    ...(projectIdentity.project_id ? { projectId: projectIdentity.project_id } : {}),
-    ...(doc?.current_state ? { currentState: doc.current_state } : {}),
-    visualQaSummary,
-  };
+  // public preflight: the exported preflight derives every artifact path
+  // from the strict current pointer authority — no caller-supplied paths
+  return buildPackagePreflightFromStrictPointer(projectDir, args);
 }
 
 export function formatPreflightReport(preflight: PackagePreflight): string {
@@ -554,6 +396,7 @@ export async function runPackageCli(argv: string[] = process.argv): Promise<numb
   const options: PackageCommandOptions = {
     skipRender: args.skipRender,
     projectId: preflight.projectId,
+    ...(args.repoSfxRoot ? { repoSfxRoot: path.resolve(args.repoSfxRoot) } : {}),
     ...(args.createdAt ? { createdAt: args.createdAt } : {}),
   };
 
@@ -571,7 +414,6 @@ export async function runPackageCli(argv: string[] = process.argv): Promise<numb
     } else {
       try {
         const route = resolveProjectRenderRoute(absDir, args.assemblyEngine ?? "auto");
-        options.renderRouteDecision = route;
         output(
           `[package] Render route: assembly=${route.assembly_engine} ` +
           `hyperframes=${route.hyperframes_overlay ? "on" : "off"} ` +
@@ -1008,19 +850,13 @@ function nextStepsForFailure(result: PackageCommandResult): string[] {
   return ["Fix the reported packaging error, then rerun package."];
 }
 
-function toProjectRelative(filePath: string): string {
-  const parts = filePath.split(path.sep);
-  const marker = parts.findIndex((part) => /^\d{2}_/.test(part));
-  return marker >= 0 ? parts.slice(marker).join("/") : filePath;
-}
+
 
 function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter((value) => value.trim().length > 0)));
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+
 
 const isMain = process.argv[1]
   ? import.meta.url === pathToFileURL(process.argv[1]).href

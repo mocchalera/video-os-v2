@@ -43,6 +43,25 @@ describe("editorial pipeline optional Marlin evidence", () => {
       "Planning is not supported for asset(s): AST-unsupported",
     );
   });
+
+  it("rejects a creative brief whose identity belongs to another project", () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "editorial-foreign-brief-"));
+    try {
+      fs.cpSync(path.resolve("projects/sample"), projectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, "project_state.yaml"),
+        "version: 1\nproject_id: target-project\ncurrent_state: intent_locked\nhistory: []\n",
+      );
+      fs.rmSync(path.join(projectDir, "04_plan"), { recursive: true, force: true });
+
+      expect(() => loadEditorialPlanningContext(projectDir)).toThrow(
+        "creative_brief.yaml project_id mismatch: expected target-project, got sample-mountain-reset",
+      );
+      expect(fs.existsSync(path.join(projectDir, "04_plan/selects_candidates.yaml"))).toBe(false);
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("editorial pipeline status artifact", () => {

@@ -124,7 +124,7 @@ describe("final render review pack real integration", () => {
       overlay_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(remotionReceipt).toMatchObject({
-      version: "remotion-layer-receipt/v2",
+      version: "remotion-layer-receipt/v3",
       renderer: "remotion",
       composite_stage: "under_caption",
       overlay_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),

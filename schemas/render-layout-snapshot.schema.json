@@ -6,6 +6,15 @@
   "required": ["version", "frame", "layers", "ending"],
   "properties": {
     "version": { "const": "render-layout-snapshot/v1" },
+    "binding": {
+      "type": "object",
+      "required": ["generation_id", "renderer_capability_sha256"],
+      "properties": {
+        "generation_id": { "$ref": "#/$defs/hash" },
+        "renderer_capability_sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
     "frame": {
       "type": "object",
       "required": [
@@ -55,6 +64,7 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "safeArea": {
       "type": "object",
       "required": ["top", "right", "bottom", "left"],
@@ -109,6 +119,10 @@
         "semantic_role": {
           "type": "string",
           "enum": ["speech_caption", "title", "cta"]
+        },
+        "caption_role": {
+          "type": "string",
+          "enum": ["baseline", "emphasis", "title"]
         },
         "source": {
           "type": "string",

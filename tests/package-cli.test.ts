@@ -285,7 +285,6 @@ describe("package CLI argument parsing", () => {
     }
 
     const result = await packageCommand(projectDir, {
-      allowedStates: ["approved"],
       createdAt: "2026-07-20T00:00:00Z",
     });
     if (!result.success) throw new Error(JSON.stringify(result));
@@ -361,7 +360,7 @@ describe("package CLI argument parsing", () => {
     state.approval_record.artifact_versions.timeline_version = timelineHash;
     state.approval_record.artifact_versions.editorial_timeline_hash = timelineHash;
     fs.writeFileSync(statePath, stringifyYaml(state));
-    await expect(packageCommand(projectDir, { skipRender: true, allowedStates: ["intent_pending", "approved"] })).rejects.toMatchObject({
+    await expect(packageCommand(projectDir, { skipRender: true })).rejects.toMatchObject({
       name: "CanonicalRenderInputError",
     });
     expect(fs.existsSync(path.join(projectDir, "07_package"))).toBe(false);
@@ -392,7 +391,7 @@ describe("package CLI argument parsing", () => {
     fs.writeFileSync(statePath, stringifyYaml(state));
     const stateBefore = fs.readFileSync(statePath);
 
-    await expect(packageCommand(projectDir, { skipRender: false, allowedStates: ["approved"] }))
+    await expect(packageCommand(projectDir, { skipRender: false }))
       .rejects.toMatchObject({ name: "CanonicalRenderInputError", assetId: "AST_IMG" });
     expect(fs.existsSync(path.join(projectDir, "07_package"))).toBe(false);
     expect(fs.readFileSync(statePath)).toEqual(stateBefore);
@@ -653,14 +652,24 @@ describe("package CLI Gate 10 preflight", () => {
     const state = parseYaml(fs.readFileSync(statePath, "utf8")) as Record<string, unknown>;
     state.project_id = "";
     writeYaml(statePath, state);
+    // Keep the canonical state reconstructible as approved; an empty state
+    // identity is inferred from the timeline, but missing early-phase
+    // artifacts must not be smuggled through a caller-supplied allowedStates.
+    writeYaml(path.join(projectDir, "01_intent", "unresolved_blockers.yaml"), {
+      version: "1",
+      project_id: "package-cli-test",
+      blockers: [],
+    });
+    writeYaml(path.join(projectDir, "04_plan", "selects_candidates.yaml"), {
+      version: "1",
+      project_id: "package-cli-test",
+      candidates: [],
+    });
     const preflight = buildPackagePreflight(projectDir);
 
     const result = await packageCommand(projectDir, {
       projectId: preflight.projectId,
       skipRender: true,
-      deferActivation: true,
-      allowedStates: ["approved"],
-      deliveryOutputDir: path.join(projectDir, "07_package", "identity-test"),
       precomputedMetrics: {
         videoDurationMs: 0,
         audioDurationMs: 0,

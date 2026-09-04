@@ -332,6 +332,72 @@ describe("content render ownership plan", () => {
     expect(plan).toMatchObject({ fps: 30, fps_num: 30, fps_den: 1 });
   });
 
+  it("fails closed when a raw auto-hinted content element has no renderer owner", () => {
+    const clipBase = {
+      segment_id: "SEG",
+      asset_id: "AST",
+      src_in_us: 0,
+      src_out_us: 1_000_000,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 30,
+      role: "overlay",
+      motivation: "test",
+      beat_id: "B1",
+      fallback_segment_ids: [],
+      confidence: 1,
+      quality_flags: [],
+    };
+    const plan = buildContentRenderPlan({
+      sequence: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 },
+      tracks: {
+        video: [],
+        audio: [],
+        overlay: [{
+          track_id: "V3",
+          kind: "overlay",
+          clips: [{
+            ...clipBase,
+            clip_id: "RAW_AUTO",
+            metadata: {
+              content_element: {
+                version: "content-element/v1",
+                element_id: "raw_auto_01",
+                kind: "text",
+                props: { text: "所有者のいないraw要素" },
+                layout: {
+                  anchor: "bottom_center",
+                  x: 0,
+                  y: 0,
+                  scale: 1,
+                  rotation_deg: 0,
+                  opacity: 1,
+                  safe_area: true,
+                  z_index: 100,
+                },
+                animation: { in: { preset: "fade-rise", duration_frames: 12 } },
+                renderer_hint: "auto",
+                creative_recipe: {
+                  version: "creative-recipe/v1",
+                  reuse_scope: "one_off",
+                  authoring_surface: "html_motion",
+                  layer_mode: "alpha_overlay",
+                  composite_stage: "under_caption",
+                  requires_base_frame: false,
+                },
+              },
+            },
+          }],
+        }],
+      },
+    });
+
+    expect(plan.issues).toEqual([expect.objectContaining({
+      clip_id: "RAW_AUTO",
+      message: expect.stringContaining("raw_auto_01"),
+    })]);
+    expect(plan.issues[0]?.message).toMatch(/unowned|unsupported/);
+  });
+
   it("preserves a rational timeline rate for renderer CLIs", () => {
     const plan = buildContentRenderPlan({
       sequence: { width: 1920, height: 1080, fps_num: 30_000, fps_den: 1_001 },

@@ -74,10 +74,20 @@ export function ensureCandidateIds(
   projectId: string,
   candidates: Candidate[],
 ): Candidate[] {
-  for (const c of candidates) {
-    if (!c.candidate_id) {
-      c.candidate_id = generateCandidateId(projectId, c);
+  const canonicalIds = candidates.map((candidate) => generateCandidateId(projectId, candidate));
+  const canonicalOwner = new Map(canonicalIds.map((id, index) => [id, index]));
+  const seen = new Set<string>();
+  for (const [index, c] of candidates.entries()) {
+    const owner = c.candidate_id ? canonicalOwner.get(c.candidate_id) : undefined;
+    if (!c.candidate_id || seen.has(c.candidate_id) || (owner !== undefined && owner !== index)) {
+      c.candidate_id = canonicalIds[index];
     }
+    if (seen.has(c.candidate_id)) {
+      throw new Error(
+        `Duplicate candidate identity for ${c.segment_id} at ${c.src_in_us}-${c.src_out_us}`,
+      );
+    }
+    seen.add(c.candidate_id);
   }
   return candidates;
 }

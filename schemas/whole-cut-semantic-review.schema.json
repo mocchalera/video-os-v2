@@ -1,0 +1,399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/whole-cut-semantic-review.schema.json",
+  "title": "Video OS Whole-Cut Semantic Review",
+  "type": "object",
+  "required": [
+    "version",
+    "evaluated_at",
+    "status",
+    "render",
+    "timeline",
+    "brief",
+    "coverage",
+    "provider",
+    "observations",
+    "axis_results",
+    "problem_ranges",
+    "brief_mismatches",
+    "uncertainties",
+    "recommended_corrections",
+    "cut_density",
+    "story_progression",
+    "message_retention",
+    "semantic_outcome",
+    "alternative_evaluation"
+  ],
+  "properties": {
+    "version": { "const": "1" },
+    "evaluated_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["verified", "degraded", "blocked", "unavailable"] },
+    "render": { "$ref": "#/$defs/render" },
+    "timeline": { "$ref": "#/$defs/timeline" },
+    "brief": { "$ref": "#/$defs/brief" },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "provider": { "$ref": "#/$defs/provider" },
+    "observations": { "type": "array", "items": { "$ref": "#/$defs/observation" } },
+    "axis_results": {
+      "type": "array",
+      "minItems": 8,
+      "items": { "$ref": "#/$defs/axisResult" }
+    },
+    "problem_ranges": { "type": "array", "items": { "$ref": "#/$defs/problem" } },
+    "brief_mismatches": { "type": "array", "items": { "$ref": "#/$defs/briefMismatch" } },
+    "uncertainties": { "type": "array", "items": { "$ref": "#/$defs/uncertainty" } },
+    "recommended_corrections": { "type": "array", "items": { "$ref": "#/$defs/recommendation" } },
+    "cut_density": { "$ref": "#/$defs/cutDensity" },
+    "story_progression": { "$ref": "#/$defs/storyProgression" },
+    "message_retention": { "$ref": "#/$defs/messageRetention" },
+    "semantic_outcome": { "$ref": "#/$defs/semanticOutcome" },
+    "alternatives": { "type": "array", "items": { "$ref": "#/$defs/alternative" } },
+    "alternative_evaluation": { "$ref": "#/$defs/alternativeEvaluation" },
+    "human_hold": { "$ref": "#/$defs/humanHold" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "render": {
+      "type": "object",
+      "required": ["path", "duration_sec"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" },
+        "duration_sec": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "timeline": {
+      "type": "object",
+      "required": ["path", "version"],
+      "properties": {
+        "path": { "const": "05_timeline/timeline.json" },
+        "version": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "brief": {
+      "type": "object",
+      "required": ["path", "project_id", "axes"],
+      "properties": {
+        "path": { "const": "01_intent/creative_brief.yaml" },
+        "project_id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" },
+        "axes": { "type": "array", "minItems": 8, "items": { "$ref": "#/$defs/axis" } }
+      },
+      "additionalProperties": false
+    },
+    "axis": {
+      "type": "object",
+      "required": ["axis_id", "label", "source", "minimum", "rationale", "brief_refs"],
+      "properties": {
+        "axis_id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "source": { "enum": ["minimum", "brief"] },
+        "minimum": { "type": "boolean" },
+        "rationale": { "type": "string", "minLength": 1 },
+        "brief_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      },
+      "additionalProperties": false
+    },
+    "coverageRange": {
+      "type": "object",
+      "required": ["start_sec", "end_sec"],
+      "properties": {
+        "start_sec": { "type": "number", "minimum": 0 },
+        "end_sec": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["status", "expected_duration_sec", "covered_duration_sec", "intervals", "uncovered_ranges"],
+      "properties": {
+        "status": { "enum": ["complete", "partial", "missing"] },
+        "expected_duration_sec": { "type": "number", "minimum": 0 },
+        "covered_duration_sec": { "type": "number", "minimum": 0 },
+        "intervals": { "type": "array", "items": { "$ref": "#/$defs/coverageRange" } },
+        "uncovered_ranges": { "type": "array", "items": { "$ref": "#/$defs/coverageRange" } }
+      },
+      "additionalProperties": false
+    },
+    "provider": {
+      "type": "object",
+      "required": ["provider_id", "capability", "window_duration_sec", "overlap_sec", "window_count", "completed_window_count", "degradation_reasons"],
+      "properties": {
+        "provider_id": { "type": "string", "minLength": 1 },
+        "capability": { "enum": ["available", "degraded", "unavailable_optional", "failed"] },
+        "model": { "type": "string", "minLength": 1 },
+        "window_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "overlap_sec": { "type": "number", "minimum": 0 },
+        "window_count": { "type": "integer", "minimum": 0 },
+        "completed_window_count": { "type": "integer", "minimum": 0 },
+        "degradation_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      },
+      "additionalProperties": false
+    },
+    "renderEvidence": {
+      "type": "object",
+      "required": ["path", "start_sec", "end_sec", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "start_sec": { "type": "number", "minimum": 0 },
+        "end_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "sourceEvidence": {
+      "type": "object",
+      "required": ["timeline_path", "timeline_version", "timeline_sha256", "clip_id", "asset_id", "track_kind", "timeline_start_sec", "timeline_end_sec", "source_range_us"],
+      "properties": {
+        "timeline_path": { "const": "05_timeline/timeline.json" },
+        "timeline_version": { "type": "string", "minLength": 1 },
+        "timeline_sha256": { "$ref": "#/$defs/hash" },
+        "clip_id": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "track_kind": { "enum": ["video", "audio"] },
+        "timeline_start_sec": { "type": "number", "minimum": 0 },
+        "timeline_end_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "source_range_us": {
+          "type": "object",
+          "required": ["in_us", "out_us"],
+          "properties": {
+            "in_us": { "type": "integer", "minimum": 0 },
+            "out_us": { "type": "integer", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["render", "source"],
+      "properties": {
+        "render": { "$ref": "#/$defs/renderEvidence" },
+        "source": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceEvidence" } }
+      },
+      "additionalProperties": false
+    },
+    "progressionEvidence": {
+      "type": "object",
+      "required": ["score", "confidence", "confidence_basis"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence_basis": { "enum": ["measured", "degraded", "unmeasured"] }
+      },
+      "additionalProperties": false
+    },
+    "observation": {
+      "type": "object",
+      "required": ["observation_id", "start_sec", "end_sec", "observation", "inference", "evidence", "confidence", "confidence_basis", "axis_ids"],
+      "properties": {
+        "observation_id": { "type": "string", "minLength": 1 },
+        "start_sec": { "type": "number", "minimum": 0 },
+        "end_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "observation": { "type": "string", "minLength": 1 },
+        "inference": { "type": "string", "minLength": 1 },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence_basis": { "enum": ["measured", "degraded", "unmeasured"] },
+        "axis_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "story_progression": { "$ref": "#/$defs/progressionEvidence" }
+      },
+      "additionalProperties": false
+    },
+    "axisResult": {
+      "type": "object",
+      "required": ["axis_id", "outcome", "confidence", "confidence_basis", "brief_refs", "observation_ids", "coverage", "rationale"],
+      "properties": {
+        "axis_id": { "type": "string", "minLength": 1 },
+        "outcome": { "enum": ["pass", "problem", "uncertain", "intentional_contrast", "intentional_non_linear"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence_basis": { "enum": ["measured", "degraded", "unmeasured"] },
+        "brief_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "observation_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "coverage": { "$ref": "#/$defs/coverage" },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "clarification": {
+      "type": "object",
+      "required": ["question", "observation", "hypothesis"],
+      "properties": {
+        "question": { "type": "string", "minLength": 1 },
+        "observation": { "type": "string", "minLength": 1 },
+        "hypothesis": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "uncertainty": {
+      "type": "object",
+      "required": ["description", "impact", "clarification_question"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1 },
+        "impact": { "enum": ["high", "low"] },
+        "clarification_question": { "$ref": "#/$defs/clarification" }
+      },
+      "additionalProperties": false
+    },
+    "problem": {
+      "type": "object",
+      "required": ["problem_id", "axis_id", "start_sec", "end_sec", "summary", "observation_ids", "render_evidence", "source_evidence", "brief_refs", "brief_mismatch", "recommended_correction"],
+      "properties": {
+        "problem_id": { "type": "string", "minLength": 1 },
+        "axis_id": { "type": "string", "minLength": 1 },
+        "start_sec": { "type": "number", "minimum": 0 },
+        "end_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "summary": { "type": "string", "minLength": 1 },
+        "observation_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "render_evidence": { "$ref": "#/$defs/renderEvidence" },
+        "source_evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceEvidence" } },
+        "brief_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "brief_mismatch": { "type": "string", "minLength": 1 },
+        "recommended_correction": { "type": "string", "minLength": 1 },
+        "uncertainty": { "$ref": "#/$defs/uncertainty" }
+      },
+      "additionalProperties": false
+    },
+    "briefMismatch": {
+      "type": "object",
+      "required": ["problem_id", "axis_id", "brief_refs", "observed_issue", "why_it_matters"],
+      "properties": {
+        "problem_id": { "type": "string", "minLength": 1 },
+        "axis_id": { "type": "string", "minLength": 1 },
+        "brief_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "observed_issue": { "type": "string", "minLength": 1 },
+        "why_it_matters": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "recommendation": {
+      "type": "object",
+      "required": ["problem_id", "priority", "recommendation", "brief_refs"],
+      "properties": {
+        "problem_id": { "type": "string", "minLength": 1 },
+        "priority": { "enum": ["high", "medium", "low"] },
+        "recommendation": { "type": "string", "minLength": 1 },
+        "brief_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      },
+      "additionalProperties": false
+    },
+    "cutDensity": {
+      "type": "object",
+      "required": ["status", "duration_sec", "clip_count", "cut_count", "timeline_evidence"],
+      "properties": {
+        "status": { "enum": ["measured", "unmeasured"] },
+        "duration_sec": { "type": "number", "minimum": 0 },
+        "clip_count": { "type": "integer", "minimum": 0 },
+        "cut_count": { "type": "integer", "minimum": 0 },
+        "cuts_per_10_sec": { "type": "number", "minimum": 0 },
+        "median_shot_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "timeline_evidence": {
+          "type": "object",
+          "required": ["path", "sha256"],
+          "properties": { "path": { "const": "05_timeline/timeline.json" }, "sha256": { "$ref": "#/$defs/hash" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "storyProgression": {
+      "type": "object",
+      "required": ["status", "confidence_basis", "observation_ids", "relationship", "rationale"],
+      "properties": {
+        "status": { "enum": ["measured", "degraded", "unmeasured"] },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence_basis": { "enum": ["measured", "degraded", "unmeasured"] },
+        "observation_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "relationship": { "enum": ["aligned", "dense_without_progression", "unmeasured"] },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "messageRetention": {
+      "type": "object",
+      "required": ["status", "confidence", "confidence_basis", "observation_ids", "rationale"],
+      "properties": {
+        "status": { "enum": ["retained", "not_retained", "unmeasured"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence_basis": { "enum": ["measured", "degraded", "unmeasured"] },
+        "observation_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "semanticOutcome": {
+      "type": "object",
+      "required": ["status", "confidence", "confidence_basis", "rationale"],
+      "properties": {
+        "status": { "enum": ["pass", "needs_revision", "blocked", "unmeasured"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence_basis": { "enum": ["measured", "degraded", "unmeasured"] },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "confidence_basis": { "enum": ["degraded", "unmeasured"] } }, "required": ["confidence_basis"] },
+          "then": { "properties": { "confidence": { "maximum": 0.5 } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "alternative": {
+      "type": "object",
+      "required": [
+        "alternative_id",
+        "axis_id",
+        "interpretation",
+        "edit_direction",
+        "render_evidence",
+        "source_evidence",
+        "risk",
+        "brief_fit",
+        "whole_cut_outcome",
+        "decision",
+        "decision_reason"
+      ],
+      "properties": {
+        "alternative_id": { "type": "string", "minLength": 1 },
+        "axis_id": { "type": "string", "minLength": 1 },
+        "interpretation": { "type": "string", "minLength": 1 },
+        "edit_direction": { "type": "string", "minLength": 1 },
+        "render_evidence": { "$ref": "#/$defs/renderEvidence" },
+        "source_evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceEvidence" } },
+        "risk": { "type": "string", "minLength": 1 },
+        "brief_fit": { "enum": ["strong", "partial", "weak"] },
+        "whole_cut_outcome": { "type": "string", "minLength": 1 },
+        "decision": { "enum": ["selected", "rejected"] },
+        "decision_reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "alternativeEvaluation": {
+      "type": "object",
+      "required": ["status", "required_axis_ids", "distinct_alternative_count", "rationale"],
+      "properties": {
+        "status": { "enum": ["not_required", "satisfied", "missing", "invalid"] },
+        "required_axis_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "distinct_alternative_count": { "type": "integer", "minimum": 0 },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "humanHold": {
+      "type": "object",
+      "required": ["required", "reason", "clarification_question"],
+      "properties": {
+        "required": { "const": true },
+        "reason": { "type": "string", "minLength": 1 },
+        "clarification_question": { "$ref": "#/$defs/clarification" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

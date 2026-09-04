@@ -12,6 +12,10 @@ import {
   writeAudioStoryGraph,
   type AudioStoryGraph,
 } from "./p2-audio-story-graph.js";
+import {
+  hasM2BgmProvenance,
+  isBgmAnalysisAcceptedForConsumption,
+} from "../media/bgm-analysis-contract.js";
 
 interface AssetsLike {
   project_id?: string;
@@ -56,8 +60,11 @@ export function buildProjectAudioStoryGraph(
     readJsonIfExists(path.join(analysisDir, "audio_events.json")),
     currentAssetIds,
   );
+  const rawBgmAnalysis = readJsonIfExists(path.join(analysisDir, "bgm_analysis.json"));
+  const bgmAnalysisRejected = hasM2BgmProvenance(rawBgmAnalysis)
+    && !isBgmAnalysisAcceptedForConsumption(rawBgmAnalysis);
   const bgmAnalysis = filterBgmAnalysis(
-    readJsonIfExists(path.join(analysisDir, "bgm_analysis.json")),
+    rawBgmAnalysis,
     currentAssetIds,
   );
   const coverageReport = readCoverageReport(projectDir, projectId, manifest, transcripts, audioEvents, bgmAnalysis);
@@ -70,6 +77,7 @@ export function buildProjectAudioStoryGraph(
     transcripts: transcripts as never,
     audioEvents: audioEvents as never,
     bgmAnalysis: bgmAnalysis as never,
+    bgmAnalysisRejected,
     transcriptHashes: transcripts.map((transcript) => computeNormalizedJsonHash(transcript)),
     createdAt: options.createdAt,
   });
@@ -211,6 +219,9 @@ function filterAudioEvents(value: unknown | null, currentAssetIds: Set<string>):
 
 function filterBgmAnalysis(value: unknown | null, currentAssetIds: Set<string>): unknown | null {
   if (!value || typeof value !== "object") return value;
+  const analysisStatus = (value as { analysis_status?: unknown }).analysis_status;
+  if (typeof analysisStatus === "string" && analysisStatus !== "ready") return null;
+  if (hasM2BgmProvenance(value) && !isBgmAnalysisAcceptedForConsumption(value)) return null;
   const assetId = (value as { music_asset?: { asset_id?: string } }).music_asset?.asset_id;
   return assetId && (currentAssetIds.has(assetId) || assetId.startsWith("BGM_")) ? value : null;
 }

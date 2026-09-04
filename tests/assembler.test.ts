@@ -113,7 +113,7 @@ describe("ffmpeg assembler", () => {
       start_frame: 0,
       end_frame: 92,
       source_in_sec: 2,
-      source_out_sec: 5.354166666666667,
+      source_out_sec: 5.5,
     });
     expect(videoPlans.some((plan) => plan.kind === "gap")).toBe(true);
 
@@ -144,22 +144,28 @@ describe("ffmpeg assembler", () => {
 
     const trimCall = calls.find((call) =>
       call.args.includes("-vf") &&
-      call.args.some((arg) => arg.startsWith(buildAspectRatioFitFilter(1920, 1080))) &&
+      call.args.some((arg) => arg.includes(buildAspectRatioFitFilter(1920, 1080))) &&
       call.args.some((arg) => arg.endsWith("video-segment-0001.mp4"))
     );
     expect(trimCall).toBeDefined();
-    expect(trimCall!.args).toContain("-ss");
-    expect(trimCall!.args).toContain(formatFfmpegTimestamp(firstVideoPlan.source_in_sec!));
-    expect(trimCall!.args).toContain("-to");
-    expect(trimCall!.args).toContain(formatFfmpegTimestamp(firstVideoPlan.source_out_sec!));
+    expect(trimCall!.args).not.toContain("-ss");
+    expect(trimCall!.args).not.toContain("-to");
+    const videoFilter = trimCall!.args[trimCall!.args.indexOf("-vf") + 1];
+    expect(videoFilter).toContain(
+      `trim=start=${formatFfmpegTimestamp(firstVideoPlan.source_in_sec!)}:end=${formatFfmpegTimestamp(firstVideoPlan.source_out_sec!)}`,
+    );
 
     const audioTrimCall = calls.find((call) =>
       call.args.includes("-vn") &&
       call.args.some((arg) => arg.endsWith("audio-segment-0001.wav"))
     );
     expect(audioTrimCall).toBeDefined();
-    expect(audioTrimCall!.args).toContain(formatFfmpegTimestamp(firstAudioPlan.source_in_sec));
-    expect(audioTrimCall!.args).toContain(formatFfmpegTimestamp(firstAudioPlan.source_out_sec));
+    expect(audioTrimCall!.args).not.toContain("-ss");
+    expect(audioTrimCall!.args).not.toContain("-to");
+    const audioFilter = audioTrimCall!.args[audioTrimCall!.args.indexOf("-af") + 1];
+    expect(audioFilter).toContain(
+      `atrim=start=${formatFfmpegTimestamp(firstAudioPlan.source_in_sec)}:end=${formatFfmpegTimestamp(firstAudioPlan.source_out_sec)}`,
+    );
 
     const concatList = fs.readFileSync(
       path.join(result.workingDir, "video.concat.txt"),
@@ -366,6 +372,7 @@ describe("ffmpeg assembler", () => {
     );
     const filter = args[args.indexOf("-vf") + 1];
 
+    expect(filter).toContain("setpts=PTS-STARTPTS,trim=start=14.32:end=53.732249,setpts=PTS-STARTPTS");
     expect(filter).toContain("fps=24/1");
     expect(filter.indexOf("fps=24/1")).toBeLessThan(filter.indexOf("trim=end_frame=946"));
     expect(filter).toContain("tpad=stop_mode=clone:stop_duration=1");

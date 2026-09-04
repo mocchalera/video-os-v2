@@ -39,6 +39,8 @@ import {
   type CriticReentryEvidence,
   type BlueprintReentryEvidence,
 } from "../runtime/handoff/reentry.js";
+import { runCanonicalCompile } from "../runtime/compiler/index.js";
+import { computeMediaHeadSourceHash } from "../runtime/media/bgm-analyzer.js";
 import type {
   NormalizedClip,
   ClipMapping,
@@ -186,6 +188,17 @@ function makeImportReport(overrides?: Partial<RoundtripImportReport>): Roundtrip
   };
 }
 
+const SYNTHETIC_IDENTITY = {
+  base_timeline: { path: "05_timeline/timeline.json", version: TIMELINE_VERSION, sha256: `sha256:${"b".repeat(64)}` },
+  review_generation: {
+    generation_id: `sha256:${"a".repeat(64)}`,
+    review_identity: `sha256:${"c".repeat(64)}`,
+    output: { path: "09_output/social-review/generations/g/review.mp4", sha256: `sha256:${"9".repeat(64)}` },
+    review_ready_receipt: { path: "09_output/social-review/generations/g/review-ready-receipt.json", sha256: `sha256:${"e".repeat(64)}` },
+  },
+  review_round: { round_index: 1, round_identity: `sha256:${"d".repeat(64)}` },
+};
+
 function makeDiffInput(overrides?: Partial<DiffAnalysisInput>): DiffAnalysisInput {
   return {
     projectId: PROJECT_ID,
@@ -198,6 +211,7 @@ function makeDiffInput(overrides?: Partial<DiffAnalysisInput>): DiffAnalysisInpu
     oneToMany: emptyOneToMany(),
     unmappedClips: [],
     importReport: makeImportReport(),
+    identity: SYNTHETIC_IDENTITY,
     ...overrides,
   };
 }
@@ -213,6 +227,149 @@ function copyDirSync(src: string, dest: string): void {
       fs.copyFileSync(srcPath, destPath);
     }
   }
+}
+
+function copyReentrySample(name: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `m35-reentry-${name}-`));
+  copyDirSync(SAMPLE_PROJECT, dir);
+  return dir;
+}
+
+function writeReentryState(dir: string): void {
+  fs.writeFileSync(path.join(dir, "project_state.yaml"), stringifyYaml({
+    version: 1,
+    project_id: "sample-mountain-reset",
+    current_state: "approved",
+    approval_record: { status: "clean", approved_by: "operator", approved_at: "2026-03-21T10:00:00Z" },
+    history: [],
+  }));
+}
+
+function reentryDiff(): HumanRevisionDiff {
+  return {
+    version: 2,
+    project_id: "sample-mountain-reset",
+    handoff_id: HANDOFF_ID,
+    base_timeline_version: TIMELINE_VERSION,
+    capability_profile_id: PROFILE_ID,
+    identity: SYNTHETIC_IDENTITY,
+    status: "clean",
+    summary: { trim: 1 },
+    operations: [{
+      operation_id: "HRD_REENTRY_0001",
+      type: "trim",
+      target: { exchange_clip_id: "a" },
+    }],
+  };
+}
+
+function writeReentryRhythmEvidence(
+  dir: string,
+  options: { mediaPath?: string; mediaBytes?: string } = {},
+): string {
+  fs.mkdirSync(path.join(dir, "02_media"), { recursive: true });
+  const bgmPath = options.mediaPath ?? path.join(dir, "02_media/bgm-test.wav");
+  fs.mkdirSync(path.dirname(bgmPath), { recursive: true });
+  fs.writeFileSync(bgmPath, options.mediaBytes ?? "reentry-bgm-media-v1");
+  fs.writeFileSync(path.join(dir, "03_analysis/bgm_analysis.json"), JSON.stringify({
+    version: "1",
+    project_id: "sample-mountain-reset",
+    analysis_status: "ready",
+    music_asset: {
+      asset_id: "AST_MUSICTEST",
+      path: options.mediaPath ?? "02_media/bgm-test.wav",
+      source_hash: computeMediaHeadSourceHash(bgmPath),
+    },
+    bpm: 120,
+    meter: "4/4",
+    duration_sec: 30,
+    beats_sec: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28],
+    downbeats_sec: [0, 4, 8, 12, 16, 20, 24, 28],
+    sections: [
+      { id: "S1", label: "intro", start_sec: 0, end_sec: 4.6, energy: 0.3 },
+      { id: "S2", label: "chorus", start_sec: 4.6, end_sec: 20, energy: 0.9 },
+      { id: "S3", label: "outro", start_sec: 20, end_sec: 30, energy: 0.4 },
+    ],
+    provenance: { detector: "reentry-fixture", sample_rate_hz: 44100 },
+  }, null, 2));
+  fs.mkdirSync(path.join(dir, "03_analysis/transcripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "03_analysis/transcripts/TR_AST_MUSICTEST.json"), JSON.stringify({
+    project_id: "sample-mountain-reset",
+    artifact_version: "analysis-v1",
+    transcript_ref: "TR_AST_MUSICTEST",
+    asset_id: "AST_MUSICTEST",
+    word_timing_mode: "word",
+    items: [{
+      speaker: "VOCALS",
+      start_us: 4_600_000,
+      end_us: 6_000_000,
+      text: "orbit tonight",
+      words: [
+        { word: "orbit", start_us: 4_600_000, end_us: 5_100_000 },
+        { word: "tonight", start_us: 5_400_000, end_us: 5_900_000 },
+      ],
+    }],
+  }, null, 2));
+  return bgmPath;
+}
+
+function writeLegacyReentryRhythmEvidence(
+  dir: string,
+  mediaPath: string,
+  mediaBytes: string,
+): string {
+  fs.mkdirSync(path.dirname(mediaPath), { recursive: true });
+  fs.writeFileSync(mediaPath, mediaBytes);
+  const primary = JSON.parse(fs.readFileSync(path.join(dir, "03_analysis/bgm_analysis.json"), "utf8")) as Record<string, any>;
+  primary.music_asset = {
+    ...(primary.music_asset as Record<string, unknown>),
+    path: mediaPath,
+    source_hash: computeMediaHeadSourceHash(mediaPath),
+  };
+  fs.mkdirSync(path.join(dir, "07_package/audio"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "07_package/audio/bgm-analysis.json"), JSON.stringify(primary, null, 2));
+  return mediaPath;
+}
+
+function writeReentryImageEvidence(dir: string): string {
+  const analysisDir = path.join(dir, "03_analysis");
+  const frameRelPath = "normalized/REENTRY_IMAGE.png";
+  const framePath = path.join(analysisDir, frameRelPath);
+  fs.mkdirSync(path.dirname(framePath), { recursive: true });
+  fs.writeFileSync(framePath, "reentry-image-frame-v1");
+  const assets = JSON.parse(fs.readFileSync(path.join(analysisDir, "assets.json"), "utf8")) as Record<string, unknown>;
+  assets.project_id = "sample-mountain-reset";
+  assets.items = [{
+    asset_id: "AST_REENTRY_IMAGE",
+    media_kind: "image",
+    source_content_sha256: "a".repeat(64),
+    still_image: {
+      normalized_frame_path: frameRelPath,
+      normalized_frame_content_sha256: require("node:crypto").createHash("sha256").update(fs.readFileSync(framePath)).digest("hex"),
+    },
+  }];
+  fs.writeFileSync(path.join(analysisDir, "assets.json"), JSON.stringify(assets, null, 2));
+  return framePath;
+}
+
+function v1Geometry(timeline: { tracks: { video: Array<{ clips: Array<{ clip_id: string; timeline_in_frame: number; timeline_duration_frames: number }> }> } }): string {
+  return timeline.tracks.video[0].clips
+    .map((clip) => `${clip.clip_id}@${clip.timeline_in_frame}+${clip.timeline_duration_frames}`)
+    .join("|");
+}
+
+function snapshotReentryEvidence(dir: string): Map<string, Buffer> {
+  const paths = [
+    "02_media/bgm-test.wav",
+    "03_analysis/assets.json",
+    "03_analysis/segments.json",
+    "03_analysis/bgm_analysis.json",
+    "03_analysis/transcripts/TR_AST_MUSICTEST.json",
+    "03_analysis/normalized/REENTRY_IMAGE.png",
+  ];
+  return new Map(paths
+    .filter((relativePath) => fs.existsSync(path.join(dir, relativePath)))
+    .map((relativePath) => [relativePath, fs.readFileSync(path.join(dir, relativePath))]));
 }
 
 // ── Diff Classification Tests ──────────────────────────────────────
@@ -1088,11 +1245,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
   describe("buildReentryEvidence", () => {
     it("builds critic evidence for trim ops", () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "clean",
         summary: { trim: 2 },
         operations: [
@@ -1111,11 +1269,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
 
     it("builds blueprint evidence for track_move and unmapped", () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "review_required",
         summary: { track_move: 1, unmapped: 2 },
         operations: [
@@ -1137,11 +1296,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
 
     it("returns null evidence when no actionable ops", () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "review_required",
         summary: { unmapped: 1 },
         unmapped_edits: [
@@ -1314,11 +1474,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
 
     it("keeps approval clean until a proposal artifact exists", async () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "clean",
         summary: { trim: 1 },
         operations: [
@@ -1344,11 +1505,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
 
     it("invalidates approval after critic proposal promotion and compiles from the proposal patch", async () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "clean",
         summary: { trim: 1 },
         operations: [
@@ -1395,11 +1557,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
 
     it("transitions to blueprint_ready when a blueprint proposal is promoted", async () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "review_required",
         summary: { track_move: 1 },
         operations: [
@@ -1470,11 +1633,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
       };
 
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "review_required",
         summary: { trim: 1, track_move: 1, unmapped: 1 },
         operations: [
@@ -1503,11 +1667,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
 
     it("updates handoff_resolution with diff hash even when no action is taken", async () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "clean",
         summary: { trim: 1 },
         operations: [
@@ -1527,11 +1692,12 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
 
     it("does not transition when no actionable ops but still persists handoff_resolution", async () => {
       const diff: HumanRevisionDiff = {
-        version: 1,
+        version: 2,
         project_id: PROJECT_ID,
         handoff_id: HANDOFF_ID,
         base_timeline_version: TIMELINE_VERSION,
         capability_profile_id: PROFILE_ID,
+        identity: SYNTHETIC_IDENTITY,
         status: "review_required",
         summary: { unmapped: 1 },
         unmapped_edits: [
@@ -1579,6 +1745,237 @@ describe("M3.5 Phase 4: M3 Re-entry Bridge", () => {
       ) as ProjectStateDoc;
       expect(persisted.approval_record?.status).toBe("clean");
       expect(persisted.current_state).toBe("approved");
+    });
+
+    it("keeps image-QC applicability and blocking identical to direct canonical compile", async () => {
+      const directDir = copyReentrySample("image-direct");
+      const reentryDir = copyReentrySample("image-reentry");
+      try {
+        writeReentryState(directDir);
+        writeReentryState(reentryDir);
+        writeReentryImageEvidence(directDir);
+        writeReentryImageEvidence(reentryDir);
+        const before = snapshotReentryEvidence(reentryDir);
+        const beforePatch = path.join(reentryDir, "06_review/review_patch.json");
+        const beforePatchBytes = fs.existsSync(beforePatch) ? fs.readFileSync(beforePatch) : null;
+        const beforeBlueprint = fs.readFileSync(path.join(reentryDir, "04_plan/edit_blueprint.yaml"));
+        const previousGeminiKey = process.env.GEMINI_API_KEY;
+        delete process.env.GEMINI_API_KEY;
+        try {
+          await expect(runCanonicalCompile({
+            projectPath: directDir,
+            createdAt: "2026-08-31T00:00:00.000Z",
+          })).rejects.toThrow(/still_image_grounding_invalid/);
+          await expect(executeRecompileLoop({
+            projectDir: reentryDir,
+            diff: reentryDiff(),
+          }, {
+            async applyCriticEvidence() {
+              return {
+                reviewPatch: {
+                  timeline_version: "1",
+                  operations: [{
+                    op: "add_marker",
+                    reason: "image-QC staging regression",
+                    label: "must not promote",
+                    new_timeline_in_frame: 24,
+                  }],
+                },
+              };
+            },
+          })).rejects.toThrow(/still_image_grounding_invalid/);
+        } finally {
+          if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+          else process.env.GEMINI_API_KEY = previousGeminiKey;
+        }
+        expect(fs.existsSync(beforePatch) ? fs.readFileSync(beforePatch) : null).toEqual(beforePatchBytes);
+        expect(fs.readFileSync(path.join(reentryDir, "04_plan/edit_blueprint.yaml"))).toEqual(beforeBlueprint);
+        expect(snapshotReentryEvidence(reentryDir)).toEqual(before);
+      } finally {
+        fs.rmSync(directDir, { recursive: true, force: true });
+        fs.rmSync(reentryDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves rhythm evidence and parity when reentry validates the staged canonical inputs", async () => {
+      const baselineDir = copyReentrySample("rhythm-baseline");
+      const directDir = copyReentrySample("rhythm-direct");
+      const reentryDir = copyReentrySample("rhythm-reentry");
+      try {
+        writeReentryState(baselineDir);
+        writeReentryState(directDir);
+        writeReentryState(reentryDir);
+        writeReentryRhythmEvidence(directDir);
+        writeReentryRhythmEvidence(reentryDir);
+        const patch = {
+          timeline_version: "1",
+          operations: [{
+            op: "add_marker" as const,
+            reason: "rhythm staging regression",
+            label: "reentry marker",
+            new_timeline_in_frame: 24,
+          }],
+        };
+        const baseline = await runCanonicalCompile({
+          projectPath: baselineDir,
+          createdAt: "2026-08-31T00:00:00.000Z",
+          reviewPatch: patch,
+          repoRoot: path.resolve("."),
+        });
+        const direct = await runCanonicalCompile({
+          projectPath: directDir,
+          createdAt: "2026-08-31T00:00:00.000Z",
+          reviewPatch: patch,
+          repoRoot: path.resolve("."),
+        });
+        const before = snapshotReentryEvidence(reentryDir);
+        const reentry = await executeRecompileLoop({
+          projectDir: reentryDir,
+          diff: reentryDiff(),
+        }, {
+          async applyCriticEvidence() {
+            return { reviewPatch: patch };
+          },
+        });
+        const baselineRhythm = baseline.timeline.metadata?.rhythm_sync as Record<string, any> | undefined;
+        const directRhythm = direct.timeline.metadata?.rhythm_sync as Record<string, any> | undefined;
+        const reentryRhythm = reentry.compileResult?.timeline.metadata?.rhythm_sync as Record<string, any> | undefined;
+        expect(baselineRhythm?.parity.status).toBe("degraded");
+        expect(directRhythm).toEqual(reentryRhythm);
+        expect(directRhythm?.parity.status).toBe("pass");
+        expect(directRhythm?.evidence_provenance).toEqual(reentryRhythm?.evidence_provenance);
+        expect(v1Geometry(direct.timeline)).toBe(v1Geometry(reentry.compileResult!.timeline));
+        expect(snapshotReentryEvidence(reentryDir)).toEqual(before);
+      } finally {
+        fs.rmSync(baselineDir, { recursive: true, force: true });
+        fs.rmSync(directDir, { recursive: true, force: true });
+        fs.rmSync(reentryDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves absolute BGM analysis identity and source bytes across direct and reentry compile", async () => {
+      const directDir = copyReentrySample("absolute-bgm-direct");
+      const reentryDir = copyReentrySample("absolute-bgm-reentry");
+      const mediaRoot = fs.mkdtempSync(path.join(os.tmpdir(), "m35-absolute-bgm-"));
+      try {
+        writeReentryState(directDir);
+        writeReentryState(reentryDir);
+        const mediaPath = path.join(mediaRoot, "ingested-bgm.wav");
+        writeReentryRhythmEvidence(directDir, {
+          mediaPath,
+          mediaBytes: "absolute-bgm-ingest-v1",
+        });
+        const reentryMedia = writeReentryRhythmEvidence(reentryDir, {
+          mediaPath,
+          mediaBytes: "absolute-bgm-ingest-v1",
+        });
+        const directAnalysis = fs.readFileSync(path.join(directDir, "03_analysis/bgm_analysis.json"));
+        const reentryAnalysis = fs.readFileSync(path.join(reentryDir, "03_analysis/bgm_analysis.json"));
+        const reentryMediaBytes = fs.readFileSync(reentryMedia);
+        const patch = {
+          timeline_version: "1",
+          operations: [{
+            op: "add_marker" as const,
+            reason: "absolute BGM staging regression",
+            label: "absolute BGM",
+            new_timeline_in_frame: 24,
+          }],
+        };
+        const direct = await runCanonicalCompile({
+          projectPath: directDir,
+          createdAt: "2026-08-31T00:00:00.000Z",
+          repoRoot: path.resolve("."),
+          reviewPatch: patch,
+        });
+        const reentry = await executeRecompileLoop({ projectDir: reentryDir, diff: reentryDiff() }, {
+          async applyCriticEvidence() {
+            return { reviewPatch: patch };
+          },
+        });
+        expect(direct.timeline.metadata?.rhythm_sync).toEqual(reentry.compileResult?.timeline.metadata?.rhythm_sync);
+        const rhythm = direct.timeline.metadata?.rhythm_sync as Record<string, any>;
+        expect(rhythm.status).toBe("applied");
+        expect(rhythm.evidence_provenance.bgm_artifact_sha256).toBe(
+          require("node:crypto").createHash("sha256").update(directAnalysis).digest("hex"),
+        );
+        expect(fs.readFileSync(path.join(directDir, "03_analysis/bgm_analysis.json"))).toEqual(directAnalysis);
+        expect(fs.readFileSync(path.join(reentryDir, "03_analysis/bgm_analysis.json"))).toEqual(reentryAnalysis);
+        expect(fs.readFileSync(reentryMedia)).toEqual(reentryMediaBytes);
+      } finally {
+        fs.rmSync(directDir, { recursive: true, force: true });
+        fs.rmSync(reentryDir, { recursive: true, force: true });
+        fs.rmSync(mediaRoot, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps a ready primary BGM authoritative over a colliding legacy absolute source", async () => {
+      const directDir = copyReentrySample("absolute-bgm-primary-direct");
+      const reentryDir = copyReentrySample("absolute-bgm-primary-reentry");
+      const mediaRoot = fs.mkdtempSync(path.join(os.tmpdir(), "m35-primary-bgm-"));
+      try {
+        writeReentryState(directDir);
+        writeReentryState(reentryDir);
+        const primaryMediaPath = path.join(mediaRoot, "same-name.wav");
+        const directPrimary = writeReentryRhythmEvidence(directDir, {
+          mediaPath: primaryMediaPath,
+          mediaBytes: "primary-source-bytes",
+        });
+        const reentryPrimary = writeReentryRhythmEvidence(reentryDir, {
+          mediaPath: primaryMediaPath,
+          mediaBytes: "primary-source-bytes",
+        });
+        const legacyMediaPath = path.join(mediaRoot, "legacy", "same-name.wav");
+        const directLegacy = writeLegacyReentryRhythmEvidence(
+          directDir,
+          legacyMediaPath,
+          "legacy-source-bytes-different",
+        );
+        const reentryLegacy = writeLegacyReentryRhythmEvidence(
+          reentryDir,
+          legacyMediaPath,
+          "legacy-source-bytes-different",
+        );
+        const primaryAnalysis = fs.readFileSync(path.join(directDir, "03_analysis/bgm_analysis.json"));
+        const legacyAnalysis = fs.readFileSync(path.join(directDir, "07_package/audio/bgm-analysis.json"));
+        const primaryBytes = fs.readFileSync(directPrimary);
+        const legacyBytes = fs.readFileSync(directLegacy);
+        const patch = {
+          timeline_version: "1",
+          operations: [{
+            op: "add_marker" as const,
+            reason: "primary BGM precedence regression",
+            label: "primary wins",
+            new_timeline_in_frame: 24,
+          }],
+        };
+        const direct = await runCanonicalCompile({
+          projectPath: directDir,
+          createdAt: "2026-08-31T00:00:00.000Z",
+          repoRoot: path.resolve("."),
+          reviewPatch: patch,
+        });
+        const reentry = await executeRecompileLoop({ projectDir: reentryDir, diff: reentryDiff() }, {
+          async applyCriticEvidence() {
+            return { reviewPatch: patch };
+          },
+        });
+        const directRhythm = direct.timeline.metadata?.rhythm_sync as Record<string, any>;
+        const reentryRhythm = reentry.compileResult?.timeline.metadata?.rhythm_sync as Record<string, any>;
+        expect(directRhythm).toEqual(reentryRhythm);
+        expect(directRhythm.evidence_provenance.bgm_artifact_origin).toBe("primary");
+        expect(directRhythm.evidence_provenance.binding).toBe("bound");
+        expect(directRhythm.parity.status).toBe("pass");
+        expect(fs.readFileSync(path.join(directDir, "03_analysis/bgm_analysis.json"))).toEqual(primaryAnalysis);
+        expect(fs.readFileSync(path.join(directDir, "07_package/audio/bgm-analysis.json"))).toEqual(legacyAnalysis);
+        expect(fs.readFileSync(directPrimary)).toEqual(primaryBytes);
+        expect(fs.readFileSync(directLegacy)).toEqual(legacyBytes);
+        expect(fs.readFileSync(reentryPrimary)).toEqual(primaryBytes);
+        expect(fs.readFileSync(reentryLegacy)).toEqual(legacyBytes);
+      } finally {
+        fs.rmSync(directDir, { recursive: true, force: true });
+        fs.rmSync(reentryDir, { recursive: true, force: true });
+        fs.rmSync(mediaRoot, { recursive: true, force: true });
+      }
     });
   });
 });

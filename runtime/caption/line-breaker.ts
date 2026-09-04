@@ -22,7 +22,20 @@ export interface LayoutPolicy {
   maxLines: number;
   maxCps: number;
   language: string;
+  /** Optional policy-owned display measurement. Legacy callers keep character counting. */
+  measurement_mode?: "legacy_chars" | "unicode_display_units";
+  full_width_unit?: number;
+  latin_unit?: number;
+  maxLineUnits?: number;
+  /** Optional profile-owned line-break decisions. Legacy callers use the registered defaults below. */
+  line_start_punctuation?: string[];
+  line_end_punctuation?: string[];
+  orphan_tokens?: string[];
+  break_after?: string[];
+  break_priorities?: BreakPriority[];
 }
+
+export type BreakPriority = "punctuation" | "word_or_phrase" | "lexical_boundary" | "balanced_midpoint";
 
 export const LAYOUT_POLICIES: Record<string, LayoutPolicy> = {
   ja: { maxCharsPerLine: 20, maxLines: 2, maxCps: 6.0, language: "ja" },
@@ -89,6 +102,7 @@ export interface LineBreakResult {
   lines: string[];
   needsSplit: boolean;
   layoutViolation: boolean;
+  selection_reason?: BreakPriority;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,33 +121,34 @@ export function breakLines(
   if (text.includes("\n")) {
     const existing = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
     if (existing.length <= policy.maxLines &&
-        existing.every((l) => lineLength(l, policy.language) <= policy.maxCharsPerLine)) {
+        existing.every((l) => lineLength(l, policy) <= lineLimit(policy))) {
       return { lines: existing, needsSplit: false, layoutViolation: false };
     }
     // Re-break from flat text
     text = existing.join("");
   }
 
-  const len = lineLength(text, policy.language);
+  const len = lineLength(text, policy);
 
   // Fits in one line
-  if (len <= policy.maxCharsPerLine) {
+  if (len <= lineLimit(policy)) {
     return { lines: [text], needsSplit: false, layoutViolation: false };
   }
 
   // Needs 2 lines
-  if (len <= policy.maxCharsPerLine * policy.maxLines) {
-    const lines = splitIntoTwoLines(text, policy, protectedTerms);
-    return { lines, needsSplit: false, layoutViolation: false };
+  if (len <= lineLimit(policy) * policy.maxLines) {
+    const split = splitIntoTwoLines(text, policy, protectedTerms);
+    return { ...split, needsSplit: false, layoutViolation: false };
   }
 
   // Too long for 2 lines — try best effort 2-line, mark for split
-  const lines = splitIntoTwoLines(text, policy, protectedTerms);
+  const split = splitIntoTwoLines(text, policy, protectedTerms);
+  const lines = split.lines;
   const violation = lines.some(
-    (l) => lineLength(l, policy.language) > policy.maxCharsPerLine,
+    (l) => lineLength(l, policy) > lineLimit(policy),
   );
 
-  return { lines, needsSplit: true, layoutViolation: violation };
+  return { ...split, needsSplit: true, layoutViolation: violation };
 }
 
 /**
@@ -143,15 +158,15 @@ function splitIntoTwoLines(
   text: string,
   policy: LayoutPolicy,
   protectedTerms: string[],
-): string[] {
+): { lines: string[]; selection_reason: BreakPriority } {
   const isJa = policy.language.startsWith("ja");
   const jaWordBoundaries = isJa ? findJapaneseWordBoundaries(text) : new Set<number>();
   const allCandidates = findBreakCandidates(text, policy);
   const fittingCandidates = allCandidates.filter((idx) => {
     const line1 = text.slice(0, idx).trim();
     const line2 = text.slice(idx).trim();
-    return lineLength(line1, policy.language) <= policy.maxCharsPerLine &&
-      lineLength(line2, policy.language) <= policy.maxCharsPerLine &&
+    return lineLength(line1, policy) <= lineLimit(policy) &&
+      lineLength(line2, policy) <= lineLimit(policy) &&
       !isInsideProtectedTerm(text, idx, protectedTerms);
   });
   // A two-line caption that fits the declared layout must never overflow just
@@ -164,47 +179,52 @@ function splitIntoTwoLines(
   if (candidates.length === 0) {
     // No good break point; split at midpoint
     const mid = Math.floor(text.length / 2);
-    return [text.slice(0, mid).trim(), text.slice(mid).trim()];
+    return { lines: [text.slice(0, mid).trim(), text.slice(mid).trim()], selection_reason: "balanced_midpoint" };
   }
 
   // Score each candidate: prefer balanced, valid breaks
   const target = text.length / 2;
   let bestIdx = candidates[0];
   let bestScore = Infinity;
+  let bestReason: BreakPriority = "balanced_midpoint";
 
   for (const idx of candidates) {
     const line1 = text.slice(0, idx).trim();
     const line2 = text.slice(idx).trim();
-    const line1Len = lineLength(line1, policy.language);
-    const line2Len = lineLength(line2, policy.language);
+    const line1Len = lineLength(line1, policy);
+    const line2Len = lineLength(line2, policy);
 
-    // Penalty: imbalance
+    // Policy-owned candidate ordering. The existing scorer remains the
+    // selection mechanism; profile priorities decide which candidate class
+    // dominates before its existing linguistic/balance penalties.
     let score = Math.abs(line1Len - line2Len);
+    score += breakPriorityPenalty(text, idx, policy, isJa, jaWordBoundaries);
+    const priorities = policy.break_priorities ?? ["punctuation", "word_or_phrase", "lexical_boundary", "balanced_midpoint"];
 
     if (isJa) {
       // Natural Japanese captions should break at punctuation or a lexical
       // boundary before considering visual balance. Intl.Segmenter gives us
       // deterministic word-like boundaries without a morphology dependency.
-      if (/[。、！？!?,.:;]$/.test(line1)) score -= 80;
-      if (jaWordBoundaries.has(idx)) score -= 30;
-      if (!jaWordBoundaries.has(idx) && isSameScriptContinuation(text[idx - 1], text[idx])) {
+      if (priorities.includes("punctuation") && endsWithAny(line1, policy.break_after ?? [])) score -= 80;
+      if (priorities.includes("lexical_boundary") && jaWordBoundaries.has(idx)) score -= 30;
+      if (priorities.includes("lexical_boundary") && !jaWordBoundaries.has(idx) && isSameScriptContinuation(text[idx - 1], text[idx])) {
         // A visually balanced midpoint is still a bad subtitle break when it
         // tears one reading unit apart (e.g. こ|れ, 探そ|う, Gemini, 100).
         // Prefer the nearest lexical boundary even when the two lines are a
         // little less symmetrical.
         score += 100;
       }
-      if (endsWithJaDiscouragedToken(line1)) score += 35;
-      if (/^[。、！？!?,.:;）】」』]/.test(line2)) score += 80;
-      if (isKanjiToHiraganaContinuation(text[idx - 1], text[idx])) score += 120;
+      if (endsWithJaDiscouragedToken(line1, policy)) score += 35;
+      if (startsWithAny(line2, policy.line_start_punctuation ?? ["。、！？!?,.:;）】」』"])) score += 80;
+      if (priorities.includes("lexical_boundary") && isKanjiToHiraganaContinuation(text[idx - 1], text[idx])) score += 120;
     }
 
     // Penalty: line too long
-    if (line1Len > policy.maxCharsPerLine) score += (line1Len - policy.maxCharsPerLine) * 5;
-    if (line2Len > policy.maxCharsPerLine) score += (line2Len - policy.maxCharsPerLine) * 5;
+    if (line1Len > lineLimit(policy)) score += (line1Len - lineLimit(policy)) * 5;
+    if (line2Len > lineLimit(policy)) score += (line2Len - lineLimit(policy)) * 5;
 
     // Penalty: forbidden line start
-    if (isJa && line2.length > 0 && isJaForbiddenLineStart(line2)) {
+    if (isJa && line2.length > 0 && isJaForbiddenLineStart(line2, policy)) {
       score += 120;
     }
     if (!isJa && line2.length > 0 && isEnOrphanStart(line2)) {
@@ -219,13 +239,14 @@ function splitIntoTwoLines(
     if (score < bestScore) {
       bestScore = score;
       bestIdx = idx;
+      bestReason = breakCandidateKind(text, idx, policy, isJa, jaWordBoundaries);
     }
   }
 
   const line1 = text.slice(0, bestIdx).trim();
   const line2 = text.slice(bestIdx).trim();
 
-  return [line1, line2].filter((l) => l.length > 0);
+  return { lines: [line1, line2].filter((l) => l.length > 0), selection_reason: bestReason };
 }
 
 /**
@@ -240,7 +261,7 @@ function findBreakCandidates(text: string, policy: LayoutPolicy): number[] {
     const curChar = text[i];
 
     // Priority 1: After punctuation
-    if (isJa ? JA_BREAK_AFTER.test(prevChar) : EN_BREAK_AFTER.test(prevChar)) {
+    if (policy.break_after?.includes(prevChar) || (!policy.break_after && (isJa ? JA_BREAK_AFTER.test(prevChar) : EN_BREAK_AFTER.test(prevChar)))) {
       positions.push(i);
       continue;
     }
@@ -260,6 +281,37 @@ function findBreakCandidates(text: string, policy: LayoutPolicy): number[] {
   return positions;
 }
 
+function breakPriorityPenalty(
+  text: string,
+  index: number,
+  policy: LayoutPolicy,
+  isJa: boolean,
+  jaWordBoundaries: Set<number>,
+): number {
+  const priorities = policy.break_priorities ?? ["punctuation", "word_or_phrase", "lexical_boundary", "balanced_midpoint"];
+  const kind = breakCandidateKind(text, index, policy, isJa, jaWordBoundaries);
+  const rank = priorities.indexOf(kind);
+  return (rank < 0 ? priorities.length : rank) * 1000;
+}
+
+function breakCandidateKind(
+  text: string,
+  index: number,
+  policy: LayoutPolicy,
+  isJa: boolean,
+  jaWordBoundaries: Set<number>,
+): BreakPriority {
+  const priorities = policy.break_priorities ?? ["punctuation", "word_or_phrase", "lexical_boundary", "balanced_midpoint"];
+  const detected = policy.break_after?.includes(text[index - 1] ?? "")
+    ? "punctuation"
+    : !isJa && text[index - 1] === " "
+      ? "word_or_phrase"
+      : isJa && jaWordBoundaries.has(index)
+        ? "lexical_boundary"
+        : "balanced_midpoint";
+  return priorities.includes(detected) ? detected : "balanced_midpoint";
+}
+
 function findJapaneseWordBoundaries(text: string): Set<number> {
   if (typeof Intl.Segmenter !== "function") return new Set<number>();
   return new Set(
@@ -269,7 +321,8 @@ function findJapaneseWordBoundaries(text: string): Set<number> {
   );
 }
 
-function endsWithJaDiscouragedToken(line: string): boolean {
+function endsWithJaDiscouragedToken(line: string, policy: LayoutPolicy): boolean {
+  if (policy.line_end_punctuation?.length) return endsWithAny(line, policy.line_end_punctuation);
   if (typeof Intl.Segmenter === "function") {
     const segments = [...new Intl.Segmenter("ja", { granularity: "word" }).segment(line)];
     const last = segments.at(-1)?.segment;
@@ -319,12 +372,38 @@ function isInsideProtectedTerm(
  * Japanese: character count (each CJK char = 1)
  * English: character count
  */
-function lineLength(text: string, language: string): number {
-  return text.length;
+function lineLength(text: string, policy: LayoutPolicy): number {
+  return policy.measurement_mode === "unicode_display_units"
+    ? measureDisplayUnits(text, policy)
+    : text.length;
 }
 
-function isJaForbiddenLineStart(line: string): boolean {
+function lineLimit(policy: LayoutPolicy): number {
+  return policy.measurement_mode === "unicode_display_units" && policy.maxLineUnits !== undefined
+    ? policy.maxLineUnits
+    : policy.maxCharsPerLine;
+}
+
+/** Measure mixed Japanese/full-width/Latin captions from policy-owned units. */
+export function measureDisplayUnits(
+  text: string,
+  options: Pick<LayoutPolicy, "language" | "full_width_unit" | "latin_unit"> = { language: "ja", full_width_unit: 1, latin_unit: 0.5 },
+): number {
+  const fullWidth = options.full_width_unit ?? 1;
+  const latin = options.latin_unit ?? 0.5;
+  const segments = typeof Intl.Segmenter === "function"
+    ? [...new Intl.Segmenter(options.language, { granularity: "grapheme" }).segment(text)].map((item) => item.segment)
+    : [...text];
+  return segments.reduce((total, segment) => {
+    if (/^\s+$/.test(segment)) return total + latin;
+    if (/^[\u0300-\u036f\u3099\u309A]+$/.test(segment)) return total;
+    return total + (/^[\u0000-\u007f]+$/.test(segment) ? latin : fullWidth);
+  }, 0);
+}
+
+function isJaForbiddenLineStart(line: string, policy: LayoutPolicy): boolean {
   if (line.length === 0) return false;
+  if (policy.orphan_tokens?.length) return startsWithAny(line, policy.orphan_tokens);
   // Check first character
   if (JA_LINE_START_FORBIDDEN.has(line[0])) return true;
   // Check first two characters (e.g. って, った)
@@ -332,6 +411,14 @@ function isJaForbiddenLineStart(line: string): boolean {
   // Check first three characters (e.g. ます, です)
   if (line.length >= 3 && JA_LINE_START_FORBIDDEN.has(line.slice(0, 3))) return true;
   return false;
+}
+
+function startsWithAny(value: string, tokens: string[]): boolean {
+  return tokens.some((token) => token.length > 0 && (token.length === 1 ? value.startsWith(token) : [...token].some((part) => value.startsWith(part))));
+}
+
+function endsWithAny(value: string, tokens: string[]): boolean {
+  return tokens.some((token) => token.length > 0 && (token.length === 1 ? value.endsWith(token) : value.endsWith(token)));
 }
 
 function isEnOrphanStart(line: string): boolean {
@@ -363,7 +450,7 @@ export function checkCps(
 ): CpsCheckResult {
   if (durationMs <= 0) return { withinLimit: true, cps: 0, limit: policy.maxCps };
   const seconds = durationMs / 1000;
-  const len = text.replace(/\n/g, "").length;
+  const len = lineLength(text.replace(/\n/g, ""), policy);
   const cps = len / seconds;
   return {
     withinLimit: cps <= policy.maxCps,

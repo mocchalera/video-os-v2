@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "caption-visual-treatment-input.schema.json",
+  "title": "Caption visual treatment renderer input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "project_id", "approval_hash", "typography_policy_hash", "visual_treatment_patch_hash", "caption_identity", "graphical_content_identity", "status", "fallbacks", "renderer_route", "text_timing_hash", "input_hash"],
+  "properties": {
+    "version": { "const": "caption-visual-treatment-input/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "approval_hash": { "$ref": "#/$defs/hash" },
+    "typography_policy_hash": { "$ref": "#/$defs/hash" },
+    "visual_treatment_patch_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "platform_safe_zone_profile_id": { "type": "string", "minLength": 1 },
+    "platform_safe_zone_profile_path": { "type": "string", "minLength": 1 },
+    "platform_safe_zone_profile_hash": { "$ref": "#/$defs/hash" },
+    "resolved_projection": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caption_id", "stable_root_id", "style_ref", "font_family", "font_weight", "font_size_px_1080", "line_height_px_1080", "fill_rgba", "outline_rgba", "outline_px_1080", "shadow_px_1080", "max_width_ratio", "alignment", "emphasis_scale", "effect_supported", "animation_supported", "outline_enabled", "shadow_enabled", "panel_enabled"],
+        "properties": {
+          "caption_id": { "type": "string", "pattern": "^SC_" },
+          "stable_root_id": { "type": "string", "pattern": "^SC_" },
+          "style_ref": { "type": "string", "minLength": 1 },
+          "font_family": { "type": "string", "minLength": 1 },
+          "font_weight": { "type": "integer", "minimum": 1 },
+          "font_size_px_1080": { "type": "number", "exclusiveMinimum": 0 },
+          "line_height_px_1080": { "type": "number", "exclusiveMinimum": 0 },
+          "fill_rgba": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}$" },
+          "outline_rgba": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}$" },
+          "outline_px_1080": { "type": "number", "minimum": 0 },
+          "shadow_px_1080": { "type": "number", "minimum": 0 },
+          "max_width_ratio": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+          "alignment": { "type": "string", "minLength": 1 },
+          "emphasis_scale": { "type": "number", "minimum": 1 },
+          "effect_ref": { "type": "string", "minLength": 1 },
+          "animation_ref": { "type": "string", "minLength": 1 },
+          "hierarchy_role": { "enum": ["speech", "keyword", "annotation", "speaker", "cta"] },
+          "effect_supported": { "type": "boolean" },
+          "animation_supported": { "type": "boolean" },
+          "hierarchy_supported": { "type": "boolean" },
+          "hierarchy_preview_supported": { "type": "boolean" },
+          "animation_preview_supported": { "type": "boolean" },
+          "outline_enabled": { "type": "boolean" },
+          "shadow_enabled": { "type": "boolean" },
+          "panel_enabled": { "type": "boolean" }
+        }
+      }
+    },
+    "caption_identity": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caption_id", "stable_root_id", "text", "timeline_in_frame", "timeline_duration_frames"],
+          "properties": {
+          "caption_id": { "type": "string", "pattern": "^SC_" },
+          "stable_root_id": { "type": "string", "pattern": "^SC_" },
+          "parent_ids": { "type": "array", "items": { "type": "string", "pattern": "^SC_" }, "uniqueItems": true },
+          "lineage_hash": { "$ref": "#/$defs/hash" },
+          "text": { "type": "string", "minLength": 1 },
+          "timeline_in_frame": { "type": "integer", "minimum": 0 },
+          "timeline_duration_frames": { "type": "integer", "minimum": 1 },
+          "treatment": { "$ref": "#/$defs/treatment" },
+          "requested_treatment": { "$ref": "#/$defs/treatment" }
+        }
+      }
+    },
+    "graphical_content_identity": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["overlay_id", "text", "timeline_in_frame", "timeline_duration_frames", "styling_class", "anchor"],
+        "properties": {
+          "overlay_id": { "type": "string", "minLength": 1 },
+          "text": { "type": "string", "minLength": 1 },
+          "timeline_in_frame": { "type": "integer", "minimum": 0 },
+          "timeline_duration_frames": { "type": "integer", "minimum": 1 },
+          "styling_class": { "type": "string", "minLength": 1 },
+          "anchor": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "status": { "enum": ["ready", "fallback", "human_hold", "blocked"] },
+    "fallbacks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caption_id", "kind", "reason"],
+        "properties": { "caption_id": { "type": "string", "minLength": 1 }, "kind": { "enum": ["registered_fallback", "nle_handoff", "blocker"] }, "reason": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "renderer_route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["speech_captions", "graphical_content"],
+      "properties": {
+        "speech_captions": { "const": "ffmpeg-libass" },
+        "graphical_content": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "selected", "status"],
+          "properties": {
+            "available": { "const": ["remotion", "hyperframes"] },
+            "selected": { "const": "not_selected" },
+            "status": { "const": "deferred_to_next_milestone" }
+          }
+        }
+      }
+    },
+    "text_timing_hash": { "$ref": "#/$defs/hash" },
+    "capability_hash": { "$ref": "#/$defs/hash" },
+    "accessibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reduced_motion", "high_contrast", "audio_off", "small_screen"],
+      "properties": {
+        "reduced_motion": { "type": "boolean" },
+        "high_contrast": { "type": "boolean" },
+        "audio_off": { "type": "boolean" },
+        "small_screen": { "type": "boolean" }
+      }
+    },
+    "applied_caption_ids": { "type": "array", "items": { "type": "string", "pattern": "^SC_" } },
+    "degraded_reasons": { "$ref": "#/$defs/reasons" },
+    "blocked_reasons": { "$ref": "#/$defs/reasons" },
+    "input_hash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "treatment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caption_id", "stable_root_id", "anchor", "style_ref", "fallback"],
+      "properties": {
+        "caption_id": { "type": "string", "pattern": "^SC_" },
+        "stable_root_id": { "type": "string", "pattern": "^SC_" },
+        "anchor": { "enum": ["top_left", "top_center", "top_right", "center", "bottom_left", "bottom_center", "bottom_right"] },
+        "rect": { "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"], "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } } },
+        "style_ref": { "type": "string", "minLength": 1 },
+        "reference_scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 },
+        "hierarchy_role": { "enum": ["speech", "keyword", "annotation", "speaker", "cta"] },
+        "emphasis_ref": { "type": "string", "minLength": 1 },
+        "animation_ref": { "type": "string", "minLength": 1 },
+        "effect_ref": { "type": "string", "minLength": 1 },
+        "fallback": { "enum": ["registered_fallback", "nle_handoff", "blocker"] }
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caption_id", "reason"],
+        "properties": {
+          "caption_id": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

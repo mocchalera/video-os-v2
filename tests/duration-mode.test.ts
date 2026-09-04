@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { compile } from "../runtime/compiler/index.js";
-import { resolve } from "../runtime/compiler/resolve.js";
+import { GapFreeTimelineError } from "../runtime/compiler/errors.js";
+import { resolve, resolveCoverageHorizon } from "../runtime/compiler/resolve.js";
 import {
   resolveDurationMode,
   buildDurationPolicy,
@@ -26,6 +27,27 @@ import type {
 
 const SAMPLE_PROJECT = path.resolve("projects/sample");
 const FIXED_CREATED_AT = "2026-03-21T00:00:00Z";
+const SAMPLE_INTENTIONAL_GAP_OPERATION = {
+  operation_id: "OP_SAMPLE_FIXTURE_GAP",
+  type: "gap" as const,
+  track_id: "V1",
+  start_frame: 644,
+  duration_frames: 24,
+  authority: "operator" as const,
+  reason: "fixture intentionally models a room-tone pause between approved clips",
+};
+// Issue #6 P0: intentional silence must be declared per track. The fixture's
+// V1 pause also silences the mirrored A1 lane, so it needs an explicit
+// ambient-continuation declaration with its own authority and reason.
+const SAMPLE_INTENTIONAL_AUDIO_GAP_OPERATION = {
+  operation_id: "OP_SAMPLE_FIXTURE_GAP_A1",
+  type: "ambient_continuation" as const,
+  track_id: "A1",
+  start_frame: 644,
+  duration_frames: 24,
+  authority: "operator" as const,
+  reason: "fixture keeps room tone (no mirrored source audio) across the intentional V1 pause",
+};
 
 function copyDirSync(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true });
@@ -520,6 +542,34 @@ describe("Compiler: Guide Mode", () => {
     expect(result.duration_policy!.mode).toBe("guide");
   });
 
+  it("guide target longer than actual V1/A1 end uses the actual program horizon", () => {
+    const projectDir = createTempProject({
+      briefOverrides: {
+        project: {
+          runtime_target_sec: 73,
+          duration_mode: "guide",
+        },
+      },
+    });
+    try {
+      const result = compile({ projectPath: projectDir, createdAt: FIXED_CREATED_AT });
+      const v1 = result.timeline.tracks.video.find((track) => track.track_id === "V1");
+      const actualV1End = Math.max(...(v1?.clips ?? []).map((clip) =>
+        clip.timeline_in_frame + clip.timeline_duration_frames));
+
+      expect(result.resolution.target_frames).toBe(1_752);
+      expect(actualV1End).toBeLessThan(result.resolution.target_frames);
+      expect(result.resolution.duration_fit).toBe(true);
+      expect(result.resolution.gap_count).toBe(0);
+      expect(result.resolution.audio_gap_count).toBe(0);
+      expect(result.resolution.duration_delta_frames).toBe(
+        result.resolution.content_frames! - result.resolution.target_frames,
+      );
+    } finally {
+      removeDirSync(projectDir);
+    }
+  });
+
   it("guide mode: timeline compaction — total frames <= beat target sum", () => {
     const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
     // beat targets: 96 + 216 + 240 + 168 = 720
@@ -560,8 +610,9 @@ describe("Compiler: Guide Mode", () => {
 // ── Compiler Integration: Strict Mode ───────────────────────────────
 
 describe("Compiler: Strict Mode", () => {
-  it("strict with adequate material: duration_status = pass", () => {
-    // Sample project has ~28s target and enough material
+  it("strict rejects an unintentional primary-video gap", () => {
+    // The sample has enough total material, but its approved clip placements
+    // contain a real 24-frame hole. Strict compile must fail closed.
     const tmpDir = createTempProject({
       briefOverrides: {
         project: {
@@ -576,11 +627,18 @@ describe("Compiler: Strict Mode", () => {
       },
     });
     try {
-      const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
-      expect(result.duration_policy!.mode).toBe("strict");
-      expect(result.duration_policy!.hard_gate).toBe(true);
-      // With strict, the compiler tries to hit the target
-      expect(result.resolution.duration_mode).toBe("strict");
+      expect(() => compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT })).toThrowError(GapFreeTimelineError);
+      try {
+        compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+      } catch (error) {
+        expect(error).toBeInstanceOf(GapFreeTimelineError);
+        expect((error as GapFreeTimelineError).gaps[0]).toEqual(expect.objectContaining({
+          track_id: "V1",
+          start_frame: 644,
+          end_frame: 668,
+          duration_frames: 24,
+        }));
+      }
     } finally {
       removeDirSync(tmpDir);
     }
@@ -597,6 +655,7 @@ describe("Compiler: Strict Mode", () => {
           duration_mode: "strict",
         },
       },
+      blueprintOverrides: { timeline_operations: [SAMPLE_INTENTIONAL_GAP_OPERATION, SAMPLE_INTENTIONAL_AUDIO_GAP_OPERATION] },
     });
     try {
       const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
@@ -622,6 +681,7 @@ describe("Compiler: Strict Mode", () => {
           duration_mode: "strict",
         },
       },
+      blueprintOverrides: { timeline_operations: [SAMPLE_INTENTIONAL_GAP_OPERATION, SAMPLE_INTENTIONAL_AUDIO_GAP_OPERATION] },
     });
     try {
       compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
@@ -656,6 +716,27 @@ describe("Compiler: Guide Without Target", () => {
     delete project.runtime_target_sec;
     const merged = { ...original, project };
     fs.writeFileSync(briefPath, stringifyYaml(merged), "utf-8");
+
+    const blueprintPath = path.join(tmpDir, "04_plan/edit_blueprint.yaml");
+    const blueprint = parseYaml(fs.readFileSync(blueprintPath, "utf-8")) as Record<string, unknown>;
+    blueprint.timeline_operations = [{
+      operation_id: "OP_NO_TARGET_FIXTURE_TAIL",
+      type: "gap",
+      track_id: "V1",
+      start_frame: 720,
+      duration_frames: 998,
+      authority: "operator",
+      reason: "fixture intentionally leaves the unused tail outside the authored visual clip",
+    }, {
+      operation_id: "OP_NO_TARGET_FIXTURE_TAIL_A1",
+      type: "ambient_continuation",
+      track_id: "A1",
+      start_frame: 720,
+      duration_frames: 998,
+      authority: "operator",
+      reason: "fixture keeps room tone across the intentionally unused audio tail",
+    }];
+    fs.writeFileSync(blueprintPath, stringifyYaml(blueprint), "utf-8");
     return tmpDir;
   }
 
@@ -714,7 +795,26 @@ describe("Blueprint duration_policy passthrough", () => {
       protect_vlm_peaks: true,
     };
     const tmpDir = createTempProject({
-      blueprintOverrides: { duration_policy: policy },
+      blueprintOverrides: {
+        duration_policy: policy,
+        timeline_operations: [{
+          operation_id: "OP_DURATION_FIXTURE_TAIL",
+          type: "gap",
+          track_id: "V1",
+          start_frame: 720,
+          duration_frames: 1_440,
+          authority: "operator",
+          reason: "fixture intentionally leaves the unused tail outside the authored visual clip",
+        }, {
+          operation_id: "OP_DURATION_FIXTURE_TAIL_A1",
+          type: "ambient_continuation",
+          track_id: "A1",
+          start_frame: 720,
+          duration_frames: 1_440,
+          authority: "operator",
+          reason: "fixture keeps room tone across the intentionally unused audio tail",
+        }],
+      },
     });
     try {
       const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
@@ -750,11 +850,12 @@ describe("Resolve: Duration Status", () => {
   function makeTimeline(
     videoClips: TimelineClip[][],
     markers: AssembledTimeline["markers"] = [],
+    audioClips: TimelineClip[] = [],
   ): AssembledTimeline {
     return {
       tracks: {
         video: videoClips.map((clips, i) => ({ track_id: `V${i + 1}`, kind: "video" as const, clips })),
-        audio: [{ track_id: "A1", kind: "audio" as const, clips: [] }],
+        audio: [{ track_id: "A1", kind: "audio" as const, clips: audioClips }],
       },
       markers,
     };
@@ -886,6 +987,91 @@ describe("Resolve: Duration Status", () => {
     expect(report.duration_status).toBe("pass");
   });
 
+  it("guide coverage ends at actual V1 end while retaining internal V1 gaps", () => {
+    const policy: DurationPolicy = {
+      mode: "guide",
+      source: "explicit_brief",
+      target_source: "explicit_brief",
+      target_duration_sec: 73,
+      min_duration_sec: 51.1,
+      max_duration_sec: 94.9,
+      hard_gate: false,
+      protect_vlm_peaks: true,
+    };
+    const first = makeClip({
+      clip_id: "C1",
+      segment_id: "S1",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 10,
+    });
+    const second = makeClip({
+      clip_id: "C2",
+      segment_id: "S2",
+      timeline_in_frame: 15,
+      timeline_duration_frames: 5,
+    });
+    const audio = makeClip({
+      clip_id: "A1_CLIP",
+      segment_id: "A1_SEG",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 20,
+      role: "nat_sound",
+      motivation: "original clip audio",
+    });
+    const timeline = makeTimeline([[first, second]], [], [audio]);
+
+    expect(resolveCoverageHorizon(timeline, 1_752, policy)).toBe(20);
+    const report = resolve(timeline, 1_752, [], policy, 24, 1);
+
+    expect(report.gap_details).toEqual([expect.objectContaining({
+      track_id: "V1",
+      start_frame: 10,
+      end_frame: 15,
+      duration_frames: 5,
+    })]);
+    expect(report.gap_count).toBe(1);
+    expect(report.gap_frames).toBe(5);
+    expect(report.audio_gap_count).toBe(0);
+  });
+
+  it("guide A1 coverage fails when it does not reach actual V1 end", () => {
+    const policy: DurationPolicy = {
+      mode: "guide",
+      source: "explicit_brief",
+      target_source: "explicit_brief",
+      target_duration_sec: 73,
+      min_duration_sec: 51.1,
+      max_duration_sec: 94.9,
+      hard_gate: false,
+      protect_vlm_peaks: true,
+    };
+    const video = makeClip({
+      clip_id: "C1",
+      segment_id: "S1",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 20,
+    });
+    const audio = makeClip({
+      clip_id: "A1_CLIP",
+      segment_id: "A1_SEG",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 15,
+      role: "nat_sound",
+      motivation: "original clip audio",
+    });
+    const report = resolve(makeTimeline([[video]], [], [audio]), 1_752, [], policy, 24, 1);
+
+    expect(report.gap_count).toBe(0);
+    expect(report.audio_gap_details).toEqual([expect.objectContaining({
+      track_id: "A1",
+      start_frame: 15,
+      end_frame: 20,
+      duration_frames: 5,
+    })]);
+    expect(report.audio_gap_count).toBe(1);
+    expect(report.audio_gap_frames).toBe(5);
+  });
+
   it("guide: advisory window boundary below fill threshold → short", () => {
     // 30% of 720 = 216 → min = 504 frames
     const policy: DurationPolicy = {
@@ -976,8 +1162,8 @@ describe("Resolve: Duration Status", () => {
     expect(report.content_frames).toBe(150);
     expect(report.content_fill_ratio).toBeCloseTo(0.5);
     expect(report.duration_status).toBe("short");
-    expect(report.gap_frames).toBe(150);
-    expect(report.gap_count).toBe(2);
+    expect(report.gap_frames).toBe(100);
+    expect(report.gap_count).toBe(1);
     expect(report.beat_fill).toEqual([
       { beat_id: "b01", target: 150, actual: 100, fill_ratio: 100 / 150 },
       { beat_id: "b02", target: 150, actual: 50, fill_ratio: 50 / 150 },
@@ -1066,6 +1252,7 @@ describe("Determinism", () => {
           duration_mode: "strict",
         },
       },
+      blueprintOverrides: { timeline_operations: [SAMPLE_INTENTIONAL_GAP_OPERATION, SAMPLE_INTENTIONAL_AUDIO_GAP_OPERATION] },
     });
     try {
       const r1 = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });

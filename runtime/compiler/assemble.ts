@@ -29,8 +29,10 @@ import type {
   TrackLayout,
 } from "./types.js";
 import { resolveStillImageHold } from "../artifacts/still-image-policy.js";
+import type { StillHoldResolutionContext } from "../artifacts/still-image-policy.js";
 import { isStillImageClip, setStillImageHoldFrames } from "./still-image.js";
 import { getCandidateRef } from "./candidate-ref.js";
+import type { CreatorShortVoBrollPreset } from "./creator-short-vo-broll.js";
 import {
   candidateSupportsVisual,
   inferAudioRole,
@@ -56,6 +58,8 @@ export interface AssembleOptions {
   exactCandidatePlanOrder?: boolean;
   log?: (message: string) => void;
   stillDurationPolicy?: StillDurationPolicy;
+  stillHoldContext?: StillHoldResolutionContext;
+  creatorShortVoBroll?: CreatorShortVoBrollPreset;
 }
 
 export function assemble(
@@ -103,15 +107,27 @@ export function assemble(
 
   // Track used segments to apply adjacency penalty and prevent overuse
   const usedClips = new Set<string>();
+  // Assets already placed on a video track by an earlier beat. Auto selection
+  // must not re-select them into a later beat unless that beat explicitly
+  // declares allow_revisit, otherwise the hard continuity gate would reject
+  // the assembled timeline after the fact.
+  const assetsUsedInEarlierBeats = new Set<string>();
   let clipCounter = 0;
   let currentFrame = 0;
 
   // Track previous asset per track for adjacency penalty
   let prevV1Asset: string | null = null;
   let prevV2Asset: string | null = null;
+  const creatorKickoffBeatIndex = options?.creatorShortVoBroll?.kickoffAnchor
+    ? findCreatorKickoffBeatIndex(
+        normalized,
+        rankedTable,
+        options.creatorShortVoBroll.kickoffAnchor.candidateRef,
+      )
+    : null;
 
   beatLoop:
-  for (const beat of normalized.beats) {
+  for (const [beatIndex, beat] of normalized.beats.entries()) {
     if (maxDurationFrames != null && currentFrame >= maxDurationFrames) {
       break;
     }
@@ -138,6 +154,8 @@ export function assemble(
         scored.candidate,
         options!.stillDurationPolicy!,
         options!.stillDurationPolicy!.max_hold_frames,
+        options?.stillHoldContext,
+        currentFrame,
       ).min_hold_frames;
       return beatBudget >= minimum;
     });
@@ -151,6 +169,8 @@ export function assemble(
           candidate.candidate,
           options!.stillDurationPolicy!,
           options!.stillDurationPolicy!.max_hold_frames,
+          options?.stillHoldContext,
+          currentFrame,
         ).min_hold_frames));
       throw new Error(`still_image_hold_cannot_fit_beat: beat_id=${beat.beat_id} available_frames=${beatBudget} min_hold_frames=${minimum}`);
     }
@@ -197,6 +217,7 @@ export function assemble(
         { segment_ids: [], candidate_refs: [] },
        usPerFrame,
         options?.stillDurationPolicy,
+        options?.stillHoldContext,
      );
       clip.audio_role = scored.candidate.audio_role ?? inferAudioRole(scored.candidate);
       const target = clip.audio_role === "dialogue"
@@ -213,10 +234,25 @@ export function assemble(
     }
 
     if (layout === "single") {
+      const defaultVisualCandidates = getV1FirstCandidates(byRole);
+      const creatorVisualCandidates = options?.creatorShortVoBroll
+        ? creatorShortVisualCandidates(
+            byRole,
+            beatIndex,
+            normalized.beats.length,
+            options.creatorShortVoBroll,
+            usPerFrame,
+            creatorKickoffBeatIndex,
+          )
+        : defaultVisualCandidates;
       const visualCandidates = exactCandidatePlanOrder
-        ? orderCandidatesByCandidatePlan(getV1FirstCandidates(byRole), beat.candidate_plan)
+        ? orderCandidatesByCandidatePlan(defaultVisualCandidates, beat.candidate_plan)
         : candidatesForCurrentBeat(
-            getV1FirstCandidates(byRole),
+            excludeAssetsUsedInEarlierBeats(
+              creatorVisualCandidates,
+              assetsUsedInEarlierBeats,
+              beat.allow_revisit,
+            ),
             beat.beat_id,
             reservedCandidateOwner,
           );
@@ -227,12 +263,24 @@ export function assemble(
       while (v1Frame < beatEndFrame) {
         const visualClip: ScoredCandidate | undefined = exactCandidatePlanOrder
           ? visualCandidates[exactPlanIndex++]
-          : pickAvailableV1First(
-              visualCandidates,
-              usedClips,
-              prevV1Asset,
-              params.adjacency_penalty,
-              clusterContinuity,
+          : excludeCandidatesOverlappingSelectedRanges(
+              options?.creatorShortVoBroll
+                ? pickAvailable(
+                    visualCandidates,
+                    usedClips,
+                    prevV1Asset,
+                    params.adjacency_penalty,
+                    clusterContinuity,
+                  )
+                : pickAvailableV1First(
+                    visualCandidates,
+                    usedClips,
+                    prevV1Asset,
+                    params.adjacency_penalty,
+                    clusterContinuity,
+                  ),
+              [...v1Clips, ...v2Clips],
+              beat.beat_id,
             )[0];
         if (!visualClip) break;
 
@@ -244,8 +292,45 @@ export function assemble(
           ++clipCounter,
           { segment_ids: [], candidate_refs: [] },
          usPerFrame,
-          options?.stillDurationPolicy,
+         options?.stillDurationPolicy,
+         options?.stillHoldContext,
        );
+        if (
+          options?.creatorShortVoBroll &&
+          creatorShortBrollAllowed(beatIndex, creatorKickoffBeatIndex) &&
+          beatIndex < normalized.beats.length - 1 &&
+          isCreatorBrollCandidate(visualClip.candidate)
+        ) {
+          const remainingFrames = beatEndFrame - v1Frame;
+          if (remainingFrames < options.creatorShortVoBroll.minInsertFrames) break;
+          clip.timeline_duration_frames = Math.min(
+            clip.timeline_duration_frames,
+            options.creatorShortVoBroll.maxInsertFrames,
+            remainingFrames,
+          );
+          const sourceDurationUs = Math.round(clip.timeline_duration_frames * usPerFrame);
+          const trimHint = visualClip.candidate.trim_hint;
+          const sourceCenterUs = trimHint?.source_center_us !== undefined
+            ? trimHint.source_center_us
+            : trimHint?.recommended_in_us !== undefined && trimHint.recommended_out_us !== undefined
+              ? (trimHint.recommended_in_us + trimHint.recommended_out_us) / 2
+              : (visualClip.candidate.src_in_us + visualClip.candidate.src_out_us) / 2;
+          const latestSourceInUs = visualClip.candidate.src_out_us - sourceDurationUs;
+          clip.src_in_us = Math.round(Math.max(
+            visualClip.candidate.src_in_us,
+            Math.min(latestSourceInUs, sourceCenterUs - sourceDurationUs / 2),
+          ));
+          clip.src_out_us = clip.src_in_us + sourceDurationUs;
+          const metadata = clip.metadata ?? {};
+          metadata.creator_short_vo_broll = {
+            policy: "creator-short-vo-broll/v1",
+            min_insert_frames: options.creatorShortVoBroll.minInsertFrames,
+            max_insert_frames: options.creatorShortVoBroll.maxInsertFrames,
+            audio_mode: "dialogue_voice_over",
+            anchor_status: options.creatorShortVoBroll.provenance.anchor_status,
+          };
+          clip.metadata = metadata;
+        }
         const placed = placeClipWithinCap(v1Clips, clip, maxDurationFrames);
         usedClips.add(clipUsageKey(visualClip.candidate));
         if (!placed) {
@@ -296,6 +381,7 @@ export function assemble(
             { segment_ids: [], candidate_refs: [] },
            usPerFrame,
             options?.stillDurationPolicy,
+            options?.stillHoldContext,
          );
           if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, sc);
@@ -307,18 +393,26 @@ export function assemble(
         }
       }
     } else {
-      const visualDialogueCandidates = candidatesForCurrentBeat(
-        (byRole.get("dialogue") ?? []).filter((candidate) =>
-          !candidateSupportsAuthoredDialogueAudio(candidate.candidate)
+      const visualDialogueCandidates = excludeAssetsUsedInEarlierBeats(
+        candidatesForCurrentBeat(
+          (byRole.get("dialogue") ?? []).filter((candidate) =>
+            !candidateSupportsAuthoredDialogueAudio(candidate.candidate)
+          ),
+          beat.beat_id,
+          reservedCandidateOwner,
         ),
-        beat.beat_id,
-        reservedCandidateOwner,
+        assetsUsedInEarlierBeats,
+        beat.allow_revisit,
       );
       // V1: hero clips (always pick best 1)
-      const heroCandidates = candidatesForCurrentBeat(
-        byRole.get("hero") ?? [],
-        beat.beat_id,
-        reservedCandidateOwner,
+      const heroCandidates = excludeAssetsUsedInEarlierBeats(
+        candidatesForCurrentBeat(
+          byRole.get("hero") ?? [],
+          beat.beat_id,
+          reservedCandidateOwner,
+        ),
+        assetsUsedInEarlierBeats,
+        beat.allow_revisit,
       );
       const heroClip = pickBest(
         heroCandidates,
@@ -336,6 +430,7 @@ export function assemble(
           getRunnersUp(heroCandidates, heroClip, usedClips),
          usPerFrame,
           options?.stillDurationPolicy,
+          options?.stillHoldContext,
        );
         if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
           registerClipCluster(clusterByClipId, clip, heroClip);
@@ -364,6 +459,7 @@ export function assemble(
             getRunnersUp(visualDialogueCandidates, visualDialogue, usedClips),
             usPerFrame,
             options?.stillDurationPolicy,
+            options?.stillHoldContext,
           );
           if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, visualDialogue);
@@ -387,10 +483,14 @@ export function assemble(
         if (diff !== 0) return diff;
         return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
       });
-      const availableSupportCandidates = candidatesForCurrentBeat(
-        supportCandidates,
-        beat.beat_id,
-        reservedCandidateOwner,
+      const availableSupportCandidates = excludeAssetsUsedInEarlierBeats(
+        candidatesForCurrentBeat(
+          supportCandidates,
+          beat.beat_id,
+          reservedCandidateOwner,
+        ),
+        assetsUsedInEarlierBeats,
+        beat.allow_revisit,
       );
 
       if (isGuide) {
@@ -413,6 +513,15 @@ export function assemble(
         let v2Frame = currentFrame;
         for (const sc of allSupport) {
           if (v2Frame >= beatEndFrame) break; // keep V2 inserts inside the beat
+          if (isBlockedAutoVideoCandidate(
+            sc.candidate,
+            beat.allow_revisit,
+            assetsUsedInEarlierBeats,
+            [...v1Clips, ...v2Clips],
+            beat.beat_id,
+          )) {
+            continue;
+          }
           const clip = makeClip(
             sc,
             beat.beat_id,
@@ -422,6 +531,7 @@ export function assemble(
             { segment_ids: [], candidate_refs: [] },
            usPerFrame,
             options?.stillDurationPolicy,
+            options?.stillHoldContext,
          );
           if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, sc);
@@ -436,7 +546,11 @@ export function assemble(
       } else {
         // Strict mode: pick best 1
         const supportClip = pickBest(
-          availableSupportCandidates,
+          excludeCandidatesOverlappingSelectedRanges(
+            availableSupportCandidates,
+            [...v1Clips, ...v2Clips],
+            beat.beat_id,
+          ),
           usedClips,
           prevV2Asset,
           params.adjacency_penalty,
@@ -450,7 +564,8 @@ export function assemble(
             ++clipCounter,
             getRunnersUp(availableSupportCandidates, supportClip, usedClips),
            usPerFrame,
-            options?.stillDurationPolicy,
+           options?.stillDurationPolicy,
+           options?.stillHoldContext,
          );
           if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, supportClip);
@@ -492,6 +607,7 @@ export function assemble(
             { segment_ids: [], candidate_refs: [] },
            usPerFrame,
             options?.stillDurationPolicy,
+            options?.stillHoldContext,
          );
           if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, sc);
@@ -525,6 +641,7 @@ export function assemble(
             getRunnersUp(dialogueCandidates, dialogueClip, usedClips),
            usPerFrame,
             options?.stillDurationPolicy,
+            options?.stillHoldContext,
          );
           if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, dialogueClip);
@@ -544,7 +661,15 @@ export function assemble(
         reservedCandidateOwner,
       );
       const transitionClip = pickBest(
-        transitionCandidates,
+        excludeAssetsUsedInEarlierBeats(
+          excludeCandidatesOverlappingSelectedRanges(
+            transitionCandidates,
+            [...v1Clips, ...v2Clips],
+            beat.beat_id,
+          ),
+          assetsUsedInEarlierBeats,
+          beat.allow_revisit,
+        ),
         usedClips,
         prevV2Asset,
         params.adjacency_penalty,
@@ -559,6 +684,7 @@ export function assemble(
           getRunnersUp(transitionCandidates, transitionClip, usedClips),
          usPerFrame,
           options?.stillDurationPolicy,
+          options?.stillHoldContext,
        );
         if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
           registerClipCluster(clusterByClipId, clip, transitionClip);
@@ -573,6 +699,14 @@ export function assemble(
     const craftMaxEndFrame = maxDurationFrames != null
       ? Math.min(currentFrame + beatBudget, maxDurationFrames)
       : undefined;
+    // Freeze this beat's video assets before moving on, so later beats can
+    // select a legal fallback instead of failing the continuity gate later.
+    for (const clip of v1Clips) {
+      if (clip.beat_id === beat.beat_id) assetsUsedInEarlierBeats.add(clip.asset_id);
+    }
+    for (const clip of v2Clips) {
+      if (clip.beat_id === beat.beat_id) assetsUsedInEarlierBeats.add(clip.asset_id);
+    }
     applyBeatCraftTiming(v1Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
     applyBeatCraftTiming(v2Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
     applyBeatCraftTiming(a1Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
@@ -604,7 +738,8 @@ export function assemble(
   // ── Guide mode: global fill pass ────────────────────────────────────
   // Place any remaining unused candidates that appear in the ranked table.
   // This ensures material coverage (important for keepsake profiles).
-  if (isGuide && layout === "single" && !exactCandidatePlanOrder) {
+  const videoAssetsByBeat = collectVideoAssetsByBeat(v1Clips, v2Clips);
+  if (isGuide && layout === "single" && !exactCandidatePlanOrder && !options?.creatorShortVoBroll) {
     const fillResult = fillSingleLayoutGuideBeats(
       v1Clips,
       normalized.beats,
@@ -617,6 +752,8 @@ export function assemble(
       usPerFrame,
       maxDurationFrames,
       options?.stillDurationPolicy,
+      options?.stillHoldContext,
+      videoAssetsByBeat,
     );
     durationCapDroppedClips += fillResult.droppedClips;
     clipCounter = fillResult.clipCounter;
@@ -637,10 +774,33 @@ export function assemble(
       return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
     });
 
-    const lastBeatId = normalized.beats[normalized.beats.length - 1]?.beat_id ?? "fill";
+    const lastBeat = normalized.beats[normalized.beats.length - 1];
+    const lastBeatId = lastBeat?.beat_id ?? "fill";
 
     for (const sc of unused) {
       if (maxDurationFrames != null && currentFrame >= maxDurationFrames) break;
+      const audioRole = sc.candidate.audio_role ?? inferAudioRole(sc.candidate);
+      const targetTrack = isAudioOnlyCandidate(sc.candidate)
+        ? audioRole === "dialogue" ? a1Clips : audioRole === "music" ? a2Clips : a3Clips
+        : sc.candidate.role === "dialogue" && candidateSupportsAuthoredDialogueAudio(sc.candidate)
+          ? a1Clips
+          : v2Clips;
+      // Continuity applies to video placements only; audio reuse is not part
+      // of the non-adjacent same-asset video invariant.
+      if (targetTrack === v2Clips && lastBeat && videoAssetsByBeat.size > 0) {
+        let usedInOtherBeat = false;
+        if (!assetAllowedByAllowRevisit(sc.candidate.asset_id, lastBeat.allow_revisit)) {
+          for (const [beatId, assets] of videoAssetsByBeat) {
+            if (beatId !== lastBeatId && assets.has(sc.candidate.asset_id)) {
+              usedInOtherBeat = true;
+              break;
+            }
+          }
+        }
+        if (usedInOtherBeat || overlapsSelectedSameAssetRange(sc.candidate, [...v1Clips, ...v2Clips], lastBeatId)) {
+          continue;
+        }
+      }
       const availableFrames = maxDurationFrames == null
         ? Number.MAX_SAFE_INTEGER
         : maxDurationFrames - currentFrame;
@@ -653,15 +813,10 @@ export function assemble(
         { segment_ids: [], candidate_refs: [] },
         usPerFrame,
         options?.stillDurationPolicy,
+        options?.stillHoldContext,
       );
 
       usedClips.add(clipUsageKey(sc.candidate));
-      const audioRole = sc.candidate.audio_role ?? inferAudioRole(sc.candidate);
-      const targetTrack = isAudioOnlyCandidate(sc.candidate)
-        ? audioRole === "dialogue" ? a1Clips : audioRole === "music" ? a2Clips : a3Clips
-        : sc.candidate.role === "dialogue" && candidateSupportsAuthoredDialogueAudio(sc.candidate)
-          ? a1Clips
-          : v2Clips;
       if (placeClipWithinCap(targetTrack, clip, maxDurationFrames)) {
         registerClipCluster(clusterByClipId, clip, sc);
         currentFrame += clip.timeline_duration_frames;
@@ -670,7 +825,6 @@ export function assemble(
       }
     }
   }
-
   if (clusterContinuity) {
     reorderClusterContinuity(v1Clips, clusterByClipId, options?.beatOrder, {
       trackId: "V1",
@@ -699,7 +853,7 @@ export function assemble(
     durationCapDroppedClips += dropClipsBeyondCap(a3Clips, maxDurationFrames);
   }
 
-  if (options?.audioPolicy !== "bgm_only") {
+  if (options?.audioPolicy !== "bgm_only" && options?.audioPolicy !== "music_master") {
     addOriginalAudioForVideoClips(
       [...v1Clips, ...v2Clips],
       a1Clips,
@@ -709,7 +863,7 @@ export function assemble(
     );
   }
 
-  if (options?.bgmAssetId && options.audioPolicy !== "original_only") {
+  if (options?.bgmAssetId && options.audioPolicy !== "original_only" && options.audioPolicy !== "music_master") {
     const totalProgramFrames = Math.max(
       0,
       ...(
@@ -773,6 +927,8 @@ function fillSingleLayoutGuideBeats(
   usPerFrame: number,
   maxDurationFrames?: number,
   stillDurationPolicy?: StillDurationPolicy,
+  stillHoldContext?: StillHoldResolutionContext,
+  videoAssetsByBeat: Map<string, Set<string>> = new Map(),
 ): { droppedClips: number; clipCounter: number } {
   const unused = buildUnusedCandidatePool(rankedTable, usedClips);
   if (unused.length === 0) return { droppedClips: 0, clipCounter: startClipCounter - 1 };
@@ -793,7 +949,9 @@ function fillSingleLayoutGuideBeats(
     }
 
     while (cursor < beatEnd && unused.length > 0) {
-      const nextIndex = findBestFillCandidateIndex(unused, beat.beat_id);
+      // Do not remove an ineligible candidate: a later beat may legally use it.
+      const nextIndex = findEligibleFillCandidateIndex(unused, beat, videoAssetsByBeat, v1Clips);
+      if (nextIndex < 0) break;
       const [sc] = unused.splice(nextIndex, 1);
       const availableFrames = beatEnd - cursor;
       const clip = makeClip(
@@ -805,10 +963,14 @@ function fillSingleLayoutGuideBeats(
         { segment_ids: [], candidate_refs: [] },
         usPerFrame,
         stillDurationPolicy,
+        stillHoldContext,
       );
       usedClips.add(clipUsageKey(sc.candidate));
       if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
         registerClipCluster(clusterByClipId, clip, sc);
+        const assetsHere = videoAssetsByBeat.get(beat.beat_id) ?? new Set<string>();
+        assetsHere.add(sc.candidate.asset_id);
+        videoAssetsByBeat.set(beat.beat_id, assetsHere);
         cursor += clip.timeline_duration_frames;
       } else {
         droppedClips += 1;
@@ -847,9 +1009,33 @@ function buildUnusedCandidatePool(
   });
 }
 
-function findBestFillCandidateIndex(unused: ScoredCandidate[], beatId: string): number {
-  const beatLocalIndex = unused.findIndex((sc) => sc.beat_id === beatId);
-  return beatLocalIndex >= 0 ? beatLocalIndex : 0;
+function findEligibleFillCandidateIndex(
+  unused: ScoredCandidate[],
+  beat: NormalizedData["beats"][number],
+  videoAssetsByBeat: Map<string, Set<string>>,
+  placedVideoClips: TimelineClip[],
+): number {
+  let fallbackIndex = -1;
+  for (let i = 0; i < unused.length; i += 1) {
+    const sc = unused[i];
+    const assetId = sc.candidate.asset_id;
+    if (overlapsSelectedSameAssetRange(sc.candidate, placedVideoClips, beat.beat_id)) {
+      continue;
+    }
+    if (videoAssetsByBeat.size > 0 && !assetAllowedByAllowRevisit(assetId, beat.allow_revisit)) {
+      let usedInOtherBeat = false;
+      for (const [beatId, assets] of videoAssetsByBeat) {
+        if (beatId !== beat.beat_id && assets.has(assetId)) {
+          usedInOtherBeat = true;
+          break;
+        }
+      }
+      if (usedInOtherBeat) continue;
+    }
+    if (sc.beat_id === beat.beat_id) return i;
+    if (fallbackIndex < 0) fallbackIndex = i;
+  }
+  return fallbackIndex;
 }
 
 function buildBeatStartFrameMap(beats: NormalizedData["beats"], markers: Marker[]): Map<string, number> {
@@ -1586,6 +1772,92 @@ function getV1FirstCandidates(
   ].filter((candidate) => candidateSupportsVisual(candidate.candidate)).sort(compareV1FirstCandidates);
 }
 
+const CREATOR_BROLL_TAG = /(?:run|running|walk|walking|road|trail|landscape|scenery|feet|foot|shoe|stride|motion|走|歩|景色|風景|足元|シューズ|移動)/i;
+
+function isCreatorBrollCandidate(candidate: Candidate): boolean {
+  return candidateSupportsVisual(candidate) &&
+    (candidate.role === "support" || candidate.role === "texture");
+}
+
+function creatorBrollPriority(candidate: ScoredCandidate): number {
+  const source = candidate.candidate;
+  const tags = source.editorial_signals?.visual_tags ?? [];
+  const tagBonus = tags.some((tag) => CREATOR_BROLL_TAG.test(tag)) ? 2 : 0;
+  const motion = source.editorial_signals?.motion_energy_score ?? source.peak_signals?.motion ?? 0;
+  const visualPeak = source.trim_hint?.peak_type === "visual_peak" ||
+    source.editorial_signals?.peak_type === "visual_peak" ? 1 : 0;
+  return tagBonus + motion + visualPeak;
+}
+
+function creatorShortVisualCandidates(
+  byRole: Map<string, ScoredCandidate[]>,
+  beatIndex: number,
+  beatCount: number,
+  preset: NonNullable<AssembleOptions["creatorShortVoBroll"]>,
+  usPerFrame: number,
+  kickoffBeatIndex: number | null,
+): ScoredCandidate[] {
+  const defaults = getV1FirstCandidates(byRole);
+  if (!creatorShortBrollAllowed(beatIndex, kickoffBeatIndex)) {
+    const nonBroll = defaults.filter((candidate) => !isCreatorBrollCandidate(candidate.candidate));
+    if (beatIndex === kickoffBeatIndex && preset.kickoffAnchor) {
+      return nonBroll.sort((left, right) => {
+        const leftAnchor = getCandidateRef(left.candidate) === preset.kickoffAnchor!.candidateRef;
+        const rightAnchor = getCandidateRef(right.candidate) === preset.kickoffAnchor!.candidateRef;
+        return leftAnchor === rightAnchor ? 0 : leftAnchor ? -1 : 1;
+      });
+    }
+    return nonBroll;
+  }
+  const isBookend = beatIndex === 0 || beatIndex === beatCount - 1;
+  if (isBookend) {
+    const faceTalk = (byRole.get("dialogue") ?? []).filter((candidate) =>
+      candidate.candidate.editorial_signals?.face_detected !== false
+    );
+    return faceTalk.length > 0 ? faceTalk : defaults;
+  }
+
+  const minimumSourceUs = preset.minInsertFrames * usPerFrame;
+  const broll = [
+    ...(byRole.get("support") ?? []),
+    ...(byRole.get("texture") ?? []),
+  ].filter((candidate) =>
+    isCreatorBrollCandidate(candidate.candidate) &&
+    candidate.candidate.src_out_us - candidate.candidate.src_in_us >= minimumSourceUs
+  ).map((candidate) => ({
+    ...candidate,
+    score: candidate.score + creatorBrollPriority(candidate) * 10,
+  })).sort((left, right) =>
+    creatorBrollPriority(right) - creatorBrollPriority(left) ||
+    right.score - left.score ||
+    left.candidate.segment_id.localeCompare(right.candidate.segment_id)
+  );
+  return broll.length > 0 ? broll : defaults;
+}
+
+function creatorShortBrollAllowed(
+  beatIndex: number,
+  kickoffBeatIndex: number | null,
+): boolean {
+  return kickoffBeatIndex === null || beatIndex > kickoffBeatIndex;
+}
+
+function findCreatorKickoffBeatIndex(
+  normalized: NormalizedData,
+  rankedTable: RankedCandidateTable,
+  kickoffCandidateRef: string,
+): number {
+  const index = normalized.beats.findIndex((beat) =>
+    (rankedTable.get(beat.beat_id) ?? []).some((scored) =>
+      getCandidateRef(scored.candidate) === kickoffCandidateRef ||
+      scored.candidate.segment_id === kickoffCandidateRef
+    )
+  );
+  // A detected declaration that cannot be mapped to an eligible beat must not
+  // accidentally authorize early B-roll. Conservatively keep talk picture.
+  return index >= 0 ? index : normalized.beats.length - 1;
+}
+
 function orderCandidatesByCandidatePlan(
   candidates: ScoredCandidate[],
   plan: NormalizedData["beats"][number]["candidate_plan"],
@@ -1615,6 +1887,80 @@ function compareV1FirstCandidates(a: ScoredCandidate, b: ScoredCandidate): numbe
   const scoreDiff = b.score - a.score;
   if (scoreDiff !== 0) return scoreDiff;
   return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
+}
+
+/** Mirrors the continuity validator's per-beat allow_revisit semantics. */
+function assetAllowedByAllowRevisit(
+  assetId: string,
+  allowRevisit: NormalizedData["beats"][number]["allow_revisit"],
+): boolean {
+  if (!allowRevisit) return false;
+  if (allowRevisit === true) return true;
+  if (allowRevisit.asset_ids) {
+    return allowRevisit.asset_ids.some((id) => id.trim() === assetId);
+  }
+  return true;
+}
+
+function excludeAssetsUsedInEarlierBeats(
+  candidates: ScoredCandidate[],
+  usedAssets: Set<string>,
+  allowRevisit: NormalizedData["beats"][number]["allow_revisit"],
+): ScoredCandidate[] {
+  if (usedAssets.size === 0) return candidates;
+  return candidates.filter((sc) =>
+    !usedAssets.has(sc.candidate.asset_id) ||
+    assetAllowedByAllowRevisit(sc.candidate.asset_id, allowRevisit));
+}
+
+/** Positive overlap is blocked; source ranges that merely touch stay valid. */
+function overlapsSelectedSameAssetRange(
+  candidate: Candidate,
+  placedVideoClips: TimelineClip[],
+  beatId: string,
+): boolean {
+  return placedVideoClips.some((clip) =>
+    clip.beat_id === beatId &&
+    clip.asset_id === candidate.asset_id &&
+    Math.max(clip.src_in_us, candidate.src_in_us) <
+      Math.min(clip.src_out_us, candidate.src_out_us));
+}
+
+function excludeCandidatesOverlappingSelectedRanges(
+  candidates: ScoredCandidate[],
+  placedVideoClips: TimelineClip[],
+  beatId: string,
+): ScoredCandidate[] {
+  const beatClips = placedVideoClips.filter((clip) => clip.beat_id === beatId);
+  if (beatClips.length === 0) return candidates;
+  return candidates.filter((sc) => !overlapsSelectedSameAssetRange(sc.candidate, beatClips, beatId));
+}
+
+function isBlockedAutoVideoCandidate(
+  candidate: Candidate,
+  allowRevisit: NormalizedData["beats"][number]["allow_revisit"],
+  assetsUsedInOtherBeats: Set<string>,
+  placedVideoClips: TimelineClip[],
+  beatId: string,
+): boolean {
+  if (assetsUsedInOtherBeats.has(candidate.asset_id) &&
+      !assetAllowedByAllowRevisit(candidate.asset_id, allowRevisit)) {
+    return true;
+  }
+  return overlapsSelectedSameAssetRange(candidate, placedVideoClips, beatId);
+}
+
+function collectVideoAssetsByBeat(
+  v1Clips: TimelineClip[],
+  v2Clips: TimelineClip[],
+): Map<string, Set<string>> {
+  const assetsByBeat = new Map<string, Set<string>>();
+  for (const clip of [...v1Clips, ...v2Clips]) {
+    const assets = assetsByBeat.get(clip.beat_id) ?? new Set<string>();
+    assets.add(clip.asset_id);
+    assetsByBeat.set(clip.beat_id, assets);
+  }
+  return assetsByBeat;
 }
 
 /**
@@ -1794,13 +2140,27 @@ function makeClip(
   fallbacks: { segment_ids: string[]; candidate_refs: string[] },
   usPerFrame: number,
   stillDurationPolicy?: StillDurationPolicy,
+  stillHoldContext?: StillHoldResolutionContext,
 ): TimelineClip {
   const c = scored.candidate;
   if (c.media_kind === "image") {
     if (!stillDurationPolicy) throw new Error("still_image_duration_policy_missing");
-    const stillImage = resolveStillImageHold(c, stillDurationPolicy, beatDurationFrames);
+    const clipId = `CLP_${String(clipNum).padStart(4, "0")}`;
+    const resolvedStillImage = resolveStillImageHold(
+      c,
+      stillDurationPolicy,
+      beatDurationFrames,
+      stillHoldContext,
+      timelineInFrame,
+    );
+    const stillImage = {
+      ...resolvedStillImage,
+      source_still_id: c.still_image?.source_still_id ?? c.asset_id,
+      still_instance_id: c.still_image?.still_instance_id ?? clipId,
+      reuse: c.still_image?.reuse ?? "unique" as const,
+    };
     return {
-      clip_id: `CLP_${String(clipNum).padStart(4, "0")}`,
+      clip_id: clipId,
       segment_id: c.segment_id,
       asset_id: c.asset_id,
       src_in_us: c.src_in_us,

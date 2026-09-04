@@ -1,19 +1,24 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import { validateAgainstSchema } from "../runtime/commands/shared.js";
 import {
+  appendCaptionVisualTreatmentOperations,
   applyCaptionReview,
   approveCaptionReview,
   captionReviewUndoDepth,
   editCaptionReview,
   initializeCaptionReviewPatch,
+  initializeCaptionVisualTreatmentPatch,
   inspectCaptionReviewOperationalState,
+  inspectCaptionVisualTreatment,
   mergeCaptionReview,
   proposeCaptionGlossaryTerm,
   queueCaptionReview,
   prepareCaptionReviewDraft,
+  previewCaptionVisualTreatment,
   splitCaptionReview,
   undoCaptionReview,
   validateCaptionReview,
@@ -23,6 +28,8 @@ import {
   computeCaptionDraftHash,
   computeCaptionTextHash,
 } from "../runtime/caption/review-core.js";
+import { captionApprovalBindingHash } from "../runtime/caption/visual-treatment.js";
+import { computeSha256 } from "../runtime/packaging/manifest.js";
 import {
   parseCaptionReviewArgs,
   runCaptionReviewCli,
@@ -45,6 +52,407 @@ describe("caption review CLI workflow", () => {
     expect(output.join("\n")).toContain("verify-safe --project <dir>");
     expect(output.join("\n")).toContain("retime --project <dir> --reviewer <name>");
     expect(output.join("\n")).toContain("approve --project <dir>");
+    expect(output.join("\n")).toContain("visual-init --project <dir>");
+    expect(output.join("\n")).toContain("visual-status --project <dir>");
+    expect(output.join("\n")).toContain("visual-approve --project <dir>");
+  });
+
+  it("runs visual init/status/apply/undo/approve through the existing human CLI", () => {
+    const projectDir = createProject(["visual CLI の字幕"]);
+    const policyPath = path.join(projectDir, "04_plan/typography_policy.json");
+    fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+    fs.copyFileSync(path.resolve("tests/fixtures/rfa-caption/typography-policy.json"), policyPath);
+    initializeCaptionReviewPatch(projectDir, "human-editor");
+    const item = queueCaptionReview(projectDir)[0];
+    editCaptionReview(projectDir, { captionID: item.caption_id, state: "verified", expectedTextHash: item.text_hash });
+    approveCaptionReview(projectDir, "human-editor");
+
+    const run = (command: string, ...args: string[]) => {
+      const output: string[] = [];
+      expect(runCaptionReviewCli(["node", "caption-review.ts", command, "--project", projectDir, ...args], (message) => output.push(message))).toBe(0);
+      return JSON.parse(output.join("\n")) as Record<string, unknown>;
+    };
+    expect(run("visual-init", "--reviewer", "human-editor", "--typography-policy", policyPath)).toMatchObject({ command: "visual-init", operation_count: 0 });
+    expect(run("visual-status", "--typography-policy", policyPath)).toMatchObject({ command: "visual-status", status: "ready" });
+    expect(run("visual-apply", "--reviewer", "human-editor", "--typography-policy", policyPath)).toMatchObject({ command: "visual-apply", status: "ready" });
+    appendCaptionVisualTreatmentOperations(projectDir, "human-editor", [{
+      caption_id: "SC_001", stable_root_id: "SC_001", anchor: "center", style_ref: "sns-vertical-outline", hierarchy_role: "keyword", emphasis_ref: "emphasis-word", fallback: "registered_fallback",
+    }], { typographyPolicyPath: policyPath });
+    expect(run("visual-undo", "--reviewer", "human-editor", "--typography-policy", policyPath)).toMatchObject({ command: "visual-undo", removed_operation_count: 1 });
+    const current = run("visual-status", "--typography-policy", policyPath);
+    const currentPatchHash = String(current.patch_hash);
+    const candidate = run("visual-preview", "--reviewer", "human-editor", "--typography-policy", policyPath, "--expected-patch-hash", currentPatchHash);
+    expect(candidate).toMatchObject({ command: "visual-preview", status: "ready", expected_patch_hash: currentPatchHash });
+    expect(run("visual-approve", "--reviewer", "human-editor", "--typography-policy", policyPath, "--expected-patch-hash", currentPatchHash, "--preapproval-receipt", String(candidate.receipt_path))).toMatchObject({ command: "visual-approve", status: "ready" });
+    expect(JSON.parse(fs.readFileSync(path.join(projectDir, "07_package/caption_approval.json"), "utf8")).approval.visual_treatment_context.accessibility).toEqual({ reduced_motion: false, high_contrast: false, audio_off: false, small_screen: false });
+  });
+
+  it("authors and renders a canonical visual-only preview without changing approval or text/timing", async () => {
+    const projectDir = createProject(["承認済みの字幕"], true);
+    const policyPath = path.join(projectDir, "04_plan/typography_policy.json");
+    fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+    fs.copyFileSync(path.resolve("tests/fixtures/rfa-caption/typography-policy.json"), policyPath);
+    initializeCaptionReviewPatch(projectDir, "human-editor");
+    const item = queueCaptionReview(projectDir)[0];
+    editCaptionReview(projectDir, { captionID: item.caption_id, state: "verified", expectedTextHash: item.text_hash });
+    approveCaptionReview(projectDir, "human-editor");
+    const approvalPath = path.join(projectDir, "07_package/caption_approval.json");
+    const approvalBefore = fs.readFileSync(approvalPath, "utf8");
+    const approvalHash = captionApprovalBindingHash(JSON.parse(approvalBefore));
+    const operation = {
+      caption_id: "SC_001",
+      stable_root_id: "SC_001",
+      anchor: "bottom_center",
+      rect: { x: 0.1, y: 0.72, width: 0.8, height: 0.16 },
+      style_ref: "sns-vertical-outline",
+      reference_scale: 1.1,
+      hierarchy_role: "speech",
+      fallback: "registered_fallback",
+    };
+    const output: string[] = [];
+    expect(await runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-author-preview",
+      "--project", projectDir,
+      "--reviewer", "human-editor",
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify(operation),
+      "--expected-patch-hash", "absent",
+      "--expected-approval-hash", approvalHash,
+    ], (message) => output.push(message))).toBe(0);
+    const result = JSON.parse(output.join("\n")) as Record<string, unknown>;
+    expect(result).toMatchObject({
+      command: "visual-author-preview",
+      production_approval_unchanged: true,
+      approval_hash_before: approvalHash,
+      approval_hash_after: approvalHash,
+    });
+    expect(result.text_timing_hash_before).toBe(result.text_timing_hash_after);
+    expect(result.preview_output_path).not.toBe(result.input_path);
+    expect(result.preview_output_hash).not.toBe(result.input_hash);
+    expect(result.preview_output_content_type).toBe("video/mp4");
+    expect(result.preview_output_hash).toBe(computeSha256(String(result.preview_output_path)));
+    expect(fs.statSync(String(result.preview_output_path)).size).toBeGreaterThan(0);
+    expect(fs.readFileSync(approvalPath, "utf8")).toBe(approvalBefore);
+
+    const secondOutput: string[] = [];
+    expect(await runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-author-preview",
+      "--project", projectDir,
+      "--reviewer", "human-editor",
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify({ ...operation, reference_scale: 1.2 }),
+      "--expected-patch-hash", String(result.patch_hash),
+      "--expected-approval-hash", approvalHash,
+    ], (message) => secondOutput.push(message))).toBe(0);
+    const second = JSON.parse(secondOutput.join("\n")) as Record<string, unknown>;
+    expect(second.text_timing_hash_before).toBe(result.text_timing_hash_before);
+    expect(second.text_timing_hash_after).toBe(result.text_timing_hash_after);
+    expect(second.approval_hash_before).toBe(approvalHash);
+    expect(second.approval_hash_after).toBe(approvalHash);
+    expect(fs.readFileSync(approvalPath, "utf8")).toBe(approvalBefore);
+    await expect(runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-author-preview",
+      "--project", projectDir,
+      "--reviewer", "human-editor",
+      "--patch", path.join(projectDir, "../escaped-patch.json"),
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify(operation),
+      "--expected-patch-hash", String(second.patch_hash),
+      "--expected-approval-hash", approvalHash,
+    ])).rejects.toThrow(/project-contained/);
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "caption-review-symlink-"));
+    temporaryDirectories.push(outsideDir);
+    const symlinkPatch = path.join(projectDir, "07_package/symlink-patch.json");
+    fs.symlinkSync(path.join(outsideDir, "patch.json"), symlinkPatch);
+    await expect(runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-author-preview",
+      "--project", projectDir,
+      "--reviewer", "human-editor",
+      "--patch", symlinkPatch,
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify(operation),
+      "--expected-patch-hash", String(second.patch_hash),
+      "--expected-approval-hash", approvalHash,
+    ])).rejects.toThrow(/symlink/i);
+    await expect(runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-author-preview",
+      "--project", projectDir,
+      "--reviewer", "human-editor",
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify({ ...operation, unknown_field: true }),
+      "--expected-patch-hash", String(second.patch_hash),
+      "--expected-approval-hash", approvalHash,
+    ])).rejects.toThrow(/additional properties|validation failed/i);
+
+    await expect(runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-author-preview",
+      "--project", projectDir,
+      "--reviewer", "human-editor",
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify(operation),
+      "--expected-patch-hash", String(result.patch_hash),
+      "--expected-approval-hash", approvalHash,
+    ])).rejects.toThrow(/patch changed|expected=absent/i);
+
+    const preapprovalInputPath = String(second.input_path);
+    const preapprovalReceiptPath = String(second.receipt_path);
+    const previewOutputPath = String(second.preview_output_path);
+    const inputBytes = fs.readFileSync(preapprovalInputPath);
+    const receiptBytes = fs.readFileSync(preapprovalReceiptPath);
+    const previewBytes = fs.readFileSync(previewOutputPath);
+    const patchPath = String(second.patch_path);
+    const patchBytes = fs.readFileSync(patchPath);
+    const thirdArgs = [
+      "node", "caption-review.ts", "visual-author-preview",
+      "--project", projectDir,
+      "--reviewer", "human-editor",
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify({ ...operation, reference_scale: 1.3 }),
+      "--expected-patch-hash", String(second.patch_hash),
+      "--expected-approval-hash", approvalHash,
+    ];
+    const staleApprovalArgs = [...thirdArgs];
+    staleApprovalArgs[staleApprovalArgs.indexOf("--expected-approval-hash") + 1] = `sha256:${"0".repeat(64)}`;
+    await expect(runCaptionReviewCli(staleApprovalArgs)).rejects.toThrow(/caption approval changed/i);
+    expect(fs.readFileSync(patchPath)).toEqual(patchBytes);
+    fs.writeFileSync(preapprovalInputPath, JSON.stringify({ stale: true }));
+    await expect(runCaptionReviewCli(thirdArgs)).rejects.toThrow(/input.*stale|schema/i);
+    expect(fs.readFileSync(patchPath)).toEqual(patchBytes);
+    fs.writeFileSync(preapprovalInputPath, inputBytes);
+    fs.writeFileSync(preapprovalReceiptPath, JSON.stringify({ forged: true }));
+    await expect(runCaptionReviewCli(thirdArgs)).rejects.toThrow(/receipt.*schema|validation/i);
+    expect(fs.readFileSync(patchPath)).toEqual(patchBytes);
+    fs.writeFileSync(preapprovalReceiptPath, receiptBytes);
+    fs.writeFileSync(previewOutputPath, "forged-preview");
+    await expect(runCaptionReviewCli(thirdArgs)).rejects.toThrow(/preview bytes.*stale|forged/i);
+    expect(fs.readFileSync(patchPath)).toEqual(patchBytes);
+    fs.writeFileSync(previewOutputPath, previewBytes);
+    const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
+    timeline.sequence.name = "stale live timeline";
+    fs.writeFileSync(timelinePath, JSON.stringify(timeline));
+    await expect(runCaptionReviewCli(thirdArgs)).rejects.toThrow(/base_timeline_hash is stale/i);
+    expect(fs.readFileSync(patchPath)).toEqual(patchBytes);
+    expect(fs.readFileSync(approvalPath, "utf8")).toBe(approvalBefore);
+  }, 120_000);
+
+  it("accepts a stable visual operation and rejects an old Studio patch hash", () => {
+    const projectDir = createProject(["visual stale guard の字幕"]);
+    const policyPath = path.join(projectDir, "04_plan/typography_policy.json");
+    fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+    fs.copyFileSync(path.resolve("tests/fixtures/rfa-caption/typography-policy.json"), policyPath);
+    initializeCaptionReviewPatch(projectDir, "human-editor");
+    const item = queueCaptionReview(projectDir)[0];
+    editCaptionReview(projectDir, { captionID: item.caption_id, state: "verified", expectedTextHash: item.text_hash });
+    approveCaptionReview(projectDir, "human-editor");
+
+    const run = (command: string, ...args: string[]) => {
+      const output: string[] = [];
+      expect(runCaptionReviewCli(["node", "caption-review.ts", command, "--project", projectDir, ...args], (message) => output.push(message))).toBe(0);
+      return JSON.parse(output.join("\n")) as Record<string, any>;
+    };
+    run("visual-init", "--reviewer", "human-editor", "--typography-policy", policyPath);
+    const initial = run("visual-status", "--typography-policy", policyPath);
+    const operation = {
+      caption_id: "SC_001",
+      stable_root_id: "SC_001",
+      anchor: "bottom_center",
+      rect: { x: 0.1, y: 0.76, width: 0.8, height: 0.12 },
+      style_ref: "sns-vertical-outline",
+      reference_scale: 1.1,
+      hierarchy_role: "speech",
+      fallback: "registered_fallback",
+    } as const;
+    const applied = run(
+      "visual-apply",
+      "--reviewer", "human-editor",
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify(operation),
+      "--expected-patch-hash", initial.patch_hash,
+    );
+    expect(applied.input.caption_identity[0].requested_treatment).toMatchObject(operation);
+
+    const current = inspectCaptionVisualTreatment(projectDir, { typographyPolicyPath: policyPath });
+    appendCaptionVisualTreatmentOperations(projectDir, "human-editor", [{
+      ...operation,
+      anchor: "center",
+    }], { typographyPolicyPath: policyPath, expectedPatchHash: current.patchHash });
+    expect(() => runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-apply", "--project", projectDir,
+      "--reviewer", "human-editor", "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify(operation),
+      "--expected-patch-hash", applied.patch_hash,
+    ])).toThrow(/changed since it was loaded/);
+  });
+
+  it("rejects concurrent visual approval without writing the approval artifact", () => {
+    const projectDir = createProject(["visual approval stale guard"]);
+    const policyPath = path.join(projectDir, "04_plan/typography_policy.json");
+    fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+    fs.copyFileSync(path.resolve("tests/fixtures/rfa-caption/typography-policy.json"), policyPath);
+    initializeCaptionReviewPatch(projectDir, "human-editor");
+    const item = queueCaptionReview(projectDir)[0];
+    editCaptionReview(projectDir, { captionID: item.caption_id, state: "verified", expectedTextHash: item.text_hash });
+    approveCaptionReview(projectDir, "human-editor");
+
+    const run = (command: string, ...args: string[]) => {
+      const output: string[] = [];
+      expect(runCaptionReviewCli(["node", "caption-review.ts", command, "--project", projectDir, ...args], (message) => output.push(message))).toBe(0);
+      return JSON.parse(output.join("\n")) as Record<string, any>;
+    };
+    run("visual-init", "--reviewer", "human-editor", "--typography-policy", policyPath);
+    const initial = run("visual-status", "--typography-policy", policyPath);
+    const operation = {
+      caption_id: "SC_001",
+      stable_root_id: "SC_001",
+      anchor: "bottom_center",
+      rect: { x: 0.1, y: 0.76, width: 0.8, height: 0.12 },
+      style_ref: "sns-vertical-outline",
+      hierarchy_role: "speech",
+      fallback: "registered_fallback",
+    } as const;
+    const applied = run(
+      "visual-apply",
+      "--reviewer", "human-editor",
+      "--typography-policy", policyPath,
+      "--visual-operation-json", JSON.stringify(operation),
+      "--expected-patch-hash", initial.patch_hash,
+    );
+    const candidate = run("visual-preview", "--reviewer", "human-editor", "--typography-policy", policyPath, "--expected-patch-hash", String(applied.patch_hash));
+    const approvalPath = path.join(projectDir, "07_package/caption_approval.json");
+    const approvalBefore = fs.readFileSync(approvalPath, "utf8");
+    const current = inspectCaptionVisualTreatment(projectDir, { typographyPolicyPath: policyPath });
+    appendCaptionVisualTreatmentOperations(projectDir, "human-editor", [{
+      ...operation,
+      anchor: "center",
+    }], { typographyPolicyPath: policyPath, expectedPatchHash: current.patchHash });
+
+    expect(() => runCaptionReviewCli([
+      "node", "caption-review.ts", "visual-approve", "--project", projectDir,
+      "--reviewer", "human-editor", "--typography-policy", policyPath,
+      "--expected-patch-hash", String(candidate.patch_hash),
+      "--preapproval-receipt", String(candidate.receipt_path),
+    ])).toThrow(/changed since it was loaded/);
+    expect(fs.readFileSync(approvalPath, "utf8")).toBe(approvalBefore);
+  });
+
+  it("requires expected hash and exact preapproval receipt at the CLI approval boundary", () => {
+    const prepare = () => {
+      const projectDir = createProject(["visual approval evidence required"]);
+      const policyPath = path.join(projectDir, "04_plan/typography_policy.json");
+      fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+      fs.copyFileSync(path.resolve("tests/fixtures/rfa-caption/typography-policy.json"), policyPath);
+      initializeCaptionReviewPatch(projectDir, "human-editor");
+      const item = queueCaptionReview(projectDir)[0];
+      editCaptionReview(projectDir, { captionID: item.caption_id, state: "verified", expectedTextHash: item.text_hash });
+      approveCaptionReview(projectDir, "human-editor");
+      const run = (command: string, ...args: string[]) => {
+        const output: string[] = [];
+        expect(runCaptionReviewCli(["node", "caption-review.ts", command, "--project", projectDir, ...args], (message) => output.push(message))).toBe(0);
+        return JSON.parse(output.join("\n")) as Record<string, any>;
+      };
+      run("visual-init", "--reviewer", "human-editor", "--typography-policy", policyPath);
+      const current = run("visual-status", "--typography-policy", policyPath);
+      const candidate = run("visual-preview", "--reviewer", "human-editor", "--typography-policy", policyPath, "--expected-patch-hash", current.patch_hash);
+      return { projectDir, policyPath, current, candidate, run, approvalPath: path.join(projectDir, "07_package/caption_approval.json") };
+    };
+    const rejectWithoutWrite = (fixture: ReturnType<typeof prepare>, args: string[], message: RegExp) => {
+      const before = fs.readFileSync(fixture.approvalPath, "utf8");
+      expect(() => runCaptionReviewCli(["node", "caption-review.ts", "visual-approve", "--project", fixture.projectDir, "--reviewer", "human-editor", "--typography-policy", fixture.policyPath, ...args])).toThrow(message);
+      expect(fs.readFileSync(fixture.approvalPath, "utf8")).toBe(before);
+    };
+
+    const missingExpected = prepare();
+    rejectWithoutWrite(missingExpected, ["--preapproval-receipt", String(missingExpected.candidate.receipt_path)], /expected-patch-hash/);
+
+    const missingReceipt = prepare();
+    rejectWithoutWrite(missingReceipt, ["--expected-patch-hash", String(missingReceipt.current.patch_hash)], /preapproval-receipt/);
+
+    const staleHash = prepare();
+    const staleCurrent = inspectCaptionVisualTreatment(staleHash.projectDir, { typographyPolicyPath: staleHash.policyPath });
+    appendCaptionVisualTreatmentOperations(staleHash.projectDir, "human-editor", [{
+      caption_id: "SC_001", stable_root_id: "SC_001", anchor: "center", style_ref: "sns-vertical-outline", fallback: "registered_fallback",
+    }], { typographyPolicyPath: staleHash.policyPath, expectedPatchHash: staleCurrent.patchHash });
+    rejectWithoutWrite(staleHash, ["--expected-patch-hash", String(staleHash.candidate.patch_hash), "--preapproval-receipt", String(staleHash.candidate.receipt_path)], /changed since it was loaded/);
+
+    const mismatchedReceipt = prepare();
+    const receipt = JSON.parse(fs.readFileSync(String(mismatchedReceipt.candidate.receipt_path), "utf8")) as Record<string, unknown>;
+    receipt.input_hash = `sha256:${"0".repeat(64)}`;
+    fs.writeFileSync(String(mismatchedReceipt.candidate.receipt_path), `${JSON.stringify(receipt, null, 2)}\n`);
+    rejectWithoutWrite(mismatchedReceipt, ["--expected-patch-hash", String(mismatchedReceipt.current.patch_hash), "--preapproval-receipt", String(mismatchedReceipt.candidate.receipt_path)], /receipt/);
+
+    const valid = prepare();
+    const beforeValid = fs.readFileSync(valid.approvalPath, "utf8");
+    expect(valid.run("visual-approve", "--reviewer", "human-editor", "--typography-policy", valid.policyPath, "--expected-patch-hash", String(valid.current.patch_hash), "--preapproval-receipt", String(valid.candidate.receipt_path))).toMatchObject({ command: "visual-approve", status: "ready" });
+    expect(fs.readFileSync(valid.approvalPath, "utf8")).not.toBe(beforeValid);
+  });
+
+  it("validates integrated visual approval before approveCaptionReview writes its approval", () => {
+    const prepare = () => {
+      const projectDir = createProject(["integrated visual approval"]);
+      const policyPath = path.join(projectDir, "04_plan/typography_policy.json");
+      fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+      fs.copyFileSync(path.resolve("tests/fixtures/rfa-caption/typography-policy.json"), policyPath);
+      initializeCaptionReviewPatch(projectDir, "human-editor");
+      const item = queueCaptionReview(projectDir)[0];
+      editCaptionReview(projectDir, { captionID: item.caption_id, state: "verified", expectedTextHash: item.text_hash });
+      const approvedAt = "2026-08-21T01:00:00.000Z";
+      approveCaptionReview(projectDir, "human-editor", { approvedAt });
+      initializeCaptionVisualTreatmentPatch(projectDir, "human-editor", { typographyPolicyPath: policyPath });
+      appendCaptionVisualTreatmentOperations(projectDir, "human-editor", [{
+        caption_id: "SC_001", stable_root_id: "SC_001", anchor: "center", style_ref: "sns-vertical-outline", fallback: "registered_fallback",
+      }], { typographyPolicyPath: policyPath });
+      const current = inspectCaptionVisualTreatment(projectDir, { typographyPolicyPath: policyPath });
+      const candidate = previewCaptionVisualTreatment(projectDir, "human-editor", { typographyPolicyPath: policyPath, expectedPatchHash: current.patchHash });
+      return { projectDir, policyPath, approvedAt, current, candidate, approvalPath: path.join(projectDir, "07_package/caption_approval.json") };
+    };
+    const unchanged = (fixture: ReturnType<typeof prepare>, options: Parameters<typeof approveCaptionReview>[2], message: RegExp) => {
+      const before = fs.readFileSync(fixture.approvalPath, "utf8");
+      expect(() => approveCaptionReview(fixture.projectDir, "human-editor", options)).toThrow(message);
+      expect(fs.readFileSync(fixture.approvalPath, "utf8")).toBe(before);
+    };
+
+    const missingReceipt = prepare();
+    unchanged(missingReceipt, {
+      approvedAt: missingReceipt.approvedAt,
+      visualTreatment: { typographyPolicyPath: missingReceipt.policyPath, expectedPatchHash: missingReceipt.current.patchHash } as never,
+    }, /preapprovalReceiptPath/);
+
+    const staleHash = prepare();
+    unchanged(staleHash, {
+      approvedAt: staleHash.approvedAt,
+      visualTreatment: {
+        typographyPolicyPath: staleHash.policyPath,
+        expectedPatchHash: `sha256:${"0".repeat(64)}`,
+        preapprovalReceiptPath: staleHash.candidate.receiptPath,
+      },
+    }, /changed since it was loaded/);
+
+    const mismatchedReceipt = prepare();
+    const receipt = JSON.parse(fs.readFileSync(mismatchedReceipt.candidate.receiptPath, "utf8")) as Record<string, unknown>;
+    receipt.input_hash = `sha256:${"0".repeat(64)}`;
+    fs.writeFileSync(mismatchedReceipt.candidate.receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+    unchanged(mismatchedReceipt, {
+      approvedAt: mismatchedReceipt.approvedAt,
+      visualTreatment: {
+        typographyPolicyPath: mismatchedReceipt.policyPath,
+        expectedPatchHash: mismatchedReceipt.current.patchHash,
+        preapprovalReceiptPath: mismatchedReceipt.candidate.receiptPath,
+      },
+    }, /receipt/);
+
+    const valid = prepare();
+    const beforeValid = fs.readFileSync(valid.approvalPath, "utf8");
+    const approved = approveCaptionReview(valid.projectDir, "human-editor", {
+      approvedAt: valid.approvedAt,
+      visualTreatment: {
+        typographyPolicyPath: valid.policyPath,
+        expectedPatchHash: valid.current.patchHash,
+        preapprovalReceiptPath: valid.candidate.receiptPath,
+      },
+    });
+    expect(approved.visualTreatment).toBeDefined();
+    expect(fs.readFileSync(valid.approvalPath, "utf8")).not.toBe(beforeValid);
   });
 
   it("initializes a hash-bound patch without overwriting human work", () => {
@@ -147,6 +555,7 @@ describe("caption review CLI workflow", () => {
     const projectDir = createProject(["保全される字幕です"]);
     const draftPath = path.join(projectDir, "07_package/caption_draft.json");
     const draft = JSON.parse(fs.readFileSync(draftPath, "utf8"));
+    fs.writeFileSync(path.join(projectDir, "STYLE.md"), "# Preserved caption style\n");
     initializeCaptionReviewPatch(projectDir, "editor");
     const patchPath = path.join(projectDir, "07_package/caption_review_patch.json");
     const patchBefore = fs.readFileSync(patchPath, "utf8");
@@ -158,6 +567,10 @@ describe("caption review CLI workflow", () => {
       recoveryAction: { code: "prepare_caption_draft", safe_to_run: true },
     });
     const recovered = prepareCaptionReviewDraft(projectDir, (stagingDir) => {
+      expect(fs.existsSync(path.join(path.dirname(stagingDir), "schemas"))).toBe(true);
+      expect(fs.readFileSync(path.join(stagingDir, "STYLE.md"), "utf8")).toBe(
+        "# Preserved caption style\n",
+      );
       fs.writeFileSync(
         path.join(stagingDir, "07_package/caption_draft.json"),
         JSON.stringify(draft, null, 2),
@@ -565,7 +978,7 @@ describe("caption review CLI workflow", () => {
   });
 });
 
-function createProject(texts: string[]): string {
+function createProject(texts: string[], renderable = false): string {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "caption-review-cli-"));
   temporaryDirectories.push(projectDir);
   fs.mkdirSync(path.join(projectDir, "05_timeline"), { recursive: true });
@@ -583,23 +996,72 @@ function createProject(texts: string[]): string {
       output_aspect_ratio: "16:9",
     },
     tracks: {
-      video: [],
+      video: renderable ? [{
+        track_id: "V1",
+        kind: "video",
+        clips: [{
+          clip_id: "VCL_001",
+          asset_id: "AST_001",
+          segment_id: "SEG_001",
+          role: "hero",
+          src_in_us: 0,
+          src_out_us: 4_000_000,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 96,
+          beat_id: "b01",
+          motivation: "synthetic canonical preview fixture",
+          fallback_segment_ids: [],
+          confidence: 1,
+          quality_flags: [],
+        }],
+      }] : [],
       audio: [{
         track_id: "A1",
+        kind: "audio",
         role: "dialogue",
         clips: [{
           clip_id: "ACL_001",
           asset_id: "AST_001",
           segment_id: "SEG_001",
-          role: "A1",
+          role: "dialogue",
           src_in_us: 0,
-          src_out_us: 10_000_000,
+          src_out_us: renderable ? 4_000_000 : 10_000_000,
           timeline_in_frame: 0,
-          timeline_duration_frames: 240,
+          timeline_duration_frames: renderable ? 96 : 240,
+          motivation: "synthetic canonical preview fixture",
         }],
       }],
     },
+    provenance: {
+      brief_path: "04_plan/creative_brief.yaml",
+      blueprint_path: "04_plan/edit_blueprint.yaml",
+      selects_path: "04_plan/selects_candidates.yaml",
+      compiler_version: "issue16-test",
+    },
   }, null, 2));
+  if (renderable) {
+    const mediaDir = path.join(projectDir, "02_media");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    const sourcePath = path.join(mediaDir, "caption-preview-fixture.mp4");
+    execFileSync("ffmpeg", [
+      "-y", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=24:duration=4",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", sourcePath,
+    ], { stdio: "ignore" });
+    fs.writeFileSync(path.join(mediaDir, "source_map.json"), JSON.stringify({
+      version: "1",
+      project_id: "caption-review-test",
+      media_dir: "02_media",
+      generated_at: "2026-08-24T00:00:00.000Z",
+      items: [{
+        asset_id: "AST_001",
+        source_locator: sourcePath,
+        local_source_path: sourcePath,
+        link_path: "02_media/caption-preview-fixture.mp4",
+        source_content_sha256: computeSha256(sourcePath).slice("sha256:".length),
+      }],
+    }));
+  }
   fs.writeFileSync(path.join(projectDir, "07_package/caption_draft.json"), JSON.stringify({
     version: "1.0",
     project_id: "caption-review-test",

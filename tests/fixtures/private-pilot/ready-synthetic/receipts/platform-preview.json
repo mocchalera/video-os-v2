@@ -1,0 +1,47 @@
+{
+  "version": "private-pilot-gate-receipt/v1",
+  "pilot_id": "PILOT_RFA016_READY_SYNTHETIC",
+  "project_id": "rfa-016-ready-synthetic",
+  "gate": "platform_preview",
+  "requirement": "required",
+  "status": "approved",
+  "decision": "approve",
+  "evidence": {
+    "record_type": "platform_preview",
+    "summary": "Synthetic current-profile human-preview-shaped metadata for contract testing only.",
+    "recorded_at": "2026-08-22T00:00:00Z",
+    "recorded_by": "synthetic-fixture",
+    "artifacts": [
+      { "path": "evidence-platform.json", "sha256": "sha256:88737c35773de7c27276b0b9a2fa29ab87ffa5b0c3b8bcdb2dd97b02b7e3f703" }
+    ],
+    "platform_preview": {
+      "platform": "fixture",
+      "surface": "fixture",
+      "profile_id": "synthetic-platform-profile",
+      "profile": { "path": "platform-profile.json", "sha256": "sha256:5b10bd32d54792e868562402f528c2aef7527d76d5558fb68e4e3eed6aa57efd" },
+      "profile_evidence_status": "partial",
+      "profile_supersession_state": "active",
+      "current_profile": true,
+      "human_preview": true,
+      "safe_zone_receipt": { "path": "safe-zone-receipt.json", "sha256": "sha256:3ccbe1079d910f8271254ba10ad621bab793ba09fe68d3e584006095232139bc" }
+    }
+  },
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "current-profile-human-preview-shaped-metadata-only",
+    "captured_at": "2026-08-22T00:00:00Z",
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:5cf5e994cc07f0c4701454c8798a61be5b6f962cca356f7e8a896721b489be54" },
+      { "path": "evidence-platform.json", "sha256": "sha256:88737c35773de7c27276b0b9a2fa29ab87ffa5b0c3b8bcdb2dd97b02b7e3f703" }
+    ],
+    "profile": { "path": "platform-profile.json", "sha256": "sha256:5b10bd32d54792e868562402f528c2aef7527d76d5558fb68e4e3eed6aa57efd" },
+    "synthetic_fixture": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-08-22T00:00:00Z",
+    "input_fingerprint": "sha256:846cc64aa6e8aed840d32fc84346d9854e48d73eccf7a0e83a4ac10441f29f5e",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "reason": "synthetic fixture inputs are hash-bound and current"
+  }
+}

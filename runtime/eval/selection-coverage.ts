@@ -1,4 +1,10 @@
-import type { Candidate, CreativeBrief, SelectsCandidates } from "../artifacts/types.js";
+import type {
+  Candidate,
+  CreativeBrief,
+  EditBlueprint,
+  SelectsCandidates,
+  TimelineIR,
+} from "../artifacts/types.js";
 import { semanticMustHaveMatch } from "./semantic-match.js";
 
 export const DENSITY_MIN = 0.55;
@@ -15,32 +21,169 @@ export const NON_CONTENT_SUMMARY_MARKERS = [
   "視聴ありがとう",
 ] as const;
 
-// Some brief must_haves are production directives (captions, music, audio mix,
-// ending transition) rather than footage moments — they cannot be satisfied by
-// selecting a segment, so they must not be flagged as selection gaps.
-export const PRODUCTION_DIRECTIVE_MARKERS = [
-  "テロップ",
-  "bgm",
-  "音楽",
-  "ミックス",
-  "環境音",
-  "フェードアウト",
-  "全編",
-  "caption",
-  "subtitle",
-  "fade out",
-  "fade-out",
-  "music",
+export type ProductionDirectiveTarget =
+  | "edit_blueprint.caption_policy"
+  | "edit_blueprint.music_policy"
+  | "timeline.audio_policy"
+  | "edit_blueprint.ending_policy";
+
+// Captured/selected evidence takes precedence over a production keyword in the
+// same requirement. This keeps visual, audio, and mixed must-haves selectable.
+const SOURCE_DEPENDENT_DIRECTIVE_PATTERNS = [
+  /素材.*(?:選|使)/,
+  /(?:映|写).*(?:画面|人物)/,
+  /(?:画面|人物).*(?:映|写)/,
+  /(?:既存|本人).*(?:発話|実音声)/,
+  /現地.*環境音/,
+  /(?:footage|clip|source).*(?:select|choose|use)/,
+  /(?:person|performer).*(?:appear|visible|play)/,
+  /(?:recorded|existing).*(?:speech|voice|dialogue)/,
 ] as const;
+
+const PRODUCTION_DIRECTIVE_TARGETS: ReadonlyArray<{
+  target: ProductionDirectiveTarget;
+  patterns: readonly RegExp[];
+}> = [
+  { target: "timeline.audio_policy", patterns: [/ミックス/, /音量/, /ラウドネス/, /ダッキング/, /audio[ -]?mix/, /loudness/, /duck/] },
+  { target: "edit_blueprint.caption_policy", patterns: [/テロップ/, /字幕/, /caption/, /subtitle/] },
+  { target: "edit_blueprint.music_policy", patterns: [/bgm/, /音楽/, /music/] },
+  { target: "edit_blueprint.ending_policy", patterns: [/フェードアウト/, /fade[ -]?out/] },
+];
 
 const US_PER_SEC = 1_000_000;
 const MUST_HAVE_NOTE = "low-confidence (cross-language)";
 const SEMANTIC_MUST_HAVE_NOTE_PREFIX = "semantic match";
 const PRODUCTION_DIRECTIVE_NOTE = "production directive — not a selection target";
 
-function isProductionDirective(item: string): boolean {
+export function productionDirectiveTarget(item: string): ProductionDirectiveTarget | undefined {
   const normalized = item.normalize("NFKC").toLowerCase();
-  return PRODUCTION_DIRECTIVE_MARKERS.some((marker) => normalized.includes(marker.toLowerCase()));
+  if (SOURCE_DEPENDENT_DIRECTIVE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return undefined;
+  }
+  return PRODUCTION_DIRECTIVE_TARGETS.find(({ patterns }) =>
+    patterns.some((pattern) => pattern.test(normalized))
+  )?.target;
+}
+
+export function isProductionDirective(item: string): boolean {
+  return productionDirectiveTarget(item) !== undefined;
+}
+
+export interface DeferredProductionDirectiveViolation {
+  item: string;
+  target: ProductionDirectiveTarget;
+  reason: string;
+}
+
+export class DeferredProductionDirectiveError extends Error {
+  constructor(public readonly violations: DeferredProductionDirectiveViolation[]) {
+    super(
+      `Production directive validation failed: ${violations
+        .map((violation) => `${violation.target} (${violation.reason})`)
+        .join("; ")}`,
+    );
+    this.name = "DeferredProductionDirectiveError";
+  }
+}
+
+/** Limited post-selection validation for the four known production targets. */
+export function validateDeferredProductionDirectives(
+  brief: CreativeBrief,
+  blueprint: EditBlueprint,
+  timeline: TimelineIR | undefined,
+): DeferredProductionDirectiveViolation[] {
+  const violations: DeferredProductionDirectiveViolation[] = [];
+  for (const item of mustHaveItems(brief)) {
+    const target = productionDirectiveTarget(item);
+    if (!target) continue;
+    const reason = deferredDirectiveFailureReason(item, target, blueprint, timeline);
+    if (reason) violations.push({ item, target, reason });
+  }
+  return violations;
+}
+
+export function assertDeferredProductionDirectivesSatisfied(
+  brief: CreativeBrief,
+  blueprint: EditBlueprint,
+  timeline: TimelineIR | undefined,
+): void {
+  const violations = validateDeferredProductionDirectives(brief, blueprint, timeline);
+  if (violations.length > 0) throw new DeferredProductionDirectiveError(violations);
+}
+
+function deferredDirectiveFailureReason(
+  item: string,
+  target: ProductionDirectiveTarget,
+  blueprint: EditBlueprint,
+  timeline: TimelineIR | undefined,
+): string | undefined {
+  if (target === "edit_blueprint.caption_policy") {
+    if (!blueprint.caption_policy) return "caption_policy is missing";
+    if (blueprint.caption_policy.source === "none") return "caption_policy.source is none";
+    if (!timeline) return "timeline is missing";
+    if (!timeline.provenance.caption_policy) return "timeline caption_policy is missing";
+    if (timeline.provenance.caption_policy.mode === "off") return "timeline caption_policy.mode is off";
+    return undefined;
+  }
+
+  if (target === "edit_blueprint.music_policy") {
+    const policy = blueprint.music_policy;
+    const hasConcreteMusic = Boolean(
+      policy?.bgm_asset_id ||
+      policy?.bgm_segment_id ||
+      (typeof policy?.bgm_duration_sec === "number" && policy.bgm_duration_sec > 0),
+    );
+    if (!hasConcreteMusic) return "music_policy has no concrete BGM source or duration";
+    if (!timeline) return "timeline is missing";
+    const hasTimelineMusic = timeline.tracks.audio.some((track) =>
+      track.track_id === "A2" && track.clips.some((clip) => clip.role === "bgm" || clip.role === "music")
+    );
+    return hasTimelineMusic ? undefined : "timeline A2 has no BGM clip";
+  }
+
+  if (target === "timeline.audio_policy") {
+    if (!timeline) return "timeline is missing";
+    const mode = timeline.provenance.audio_policy?.mode;
+    if (!mode) return "timeline audio_policy is missing";
+    if (/ダッキング|duck/i.test(item) && mode !== "ducking") {
+      return `timeline audio_policy.mode is ${mode}, not ducking`;
+    }
+    return mode === "original_only" ? "timeline audio_policy.mode is original_only" : undefined;
+  }
+
+  const ending = blueprint.ending_policy;
+  if (!ending) return "ending_policy is missing";
+  const strategyText = [
+    ending.should_feel,
+    ending.final_line_strategy,
+    ending.final_visual_strategy,
+    ending.final_audio_strategy,
+  ].filter((value): value is string => typeof value === "string").join(" ");
+  const hasFade = (ending.audio_fade_out_sec ?? 0) > 0 ||
+    (ending.video_fade_out_sec ?? 0) > 0 ||
+    /fade[ -]?out|フェードアウト/i.test(strategyText);
+  if (!hasFade) return "ending_policy does not specify a fade-out";
+  if (!timeline) return "timeline is missing";
+  const videoClips = timeline.tracks.video.flatMap((track) => track.clips);
+  const audioProgramClips = timeline.tracks.audio
+    .flatMap((track) => track.clips)
+    .filter((clip) => clip.role !== "bgm" && clip.role !== "music");
+  const finalClip = (videoClips.length > 0 ? videoClips : audioProgramClips)
+    .slice()
+    .sort((left, right) =>
+      (left.timeline_in_frame + left.timeline_duration_frames) -
+        (right.timeline_in_frame + right.timeline_duration_frames) ||
+      left.clip_id.localeCompare(right.clip_id)
+    )
+    .at(-1);
+  const treatment = finalClip?.metadata?.ending_treatment as Record<string, unknown> | undefined;
+  const compiledFadeFrames = Math.max(
+    typeof treatment?.audio_fade_out_frames === "number" ? treatment.audio_fade_out_frames : 0,
+    typeof treatment?.video_fade_out_frames === "number" ? treatment.video_fade_out_frames : 0,
+  );
+  return compiledFadeFrames > 0
+    ? undefined
+    : "final timeline clip has no compiled ending_treatment fade";
 }
 
 export interface SelectionCoverageSegment {

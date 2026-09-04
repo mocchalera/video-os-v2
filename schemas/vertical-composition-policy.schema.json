@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vertical-composition-policy.schema.json",
+  "title": "Vertical composition policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "policy_id", "output", "checks", "layout_anchors", "zoom_intents", "frames", "source", "degrade"],
+  "properties": {
+    "version": { "const": "vertical-composition-policy/v1" },
+    "policy_id": { "type": "string", "minLength": 1 },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aspect_ratio", "coordinate_system", "width", "height"],
+      "properties": {
+        "aspect_ratio": { "const": "9:16" },
+        "coordinate_system": { "const": "normalized_top_left" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["person_occupancy", "headroom", "look_room", "hands", "microphone", "evidence"],
+      "properties": {
+        "person_occupancy": {
+          "type": "object", "additionalProperties": false, "required": ["minimum", "maximum"],
+          "properties": { "minimum": { "type": "number", "minimum": 0, "maximum": 1 }, "maximum": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }
+        },
+        "headroom": {
+          "type": "object", "additionalProperties": false, "required": ["minimum_top_margin", "maximum_top_margin"],
+          "properties": { "minimum_top_margin": { "type": "number", "minimum": 0, "maximum": 1 }, "maximum_top_margin": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }
+        },
+        "look_room": {
+          "type": "object", "additionalProperties": false, "required": ["minimum_margin"],
+          "properties": { "minimum_margin": { "type": "number", "minimum": 0, "maximum": 1 } }
+        },
+        "hands": { "$ref": "#/$defs/evidenceRequirement" },
+        "microphone": { "$ref": "#/$defs/evidenceRequirement" },
+        "evidence": { "$ref": "#/$defs/evidenceRequirement" },
+        "caption_collision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["thresholds", "candidate_anchors", "auto_move"],
+          "properties": {
+            "thresholds": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["baseline", "emphasis", "title"],
+              "properties": {
+                "baseline": { "type": "number", "minimum": 0, "maximum": 1 },
+                "emphasis": { "type": "number", "minimum": 0, "maximum": 1 },
+                "title": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            },
+            "candidate_anchors": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["lower", "upper"],
+              "properties": {
+                "lower": { "type": "string", "minLength": 1 },
+                "upper": { "type": "string", "minLength": 1 }
+              }
+            },
+            "auto_move": { "const": false }
+          }
+        }
+      }
+    },
+    "layout_anchors": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/rect" }
+    },
+    "zoom_intents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["emphasis", "reaction", "evidence", "reset"],
+      "properties": {
+        "emphasis": { "$ref": "#/$defs/zoomIntent" },
+        "reaction": { "$ref": "#/$defs/zoomIntent" },
+        "evidence": { "$ref": "#/$defs/zoomIntent" },
+        "reset": { "$ref": "#/$defs/zoomIntent" }
+      }
+    },
+    "frames": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_roles", "representative_count"],
+      "properties": {
+        "required_roles": { "type": "array", "minItems": 3, "uniqueItems": true, "items": { "enum": ["first", "representative", "last"] } },
+        "representative_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["require_identity", "require_av_geometry"],
+      "properties": { "require_identity": { "type": "boolean" }, "require_av_geometry": { "type": "boolean" } }
+    },
+    "platform_geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_level"],
+      "properties": {
+        "status": { "enum": ["unknown", "provisional", "measured"] },
+        "evidence_level": { "enum": ["policy_only", "platform_measured", "human_verified"] },
+        "source": { "type": "string", "minLength": 1 },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "device": { "type": "string", "minLength": 1 },
+        "app": { "type": "string", "minLength": 1 },
+        "screenshot_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      },
+      "allOf": [{
+        "if": { "properties": { "status": { "const": "measured" } }, "required": ["status"] },
+        "then": { "required": ["source", "observed_at", "device", "app", "screenshot_sha256"] }
+      }]
+    },
+    "degrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["missing_evidence", "failed_check", "safe_mode"],
+      "properties": {
+        "missing_evidence": { "enum": ["safe_degrade", "human_hold"] },
+        "failed_check": { "enum": ["safe_degrade", "human_hold"] },
+        "safe_mode": { "enum": ["identity", "safe_crop"] }
+      }
+    }
+  },
+  "$defs": {
+    "rect": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "evidenceRequirement": {
+      "type": "object", "additionalProperties": false, "required": ["mode", "minimum_confidence"],
+      "properties": { "mode": { "enum": ["required", "protect_if_present", "ignore"] }, "minimum_confidence": { "type": "number", "minimum": 0, "maximum": 1 } }
+    },
+    "zoomIntent": {
+      "type": "object", "additionalProperties": false, "required": ["max_zoom", "allow"],
+      "properties": { "max_zoom": { "type": "number", "minimum": 1 }, "allow": { "type": "boolean" } }
+    }
+  }
+}

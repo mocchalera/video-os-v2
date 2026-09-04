@@ -673,6 +673,11 @@
             "details": "schema=package-manifest"
           },
           {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
+          },
+          {
             "name": "timeline_json_readable",
             "passed": true,
             "details": "JSON parsed"
@@ -788,6 +793,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -796,6 +806,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -888,6 +903,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -1005,6 +1025,11 @@
             "details": "manifest=sha256:e566a7128c191bedbbb3368459759005a77d5296b368effcd5caa249bf6859e6 actual=sha256:e566a7128c191bedbbb3368459759005a77d5296b368effcd5caa249bf6859e6"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -1013,6 +1038,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -1306,6 +1336,11 @@
             "details": "schema=package-manifest"
           },
           {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
+          },
+          {
             "name": "timeline_json_readable",
             "passed": true,
             "details": "JSON parsed"
@@ -1421,6 +1456,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -1429,6 +1469,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -1522,6 +1567,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -1639,6 +1689,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -1647,6 +1702,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -1741,6 +1801,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -1877,6 +1942,7 @@
         "projectDir": "$PROJECT_DIR",
         "readinessLabel": "package contract mismatch",
         "issues": [
+          "package_artifact_closure_valid: final_video:hash_mismatch:09_output/final.mp4",
           "final_video_hash_matches: manifest=sha256:stale actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
         ],
         "checks": [
@@ -1904,6 +1970,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": false,
+            "details": "final_video:hash_mismatch:09_output/final.mp4"
           },
           {
             "name": "timeline_json_readable",
@@ -2021,6 +2092,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -2029,6 +2105,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -2095,6 +2176,7 @@
         "projectDir": "$PROJECT_DIR",
         "readinessLabel": "package contract mismatch",
         "issues": [
+          "package_artifact_closure_valid: qa_report:hash_mismatch:07_package/qa-report.json",
           "qa_report_hash_matches: manifest=sha256:stale actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
         ],
         "checks": [
@@ -2122,6 +2204,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": false,
+            "details": "qa_report:hash_mismatch:07_package/qa-report.json"
           },
           {
             "name": "timeline_json_readable",
@@ -2239,6 +2326,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -2247,6 +2339,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -2340,6 +2437,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -2457,6 +2559,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -2465,6 +2572,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -2558,6 +2670,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -2675,6 +2792,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -2683,6 +2805,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -2778,6 +2905,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -2895,6 +3027,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -2903,6 +3040,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -2997,6 +3139,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -3114,6 +3261,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -3122,6 +3274,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -3217,6 +3374,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -3334,6 +3496,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -3342,6 +3509,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -3435,6 +3607,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -3552,6 +3729,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -3560,6 +3742,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -3709,6 +3896,11 @@
             "details": "schema=package-manifest"
           },
           {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
+          },
+          {
             "name": "timeline_json_readable",
             "passed": true,
             "details": "JSON parsed"
@@ -3824,6 +4016,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:93beee1cd9b34eedc2a07ca0da7334004f3bf9832123d93871e261a2a584aef6"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -3832,6 +4029,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -3925,6 +4127,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -4042,6 +4249,11 @@
             "details": "manifest=sha256:93beee1cd9b34eedc2a07ca0da7334004f3bf9832123d93871e261a2a584aef6 actual=sha256:93beee1cd9b34eedc2a07ca0da7334004f3bf9832123d93871e261a2a584aef6"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -4050,6 +4262,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -4143,6 +4360,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -4260,6 +4482,11 @@
             "details": "manifest=sha256:d2d7a2ba465c5bfcfafdb73194256edcaf98febbf2459c1f76e6efaff8c102a8 actual=sha256:d2d7a2ba465c5bfcfafdb73194256edcaf98febbf2459c1f76e6efaff8c102a8"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -4268,6 +4495,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -4361,6 +4593,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -4478,6 +4715,11 @@
             "details": "manifest=sha256:ec338640405ab287c776199c22d0a3f2e80cbeb9799ec2c7e3c231b7cd099441 actual=sha256:ec338640405ab287c776199c22d0a3f2e80cbeb9799ec2c7e3c231b7cd099441"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -4486,6 +4728,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -4580,6 +4827,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -4697,6 +4949,11 @@
             "details": "manifest=sha256:33161a015bb099bba9d78ce0052024d070d7b644bfe7de66297cead4d4b5014e actual=sha256:33161a015bb099bba9d78ce0052024d070d7b644bfe7de66297cead4d4b5014e"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -4705,6 +4962,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -4800,6 +5062,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -4917,6 +5184,11 @@
             "details": "manifest=sha256:e566a7128c191bedbbb3368459759005a77d5296b368effcd5caa249bf6859e6 actual=sha256:e566a7128c191bedbbb3368459759005a77d5296b368effcd5caa249bf6859e6"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -4925,6 +5197,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -5029,6 +5306,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -5146,6 +5428,11 @@
             "details": "manifest=sha256:94e0188f82440d8c59f5645da01f5f4190ca22cac0309eac3a3472198a25623b actual=sha256:94e0188f82440d8c59f5645da01f5f4190ca22cac0309eac3a3472198a25623b"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -5154,6 +5441,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",
@@ -5247,6 +5539,11 @@
             "name": "package_manifest_schema_valid",
             "passed": true,
             "details": "schema=package-manifest"
+          },
+          {
+            "name": "package_artifact_closure_valid",
+            "passed": true,
+            "details": "all declared package artifact bytes are present, non-empty, contained, and hash-bound"
           },
           {
             "name": "timeline_json_readable",
@@ -5364,6 +5661,11 @@
             "details": "manifest=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc actual=sha256:4cc2558e499d1535cfd2fa16ce7cf1c5776c62feb985441d13f441154b2946cc"
           },
           {
+            "name": "render_route_receipt_schema_valid",
+            "passed": true,
+            "details": "legacy receipt schema compatibility path"
+          },
+          {
             "name": "render_route_receipt_version_valid",
             "passed": true,
             "details": "version=render-route-receipt/v3"
@@ -5372,6 +5674,11 @@
             "name": "render_provenance_summary_matches_receipt",
             "passed": true,
             "details": "manifest summary is receipt-derived"
+          },
+          {
+            "name": "render_route_evidence_legacy_compatibility",
+            "passed": true,
+            "details": "legacy render-route receipt has no RFA-013/014/024 evidence"
           },
           {
             "name": "render_route_matches_canonical_inputs",

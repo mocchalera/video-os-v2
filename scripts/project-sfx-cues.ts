@@ -14,6 +14,7 @@ import type { TimelineIR } from "../runtime/compiler/types.js";
 
 export interface ProjectSfxCuesArgs {
   projectDir: string;
+  repoSfxRoot?: string;
   timelinePath: string;
   cuesPath: string;
   outputPath?: string;
@@ -21,7 +22,7 @@ export interface ProjectSfxCuesArgs {
 }
 
 const USAGE = `Usage:
-  npm run sfx:project -- --project <dir> --timeline <timeline.json> --cues <sfx_cues.json> [--output <new-timeline.json>] [--dry-run]
+  npm run sfx:project -- --project <dir> --timeline <timeline.json> --cues <sfx_cues.json> [--repo-sfx-root <repo/resources/sfx>] [--output <new-timeline.json>] [--dry-run]
 
 Validates the SFX library, rights/provenance and all content pins before
 projecting formal SFX cues onto A3. --dry-run writes nothing. Non-dry-run
@@ -38,6 +39,7 @@ function required(values: string[], index: number, flag: string): string {
 export function parseProjectSfxCuesArgs(argv: string[]): ProjectSfxCuesArgs {
   const values = argv.slice(2);
   let projectDir: string | undefined;
+  let repoSfxRoot: string | undefined;
   let timelinePath: string | undefined;
   let cuesPath: string | undefined;
   let outputPath: string | undefined;
@@ -46,6 +48,7 @@ export function parseProjectSfxCuesArgs(argv: string[]): ProjectSfxCuesArgs {
     const arg = values[index];
     if (arg === "--help" || arg === "-h") throw new Error(USAGE);
     if (arg === "--project") projectDir = required(values, ++index, arg);
+    else if (arg === "--repo-sfx-root") repoSfxRoot = required(values, ++index, arg);
     else if (arg === "--timeline") timelinePath = required(values, ++index, arg);
     else if (arg === "--cues") cuesPath = required(values, ++index, arg);
     else if (arg === "--output") outputPath = required(values, ++index, arg);
@@ -58,6 +61,7 @@ export function parseProjectSfxCuesArgs(argv: string[]): ProjectSfxCuesArgs {
   }
   return {
     projectDir: path.resolve(projectDir),
+    ...(repoSfxRoot ? { repoSfxRoot: path.resolve(repoSfxRoot) } : {}),
     timelinePath: path.resolve(timelinePath),
     cuesPath: path.resolve(cuesPath),
     outputPath: outputPath ? path.resolve(outputPath) : undefined,
@@ -90,6 +94,7 @@ export function runProjectSfxCues(
   );
   const plan = resolveSfxCuePlan({
     projectDir: args.projectDir,
+    ...(args.repoSfxRoot ? { repoSfxRoot: args.repoSfxRoot } : {}),
     timeline,
     cuesPath: args.cuesPath,
   });

@@ -29,6 +29,7 @@ export function buildAgentSkillContractsManifest(): object {
         skillPath: SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.skillPath,
         commands: SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.commands,
         flags: SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.flags,
+        commandFlagContracts: SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.commandFlagContracts,
         prerequisiteReferences:
           SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.prerequisiteReferences,
         producedArtifacts:

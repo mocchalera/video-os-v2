@@ -35,13 +35,19 @@ import {
   normalizeSourceLocators,
   type SourceDiscoveryResult,
 } from "../runtime/media/source-discovery.js";
-import { persistAnalyzeReadinessArtifacts } from "../runtime/commands/analyze.js";
+import {
+  persistAnalyzeReadinessArtifacts,
+  runAnalyzeImageQcGate,
+  readBriefContextForImageQc,
+} from "../runtime/commands/analyze.js";
 import { readProjectState } from "../runtime/state/reconcile.js";
 
 // ── Arg Parsing ────────────────────────────────────────────────────
 
 function parseArgs(argv: string[]): {
   sourceFiles: string[];
+  bgmSourceFiles: string[];
+  bgmForceBackend: "aubiotrack" | "ffmpeg" | "librosa" | undefined;
   projectDir: string;
   skipStt: boolean;
   skipVlm: boolean;
@@ -62,6 +68,8 @@ function parseArgs(argv: string[]): {
 } {
   const args = argv.slice(2); // skip node + script path
   const sourceFiles: string[] = [];
+  const bgmSourceFiles: string[] = [];
+  let bgmForceBackend: "aubiotrack" | "ffmpeg" | "librosa" | undefined;
   let projectDir = "";
   let skipStt = false;
   let skipVlm = false;
@@ -84,6 +92,20 @@ function parseArgs(argv: string[]): {
     const arg = args[i];
     if (arg === "--project" || arg === "-p") {
       projectDir = args[++i] ?? "";
+    } else if (arg === "--bgm-source") {
+      const value = args[++i];
+      if (!value || value.startsWith("-")) {
+        console.error("Error: --bgm-source requires a source file");
+        process.exit(1);
+      }
+      bgmSourceFiles.push(value);
+    } else if (arg === "--bgm-backend") {
+      const value = args[++i] ?? "";
+      if (!isBgmBackend(value)) {
+        console.error('Error: --bgm-backend must be one of "aubiotrack", "ffmpeg", or "librosa"');
+        process.exit(1);
+      }
+      bgmForceBackend = value;
     } else if (arg === "--skip-stt") {
       skipStt = true;
       sttStrategy = "skip";
@@ -133,6 +155,8 @@ function parseArgs(argv: string[]): {
 
 Options:
   --project, -p      Project directory (required)
+  --bgm-source        Explicit music/BGM source (repeatable; must be in source files)
+  --bgm-backend       Built-in BGM backend: "aubiotrack", "ffmpeg", or "librosa"
   --concurrency      Concurrent VLM asset jobs (default: ${DEFAULT_VLM_CONCURRENCY})
   --vlm-only         Re-run VLM enrichment and peak detection from existing assets/segments
   --skip-stt         Skip speech-to-text stage
@@ -169,6 +193,8 @@ Options:
 
   return {
     sourceFiles,
+    bgmSourceFiles,
+    bgmForceBackend,
     projectDir,
     skipStt,
     skipVlm,
@@ -193,6 +219,10 @@ function isSttStrategy(value: string): value is "full" | "skip" | "auto" {
   return value === "full" || value === "skip" || value === "auto";
 }
 
+function isBgmBackend(value: string): value is "aubiotrack" | "ffmpeg" | "librosa" {
+  return value === "aubiotrack" || value === "ffmpeg" || value === "librosa";
+}
+
 function formatDuration(durationMs: number): string {
   const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -207,6 +237,8 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   const repoRoot = path.resolve(import.meta.dirname, "..");
   const {
     sourceFiles,
+    bgmSourceFiles,
+    bgmForceBackend,
     projectDir,
     skipStt,
     skipVlm,
@@ -227,6 +259,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   } = parseArgs(argv);
   const absoluteProjectDir = path.resolve(projectDir);
   const normalizedSourceFiles = normalizeSourceLocators(sourceFiles, process.cwd());
+  const normalizedBgmSourceFiles = normalizeSourceLocators(bgmSourceFiles, process.cwd());
   const projectId = readCliProjectId(absoluteProjectDir);
 
   // ── Pre-flight checks ──────────────────────────────────────────
@@ -261,6 +294,8 @@ export async function main(argv: string[] = process.argv): Promise<number> {
 
   console.log(`[analyze] Project: ${absoluteProjectDir}`);
   console.log(`[analyze] Sources: ${normalizedSourceFiles.join(", ")}`);
+  if (normalizedBgmSourceFiles.length > 0) console.log(`[analyze] BGM source: ${normalizedBgmSourceFiles.join(", ")}`);
+  if (bgmForceBackend) console.log(`[analyze] BGM backend: ${bgmForceBackend}`);
   if (vlmOnly) console.log("[analyze] Mode: VLM only");
   if (skipStt) console.log("[analyze] STT: skipped");
   if (!skipStt && sttStrategy !== "full") console.log(`[analyze] STT strategy: ${sttStrategy}`);
@@ -310,6 +345,8 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   try {
     result = await runPipeline({
       sourceFiles: normalizedSourceFiles,
+      bgmSourceFiles: normalizedBgmSourceFiles,
+      bgmForceBackend,
       projectDir: absoluteProjectDir,
       projectId,
       repoRoot,
@@ -368,6 +405,15 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       return 1;
     }
   }
+
+  // Issue 37: pre-compile VLM image QC gate over AI-generated still-image
+  // assets. Optional absence is handed to Issue 44; qa_failed and provider
+  // execution failures remain fail-closed at compile.
+  await runAnalyzeImageQcGate({
+    projectDir: absoluteProjectDir,
+    projectId,
+    briefContext: readBriefContextForImageQc(absoluteProjectDir),
+  });
 
   console.log("\n[analyze] Pipeline complete");
   console.log(`  Output: ${result.outputDir}`);

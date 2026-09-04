@@ -51,7 +51,11 @@ export type TransitionType =
   | "dip_to_white"
   | "match_cut_soft"
   | "j_cut"
-  | "l_cut";
+  | "l_cut"
+  // Issue #34 semantic presets (true A/B roll overlap engine)
+  | "film_crossfade"
+  | "light_leak_flash"
+  | "dreamy_focus_blur";
 
 export interface RenderTransition {
   fromClipId: string;
@@ -163,7 +167,7 @@ export function isSupportedEffectType(t: string): t is RenderEffectType {
 export interface RenderSpec {
   version: "1";
   /** Bump when renderer semantics change so persisted exact-preview caches invalidate. */
-  rendererContractVersion: "6";
+  rendererContractVersion: "7";
   timelineRevision: string;
   renderSpecHash: string;
   sequence: {
@@ -570,6 +574,7 @@ export function buildRenderSpec(
   // ── Transitions (Phase 4) ──
   const SUPPORTED_TRANSITIONS: ReadonlySet<string> = new Set<TransitionType>([
     "cut", "crossfade", "fade_to_black", "dip_to_white", "match_cut_soft", "j_cut", "l_cut",
+    "film_crossfade", "light_leak_flash", "dreamy_focus_blur",
   ]);
   function isSupportedTransition(t: string): t is TransitionType {
     return SUPPORTED_TRANSITIONS.has(t);
@@ -657,7 +662,7 @@ export function buildRenderSpec(
   // ── Assemble spec (without hash) ──
   const spec: RenderSpec = {
     version: "1",
-    rendererContractVersion: "6",
+    rendererContractVersion: "7",
     timelineRevision,
     renderSpecHash: "", // computed below
     sequence: {

@@ -3,6 +3,11 @@ import type { TimelineIR, ClipOutput } from "../runtime/compiler/types.js";
 import { timelineToCompositionProps } from "../runtime/render/remotion/timeline-to-props.js";
 import { remotionTimelineFontStrings } from "../runtime/render/remotion/render-remotion.js";
 import { resolveRemotionOverlayClip } from "../runtime/render/remotion/overlay-clip-resolver.js";
+import {
+  anchorTransformOrigin,
+  hasExplicitRect,
+  overlayWrapperStyle,
+} from "../runtime/render/remotion/overlay-layout.js";
 
 function makeClip(overrides: Partial<ClipOutput>): ClipOutput {
   return {
@@ -180,6 +185,7 @@ describe("timelineToCompositionProps", () => {
       presetId: "vos:overlay.title-card",
       text: "本気のビートボックス",
       anchor: "top-center",
+      scale: 1,
     });
     expect(resolveRemotionOverlayClip(
       canonicalClip("vos:content.emphasis-word/v1", { text: "BOOM" }),
@@ -231,5 +237,234 @@ describe("timelineToCompositionProps", () => {
       text: "AIと縦動画の編集会議",
       anchor: "top-left",
     });
+  });
+});
+
+describe("resolveRemotionOverlayClip content-element layout", () => {
+  const canonicalWithLayout = (layout: Record<string, unknown>) => makeClip({
+    clip_id: "layout-clip",
+    metadata: {
+      content_element: {
+        version: "content-element/v1",
+        element_id: "LAYOUT_1",
+        kind: "template",
+        template_ref: "vos:content.title-card/v1",
+        template_version: "1.0.0",
+        props: { title: "レイアウト" },
+        layout,
+        renderer_hint: "remotion",
+      },
+    },
+  });
+
+  it("resolves normalized x/y/width/height/rotation/opacity/z-order/safe-area deterministically", () => {
+    expect(resolveRemotionOverlayClip(canonicalWithLayout({
+      anchor: "bottom_right",
+      x: 0.5,
+      y: 0.4,
+      width: 0.8,
+      height: 0.3,
+      scale: 1.25,
+      rotation_deg: -6,
+      opacity: 0.8,
+      safe_area: false,
+      z_index: 42,
+    }))).toMatchObject({
+      presetId: "vos:overlay.title-card",
+      anchor: "bottom-right",
+      scale: 1.25,
+      layout: {
+        x: 0.5,
+        y: 0.4,
+        width: 0.8,
+        height: 0.3,
+        rotationDeg: -6,
+        opacity: 0.8,
+        safeArea: false,
+        zIndex: 42,
+      },
+    });
+  });
+
+  it("keeps anchor-only timelines compatible with the default layout", () => {
+    expect(resolveRemotionOverlayClip(canonicalWithLayout({
+      anchor: "top_center",
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotation_deg: 0,
+      opacity: 1,
+      safe_area: true,
+      z_index: 100,
+    }))!.layout).toEqual({
+      x: 0,
+      y: 0,
+      width: undefined,
+      height: undefined,
+      rotationDeg: 0,
+      opacity: 1,
+      safeArea: true,
+      zIndex: 100,
+    });
+  });
+
+  it("leaves legacy styling_class clips without a layout contract", () => {
+    expect(resolveRemotionOverlayClip(makeClip({
+      clip_id: "legacy-title",
+      metadata: {
+        overlay: {
+          text: "AIと縦動画の編集会議",
+          styling_class: "vos:overlay.title-card",
+          anchor: "top_left",
+        },
+      },
+    }))!.layout).toBeUndefined();
+  });
+});
+
+describe("remotion overlay layout resolution (1080x1920 sequence)", () => {
+  const frame = { width: 1080, height: 1920 };
+
+  it.each([
+    ["top-left", "0% 0%"],
+    ["top-center", "50% 0%"],
+    ["top-right", "100% 0%"],
+    ["center-left", "0% 50%"],
+    ["center", "50% 50%"],
+    ["center-right", "100% 50%"],
+    ["bottom-left", "0% 100%"],
+    ["bottom-center", "50% 100%"],
+    ["bottom-right", "100% 100%"],
+  ])("pins scale to the %s anchor box point so the anchor never moves", (anchor, origin) => {
+    expect(anchorTransformOrigin(anchor)).toBe(origin);
+    expect(overlayWrapperStyle({
+      anchor,
+      x: 0,
+      y: 0,
+      scale: 3,
+      rotationDeg: 45,
+      opacity: 1,
+      safeArea: true,
+    }, frame).transformOrigin).toBe(origin);
+  });
+
+  it("resolves normalized x/y offsets as frame-fraction translation on the anchor origin", () => {
+    expect(overlayWrapperStyle({
+      anchor: "center",
+      x: 0.5,
+      y: 0.4,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      safeArea: true,
+    }, frame)).toEqual({
+      transformOrigin: "50% 50%",
+      transform: "translate(50%, 40%) scale(1) rotate(0deg)",
+    });
+  });
+
+  it("resolves an explicit rect into absolute sequence pixels with rotation, opacity and z-order", () => {
+    expect(hasExplicitRect(0.8, 0.3)).toBe(true);
+    expect(hasExplicitRect(undefined, undefined)).toBe(false);
+    expect(overlayWrapperStyle({
+      anchor: "top_left",
+      x: 0.5,
+      y: 0.4,
+      width: 0.8,
+      height: 0.3,
+      scale: 1.25,
+      rotationDeg: -6,
+      opacity: 0.8,
+      safeArea: false,
+      zIndex: 42,
+    }, frame)).toEqual({
+      position: "absolute",
+      left: 540, // 0.5 * 1080
+      top: 768, // 0.4 * 1920
+      width: 864, // 0.8 * 1080
+      height: 576, // 0.3 * 1920
+      opacity: 0.8,
+      zIndex: 42,
+      // Anchor corner is pinned via transform-origin so scaling keeps it fixed.
+      transformOrigin: "0% 0%",
+      transform: "translate(0%, 0%) scale(1.25) rotate(-6deg)",
+    });
+  });
+
+  it("keeps a width-only rect's auto height non-zero for AbsoluteFill content", () => {
+    const style = overlayWrapperStyle({
+      anchor: "top-left",
+      x: 0,
+      y: 0,
+      width: 0.5,
+      height: undefined,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      safeArea: true,
+    }, frame);
+    expect(style).toMatchObject({
+      position: "absolute",
+      width: 540,
+      minHeight: 1,
+    });
+    expect(style.height).toBeUndefined();
+  });
+
+  it("keeps a height-only rect's auto width non-zero for AbsoluteFill content", () => {
+    const style = overlayWrapperStyle({
+      anchor: "top-left",
+      x: 0,
+      y: 0,
+      width: undefined,
+      height: 0.25,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      safeArea: true,
+    }, frame);
+    expect(style).toMatchObject({
+      position: "absolute",
+      minWidth: 1,
+      height: 480,
+    });
+    expect(style.width).toBeUndefined();
+  });
+
+  it("applies hyperframes-parity safe margins inward from an anchored explicit rect", () => {
+    // --safe-x = round(1080 * 0.05) = 54, --safe-y = round(1920 * 0.067) = 129
+    expect(overlayWrapperStyle({
+      anchor: "bottom_right",
+      x: 0,
+      y: 0,
+      width: 0.5,
+      height: 0.25,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      safeArea: true,
+    }, frame)).toMatchObject({
+      position: "absolute",
+      left: 1026, // 1080 - 54
+      top: 1791, // 1920 - 129
+      width: 540,
+      height: 480,
+      transformOrigin: "100% 100%",
+      transform: "translate(-100%, -100%) scale(1) rotate(0deg)",
+    });
+  });
+
+  it("drops safe margins when safe_area is false in rect mode", () => {
+    expect(overlayWrapperStyle({
+      anchor: "bottom_right",
+      x: 0,
+      y: 0,
+      width: 0.5,
+      height: 0.25,
+      scale: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      safeArea: false,
+    }, frame)).toMatchObject({ left: 1080, top: 1920 });
   });
 });

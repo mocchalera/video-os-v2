@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/framing-policy.schema.json",
+  "title": "Generic Framing Policy",
+  "type": "object",
+  "required": ["version", "policy_id", "checks", "modes", "transform", "confidence", "degrade"],
+  "properties": {
+    "version": { "const": "framing-policy/v1" },
+    "policy_id": { "type": "string", "minLength": 1 },
+    "checks": {
+      "type": "object",
+      "required": ["person", "head", "hand", "look_room", "headroom"],
+      "properties": {
+        "person": { "$ref": "#/$defs/confidenceCheck" },
+        "head": { "$ref": "#/$defs/headCheck" },
+        "hand": {
+          "type": "object",
+          "required": ["min_confidence", "max_zoom", "safe_rect"],
+          "properties": {
+            "min_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "max_zoom": { "type": "number", "minimum": 1 },
+            "safe_rect": { "$ref": "#/$defs/safeRect" }
+          },
+          "additionalProperties": false
+        },
+        "look_room": {
+          "type": "object",
+          "required": ["yaw_threshold_radians", "minimum_zoom_when_looking", "positive_yaw_target_x", "negative_yaw_target_x", "neutral_target_x", "minimum_margin"],
+          "properties": {
+            "yaw_threshold_radians": { "type": "number", "minimum": 0 },
+            "minimum_zoom_when_looking": { "type": "number", "minimum": 1 },
+            "positive_yaw_target_x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "negative_yaw_target_x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "neutral_target_x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minimum_margin": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "headroom": {
+          "type": "object",
+          "required": ["minimum_top_margin", "target_eye_y"],
+          "properties": {
+            "minimum_top_margin": { "type": "number", "minimum": 0, "maximum": 1 },
+            "target_eye_y": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "modes": {
+      "type": "object",
+      "required": ["wide", "punch", "hold"],
+      "properties": {
+        "wide": { "$ref": "#/$defs/framingMode" },
+        "punch": { "$ref": "#/$defs/framingMode" },
+        "hold": { "$ref": "#/$defs/framingMode" }
+      },
+      "additionalProperties": false
+    },
+    "transform": {
+      "type": "object",
+      "required": ["max_pan_fraction"],
+      "properties": {
+        "max_pan_fraction": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "confidence": {
+      "type": "object",
+      "required": ["coverage_weight", "observation_weight", "stability_weight", "stability_reference_span", "safe_degrade_multiplier"],
+      "properties": {
+        "coverage_weight": { "type": "number", "minimum": 0, "maximum": 1 },
+        "observation_weight": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stability_weight": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stability_reference_span": { "type": "number", "exclusiveMinimum": 0 },
+        "safe_degrade_multiplier": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "degrade": {
+      "type": "object",
+      "required": ["missing_evidence", "failed_check", "fallback_mode", "identity_zoom", "zoom_step"],
+      "properties": {
+        "missing_evidence": { "type": "string", "enum": ["manual_fallback", "identity"] },
+        "failed_check": { "type": "string", "enum": ["safe_degrade", "manual_fallback"] },
+        "fallback_mode": { "type": "string", "enum": ["wide", "punch", "hold"] },
+        "identity_zoom": { "type": "number", "exclusiveMinimum": 0 },
+        "zoom_step": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "confidenceCheck": {
+      "type": "object",
+      "required": ["min_confidence"],
+      "properties": {
+        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "headCheck": {
+      "type": "object",
+      "required": ["min_confidence", "eye_y_ratio"],
+      "properties": {
+        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "eye_y_ratio": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "safeRect": {
+      "type": "object",
+      "required": ["left", "top", "right", "bottom"],
+      "properties": {
+        "left": { "type": "number", "minimum": 0, "maximum": 1 },
+        "top": { "type": "number", "minimum": 0, "maximum": 1 },
+        "right": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bottom": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "framingMode": {
+      "type": "object",
+      "required": ["max_zoom", "target_head_height"],
+      "properties": {
+        "max_zoom": { "type": "number", "minimum": 1 },
+        "target_head_height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

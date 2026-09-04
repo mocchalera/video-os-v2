@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CaptionApproval } from "./approval.js";
+import type { CaptionVisualTreatmentInput } from "./visual-treatment.js";
 import {
   buildAssDocument,
   resolveCaptionStylePreset,
@@ -29,6 +30,7 @@ export function writeApprovedCaptionDeliveryArtifacts(
     };
   },
   outputDir: string,
+  visualTreatmentInput?: CaptionVisualTreatmentInput,
 ): CaptionDeliveryArtifacts {
   const width = timeline.sequence?.width;
   const height = timeline.sequence?.height;
@@ -47,7 +49,7 @@ export function writeApprovedCaptionDeliveryArtifacts(
   const srt = generateSrt(approval.speech_captions, frameRate);
   const vtt = generateVtt(approval.speech_captions, frameRate);
   const ass = buildAssDocument(
-    buildApprovedCaptionAssCues(approval.speech_captions, frameRate),
+    buildApprovedCaptionAssCues(approval.speech_captions, frameRate, visualTreatmentInput),
     resolveCaptionStylePreset(approval.caption_policy.styling_class),
     { width, height, fps: fpsNum / fpsDen },
   );

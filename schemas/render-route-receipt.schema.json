@@ -1,0 +1,471 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/render-route-receipt.schema.json",
+  "title": "Video OS render route and external handoff receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "requested_assembly_engine",
+    "assembly_engine",
+    "base_engine",
+    "visual_layers",
+    "caption_layer",
+    "delivery",
+    "hyperframes_overlay",
+    "remotion_overlay_count",
+    "hyperframes_element_count",
+    "speech_caption_engine",
+    "style_family",
+    "genre",
+    "reasons",
+    "receipt_version",
+    "renderer_versions",
+    "inputs",
+    "outputs",
+    "layer_receipts",
+    "delivery_execution",
+    "base_assembly_path",
+    "effective_assembly_path",
+    "route_evidence"
+  ],
+  "properties": {
+    "version": { "const": "render-route/v2" },
+    "requested_assembly_engine": { "enum": ["auto", "ffmpeg", "remotion"] },
+    "assembly_engine": { "enum": ["ffmpeg", "remotion"] },
+    "base_engine": { "enum": ["ffmpeg", "remotion"] },
+    "visual_layers": { "type": "array", "items": { "$ref": "#/$defs/visualLayer" } },
+    "caption_layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "composite_stage"],
+      "properties": {
+        "engine": { "enum": ["ffmpeg-libass", "none"] },
+        "composite_stage": { "const": "caption" }
+      }
+    },
+    "delivery": { "$ref": "#/$defs/delivery" },
+    "hyperframes_overlay": { "type": "boolean" },
+    "remotion_overlay_count": { "type": "integer", "minimum": 0 },
+    "hyperframes_element_count": { "type": "integer", "minimum": 0 },
+    "speech_caption_engine": { "enum": ["ffmpeg-libass", "none"] },
+    "style_family": { "type": "string", "minLength": 1 },
+    "genre": { "type": "string", "minLength": 1 },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "receipt_version": { "const": "render-route-receipt/v3" },
+    "renderer_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ffmpeg"],
+      "properties": {
+        "ffmpeg": { "type": "string", "minLength": 1 },
+        "hyperframes": { "type": "string", "minLength": 1 },
+        "remotion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeline"],
+      "properties": {
+        "timeline": { "$ref": "#/$defs/artifact" },
+        "caption_approval": { "$ref": "#/$defs/artifact" },
+        "typography_policy": { "$ref": "#/$defs/artifact" },
+        "visual_treatment_patch": { "$ref": "#/$defs/artifact" },
+        "caption_visual_treatment_input": { "$ref": "#/$defs/artifact" },
+        "audio_render_plan": { "$ref": "#/$defs/artifact" },
+        "audio_mix_report": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["final_video"],
+      "properties": { "final_video": { "$ref": "#/$defs/artifact" } }
+    },
+    "layer_receipts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["renderer", "path", "sha256"],
+        "properties": {
+          "renderer": { "enum": ["hyperframes", "remotion"] },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "font_receipt": { "$ref": "#/$defs/artifact" },
+    "delivery_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definition", "measurement_source", "lossy_video_encode_passes", "operations"],
+      "properties": {
+        "definition": { "const": "sequential_h264_generations/v1" },
+        "measurement_source": { "enum": ["runtime_trace", "execution_plan"] },
+        "lossy_video_encode_passes": { "type": "integer", "minimum": 0 },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "kind": { "enum": ["lossy_video_generation", "stream_copy", "decode", "alpha_intermediate", "lossless_intermediate"] },
+              "codec": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "still_camera_motion": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/stillCameraMotion" }
+    },
+    "base_assembly_path": { "type": "string", "minLength": 1 },
+    "effective_assembly_path": { "type": "string", "minLength": 1 },
+    "hyperframes_receipt_path": { "type": "string", "minLength": 1 },
+    "remotion_overlay_receipt_path": { "type": "string", "minLength": 1 },
+    "visual_layer_receipt_paths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "caption_visual_treatment": { "$ref": "#/$defs/captionVisualTreatment" },
+    "route_evidence": { "$ref": "#/$defs/routeEvidence" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "visualLayer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["renderer", "mode", "composite_stage", "reuse_scopes", "element_ids", "z_index_min", "z_index_max", "embedded_in_base"],
+      "properties": {
+        "renderer": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "minLength": 1 },
+        "composite_stage": { "enum": ["under_caption", "over_caption"] },
+        "reuse_scopes": { "type": "array", "items": { "type": "string" } },
+        "element_ids": { "type": "array", "items": { "type": "string" } },
+        "z_index_min": { "type": "integer" },
+        "z_index_max": { "type": "integer" },
+        "embedded_in_base": { "type": "boolean" }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compositor", "video_encoder", "definition", "lossy_video_encode_passes"],
+      "properties": {
+        "compositor": { "const": "ffmpeg" },
+        "video_encoder": { "const": "ffmpeg" },
+        "definition": { "const": "sequential_h264_generations/v1" },
+        "lossy_video_encode_passes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "stillCameraMotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "interpolation", "precision", "source_dimensions", "output_dimensions", "fps", "duration_frames"],
+      "properties": {
+        "backend": { "const": "numpy_float64_lanczos_worker" },
+        "interpolation": { "const": "lanczos4" },
+        "precision": { "const": "float64" },
+        "source_dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }
+        },
+        "output_dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }
+        },
+        "fps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["num", "den"],
+          "properties": { "num": { "type": "integer", "minimum": 1 }, "den": { "type": "integer", "minimum": 1 } }
+        },
+        "duration_frames": { "type": "integer", "minimum": 1 },
+        "clip_id": { "type": "string", "minLength": 1 },
+        "source_still_id": { "type": "string", "minLength": 1 },
+        "still_instance_id": { "type": "string", "minLength": 1 },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "parallax": { "$ref": "#/$defs/stillParallax" },
+        "hold": { "$ref": "#/$defs/stillHoldReceipt" }
+      }
+    },
+    "stillTransform": {
+      "type": "object",
+      "properties": {
+        "crop": {
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "pan": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": -1, "maximum": 1 }, "y": { "type": "number", "minimum": -1, "maximum": 1 } },
+          "additionalProperties": false
+        },
+        "zoom": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "anchor": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "additionalProperties": false
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "stillParallax": {
+      "type": "object",
+      "required": ["amount", "axis"],
+      "properties": {
+        "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.25 },
+        "axis": { "type": "string", "enum": ["horizontal", "vertical", "both"] }
+      },
+      "additionalProperties": false
+    },
+    "stillHoldReceipt": {
+      "type": "object",
+      "required": ["unit", "resolved_frames"],
+      "properties": {
+        "unit": { "type": "string", "enum": ["frames", "seconds", "beats", "section_boundary"] },
+        "resolved_frames": { "type": "integer", "minimum": 1 },
+        "section_id": { "type": "string", "minLength": 1 },
+        "boundary": { "type": "string", "enum": ["start", "end"] },
+        "boundary_frame": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "captionVisualTreatment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "approval_hash", "visual_treatment_patch_hash", "typography_policy_hash", "platform_safe_zone_profile_id", "platform_safe_zone_profile_path", "platform_safe_zone_profile_hash", "accessibility", "text_timing_hash", "capability_hash", "input_hash", "applied_caption_ids", "degraded_reasons", "blocked_reasons"],
+      "properties": {
+        "status": { "enum": ["ready", "fallback", "human_hold", "blocked"] },
+        "approval_hash": { "$ref": "#/$defs/hash" },
+        "visual_treatment_patch_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "typography_policy_hash": { "$ref": "#/$defs/hash" },
+        "platform_safe_zone_profile_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "platform_safe_zone_profile_path": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "platform_safe_zone_profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "accessibility": { "type": ["object", "null"] },
+        "text_timing_hash": { "$ref": "#/$defs/hash" },
+        "capability_hash": { "$ref": "#/$defs/hash" },
+        "input_hash": { "$ref": "#/$defs/hash" },
+        "applied_caption_ids": { "type": "array", "items": { "type": "string" } },
+        "degraded_reasons": { "type": "array" },
+        "blocked_reasons": { "type": "array" }
+      }
+    },
+    "alpha": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "status", "ownership", "canonical_claim", "geometry", "fps", "codec", "source", "output", "visual_treatment", "human_approval"],
+      "properties": {
+        "version": { "const": "alpha-overlay-export-receipt/v1" },
+        "status": { "enum": ["canonical", "supplied_external", "metadata_only", "not_applicable"] },
+        "ownership": { "enum": ["canonical", "supplied", "external"] },
+        "canonical_claim": { "type": "boolean" },
+        "geometry": { "type": "object", "additionalProperties": false, "required": ["width", "height"], "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } } },
+        "fps": { "type": "object", "additionalProperties": false, "required": ["num", "den"], "properties": { "num": { "type": "integer", "minimum": 1 }, "den": { "type": "integer", "minimum": 1 } } },
+        "codec": { "type": "object", "additionalProperties": false, "required": ["name", "pixel_format", "alpha_mode"], "oneOf": [{ "$ref": "#/$defs/alphaCodec" }, { "$ref": "#/$defs/notApplicableCodec" }], "properties": { "name": { "type": "string", "minLength": 1 }, "pixel_format": { "type": "string", "minLength": 1 }, "alpha_mode": { "type": ["string", "null"] } } },
+        "source": { "$ref": "#/$defs/artifact" },
+        "output": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "visual_treatment": { "type": "object", "additionalProperties": false, "required": ["input_hash", "profile_hash", "capability_hash"], "properties": { "input_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }, "profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }, "capability_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] } } },
+        "human_approval": { "type": "object", "additionalProperties": false, "required": ["status", "owner", "receipt"], "properties": { "status": { "enum": ["not_requested", "pending", "approved", "rejected"] }, "owner": { "type": ["string", "null"] }, "receipt": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] } } }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "canonical" } }, "required": ["status"] }, "then": { "properties": { "ownership": { "const": "canonical" }, "canonical_claim": { "const": true }, "output": { "$ref": "#/$defs/artifact" } } } },
+        { "if": { "properties": { "status": { "const": "supplied_external" } }, "required": ["status"] }, "then": { "properties": { "ownership": { "enum": ["supplied", "external"] }, "canonical_claim": { "const": false }, "output": { "$ref": "#/$defs/artifact" } } } },
+        { "if": { "properties": { "status": { "const": "metadata_only" } }, "required": ["status"] }, "then": { "properties": { "ownership": { "enum": ["supplied", "external"] }, "canonical_claim": { "const": false }, "output": { "type": "null" } } } },
+        { "if": { "properties": { "status": { "const": "not_applicable" } }, "required": ["status"] }, "then": { "properties": { "ownership": { "enum": ["supplied", "external"] }, "canonical_claim": { "const": false }, "output": { "type": "null" }, "codec": { "$ref": "#/$defs/notApplicableCodec" }, "visual_treatment": { "properties": { "input_hash": { "type": "null" }, "profile_hash": { "type": "null" }, "capability_hash": { "type": "null" } } } } } },
+        { "if": { "properties": { "status": { "enum": ["canonical", "supplied_external", "metadata_only"] } }, "required": ["status"] }, "then": { "properties": { "codec": { "$ref": "#/$defs/alphaCodec" }, "visual_treatment": { "properties": { "capability_hash": { "$ref": "#/$defs/hash" } }, "oneOf": [{ "properties": { "input_hash": { "type": "null" }, "profile_hash": { "type": "null" } } }, { "properties": { "input_hash": { "$ref": "#/$defs/hash" }, "profile_hash": { "$ref": "#/$defs/hash" } } }] } } } },
+        { "if": { "properties": { "human_approval": { "properties": { "status": { "const": "not_requested" } } } }, "required": ["human_approval"] }, "then": { "properties": { "human_approval": { "properties": { "owner": { "type": "null" }, "receipt": { "type": "null" } } } } } },
+        { "if": { "properties": { "human_approval": { "properties": { "status": { "enum": ["pending", "rejected"] } } } }, "required": ["human_approval"] }, "then": { "properties": { "human_approval": { "properties": { "owner": { "type": "string", "minLength": 1 }, "receipt": { "type": "null" } } } } } },
+        { "if": { "properties": { "human_approval": { "properties": { "status": { "const": "approved" } } } }, "required": ["human_approval"] }, "then": { "properties": { "human_approval": { "properties": { "owner": { "type": "string", "minLength": 1 }, "receipt": { "$ref": "#/$defs/artifact" } } } } } }
+      ]
+    },
+    "alphaCodec": {
+      "type": "object",
+      "required": ["name", "pixel_format", "alpha_mode"],
+      "oneOf": [
+        { "properties": { "name": { "const": "vp9" }, "pixel_format": { "const": "yuva420p" }, "alpha_mode": { "enum": ["1", "straight", "premultiplied"] } } },
+        { "properties": { "name": { "enum": ["prores", "prores_ks"] }, "pixel_format": { "enum": ["yuva444p10le", "yuva444p12le", "yuva422p10le"] }, "alpha_mode": { "enum": ["1", "straight", "premultiplied"] } } },
+        { "properties": { "name": { "const": "qtrle" }, "pixel_format": { "enum": ["argb", "rgba"] }, "alpha_mode": { "enum": ["1", "straight", "premultiplied"] } } },
+        { "properties": { "name": { "const": "png" }, "pixel_format": { "enum": ["argb", "rgba"] }, "alpha_mode": { "enum": ["1", "straight", "premultiplied"] } } },
+        { "properties": { "name": { "const": "ffv1" }, "pixel_format": { "enum": ["yuva420p", "yuva444p10le"] }, "alpha_mode": { "enum": ["1", "straight", "premultiplied"] } } },
+        { "properties": { "name": { "const": "hap_alpha" }, "pixel_format": { "const": "rgba" }, "alpha_mode": { "enum": ["1", "straight", "premultiplied"] } } }
+      ]
+    },
+    "notApplicableCodec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "pixel_format", "alpha_mode"],
+      "properties": {
+        "name": { "const": "none" },
+        "pixel_format": { "const": "none" },
+        "alpha_mode": { "type": "null" }
+      }
+    },
+    "routeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_kind", "ownership", "canonical_claim", "status", "route_capability", "source_identity", "caption_ownership", "audio", "visual_treatment", "alpha", "alpha_overlays", "ass_capability", "required_handoff_artifacts", "degradation", "handoff", "agent_qa", "human_approval"],
+      "properties": {
+        "route_kind": { "enum": ["canonical_engine_render", "supplied_final", "external_manual_nle"] },
+        "ownership": { "enum": ["canonical", "supplied", "external"] },
+        "canonical_claim": { "type": "boolean" },
+        "status": { "enum": ["ready", "degraded", "handoff_required", "blocked"] },
+        "route_capability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "hash", "caption_renderer", "content_renderers", "visual_treatment_input_hash", "visual_treatment_profile_hash", "audio_plan_hash"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "hash": { "$ref": "#/$defs/hash" },
+            "caption_renderer": { "enum": ["ffmpeg-libass", "external_manual_nle", "none"] },
+            "content_renderers": { "type": "array", "items": { "type": "string" } },
+            "visual_treatment_input_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "visual_treatment_profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "audio_plan_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+          }
+        },
+        "source_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "timeline", "source_inputs_hash", "source_assets"],
+          "properties": {
+            "status": { "enum": ["verified", "live_only", "declared_reference", "missing"] },
+            "timeline": { "$ref": "#/$defs/artifact" },
+            "source_inputs_hash": { "$ref": "#/$defs/hash" },
+            "source_assets": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["asset_id", "content_sha256"], "properties": { "asset_id": { "type": "string" }, "content_sha256": { "$ref": "#/$defs/hash" } } } }
+          }
+        },
+        "caption_ownership": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["approval_owner", "approval_status", "approval_hash", "text_timing_hash", "burn_render_owner", "burn_render_claim", "renderer_count"],
+          "properties": {
+            "approval_owner": { "const": "caption_runtime_review_core_studio" },
+            "approval_status": { "enum": ["approved", "missing", "stale", "not_applicable"] },
+            "approval": { "$ref": "#/$defs/artifact" },
+            "approval_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "text_timing_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "burn_render_owner": { "enum": ["ffmpeg-libass", "external_manual_nle", "none"] },
+            "burn_render_claim": { "enum": ["canonical", "supplied", "external", "not_applicable"] },
+            "renderer_count": { "type": "integer", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "status", "plan_hash", "profile_id", "profile_hash"],
+          "properties": {
+            "owner": { "enum": ["shared_audio_render_plan", "external_manual_nle", "not_applicable"] },
+            "status": { "enum": ["resolved", "missing", "not_applicable"] },
+            "plan": { "$ref": "#/$defs/artifact" },
+            "plan_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "report": { "$ref": "#/$defs/artifact" },
+            "measurement_status": { "enum": ["measured", "degraded", "hold"] },
+            "profile_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+            "profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+          }
+        },
+        "visual_treatment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "input_hash", "profile_hash", "capability_hash"],
+          "properties": {
+            "owner": { "enum": ["ffmpeg-libass", "registered_content", "external_manual_nle", "not_applicable"] },
+            "input": { "$ref": "#/$defs/artifact" },
+            "input_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "capability_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+          }
+        },
+        "alpha": { "anyOf": [{ "$ref": "#/$defs/alpha" }, { "type": "null" }] },
+        "alpha_overlays": { "type": "array", "items": { "$ref": "#/$defs/alpha" } },
+        "ass_capability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["renderer", "status", "requested_animations", "unsupported_animations", "decision"],
+          "properties": {
+            "renderer": { "enum": ["ffmpeg-libass", "external_manual_nle", "none"] },
+            "status": { "enum": ["supported", "registered_fallback", "nle_handoff", "blocked", "not_applicable"] },
+            "requested_animations": { "type": "array", "items": { "type": "string" } },
+            "unsupported_animations": { "type": "array", "items": { "type": "string" } },
+            "decision": { "enum": ["canonical", "registered_fallback", "nle_handoff", "blocked", "not_applicable"] },
+            "evidence": { "$ref": "#/$defs/artifact" }
+          }
+        },
+        "required_handoff_artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } },
+        "degradation": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["code", "reason", "action"], "properties": { "code": { "type": "string" }, "reason": { "type": "string" }, "action": { "enum": ["registered_fallback", "nle_handoff", "block"] } } } },
+        "handoff": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["required", "status", "human_owner", "human_approval_status", "artifacts"],
+          "properties": {
+            "required": { "type": "boolean" },
+            "status": { "enum": ["not_required", "pending", "confirmed", "blocked"] },
+            "human_owner": { "type": ["string", "null"] },
+            "human_approval_status": { "enum": ["not_requested", "pending", "approved", "rejected"] },
+            "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } }
+          }
+        },
+        "agent_qa": { "type": "object", "additionalProperties": false, "required": ["status"], "properties": { "status": { "enum": ["not_run", "passed", "failed"] }, "receipt": { "$ref": "#/$defs/artifact" } } },
+        "human_approval": { "type": "object", "additionalProperties": false, "required": ["status", "owner"], "properties": { "status": { "enum": ["not_requested", "pending", "approved", "rejected"] }, "owner": { "type": ["string", "null"] }, "receipt": { "$ref": "#/$defs/artifact" } } }
+      },
+      "allOf": [
+        { "if": { "properties": { "route_kind": { "const": "canonical_engine_render" } }, "required": ["route_kind"] }, "then": { "properties": { "ownership": { "const": "canonical" }, "canonical_claim": { "const": true } } } },
+        {
+          "if": { "properties": { "route_kind": { "enum": ["supplied_final", "external_manual_nle"] } }, "required": ["route_kind"] },
+          "then": {
+            "properties": {
+              "ownership": { "not": { "const": "canonical" } },
+              "canonical_claim": { "const": false },
+              "required_handoff_artifacts": { "minItems": 1 },
+              "handoff": {
+                "properties": {
+                  "required": { "const": true },
+                  "status": { "enum": ["pending", "confirmed", "blocked"] },
+                  "human_owner": { "type": "string", "minLength": 1 },
+                  "human_approval_status": { "enum": ["pending", "approved", "rejected"] },
+                  "artifacts": { "minItems": 1 }
+                }
+              },
+              "human_approval": {
+                "properties": {
+                  "status": { "enum": ["pending", "approved", "rejected"] },
+                  "owner": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

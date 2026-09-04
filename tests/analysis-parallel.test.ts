@@ -1,5 +1,6 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AssetItem } from "../runtime/connectors/ffprobe.js";
 import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
@@ -14,11 +15,13 @@ import {
 import {
   hydrateCachedVlmSegments,
   runParallelVlmAnalysis,
+  withRateLimitRetry,
+  VLM_M2_MAX_PROVIDER_REQUESTS,
 } from "../runtime/pipeline/vlm-analysis.js";
 import { buildGapReport } from "../runtime/pipeline/stages/gap-report.js";
 
 const SOURCE_FIXTURE = path.join(import.meta.dirname, "fixtures/media/test-clip-5s.mp4");
-const FRAME_OUTPUT_DIR = path.join(import.meta.dirname, "_tmp_editorial_eye_parallel");
+const FRAME_OUTPUT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "videoos-editorial-eye-parallel-"));
 
 afterAll(() => {
   fs.rmSync(FRAME_OUTPUT_DIR, { recursive: true, force: true });
@@ -56,6 +59,7 @@ function makeAsset(assetId: string, filename: string): AssetItem {
   return {
     asset_id: assetId,
     filename,
+    media_kind: "video",
     duration_us: 2_000_000,
     has_transcript: false,
     transcript_ref: null,
@@ -64,6 +68,11 @@ function makeAsset(assetId: string, filename: string): AssetItem {
     quality_flags: [],
     tags: [],
     source_fingerprint: `${assetId.toLowerCase()}_fingerprint`,
+    source_capabilities: {
+      has_video: true,
+      has_audio: false,
+      has_temporal_video: true,
+    },
     contact_sheet_ids: [],
     analysis_status: "pending",
   };
@@ -111,6 +120,83 @@ function successResponse(summary: string) {
 }
 
 describe("runParallelVlmAnalysis", () => {
+  it("does not dispatch VLM when the visual deadline is already expired", async () => {
+    const assets = [makeAsset("AST_EXPIRED", "expired.mov")];
+    let calls = 0;
+    const result = await runParallelVlmAnalysis({
+      assets,
+      segments: [makeSegment("AST_EXPIRED", "expired")],
+      vlmPolicy,
+      samplingPolicy,
+      minSegmentDurationUs: 750_000,
+      deadlineAtMs: Date.now() - 1,
+      ...groundingOptions(assets),
+      vlmFn: async () => {
+        calls += 1;
+        return successResponse("late");
+      },
+    } as Parameters<typeof runParallelVlmAnalysis>[0] & { deadlineAtMs: number });
+
+    expect(calls).toBe(0);
+    expect(result.shards).toEqual([]);
+  });
+
+  it("returns at the visual deadline without publishing late VLM shards", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let now = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const assets = [makeAsset("AST_SLOW", "slow.mov")];
+      const common = {
+        assets,
+        segments: [makeSegment("AST_SLOW", "slow")],
+        vlmPolicy,
+        samplingPolicy,
+        minSegmentDurationUs: 750_000,
+        ...groundingOptions(assets),
+      };
+      await runParallelVlmAnalysis({
+        ...common,
+        vlmFn: async () => successResponse("warm cache"),
+      });
+      let calls = 0;
+      let completed = 0;
+      let releaseLateVlm!: () => void;
+      const lateVlm = new Promise<void>((resolve) => {
+        releaseLateVlm = resolve;
+      });
+      let resolveCallStarted!: () => void;
+      const callStarted = new Promise<void>((resolve) => {
+        resolveCallStarted = resolve;
+      });
+      const resultPromise = runParallelVlmAnalysis({
+        ...common,
+        deadlineAtMs: 5,
+        vlmFn: async () => {
+          calls += 1;
+          resolveCallStarted();
+          await lateVlm;
+          completed += 1;
+          return successResponse("late");
+        },
+      } as Parameters<typeof runParallelVlmAnalysis>[0] & { deadlineAtMs: number });
+
+      await callStarted;
+      now = 5;
+      await vi.advanceTimersByTimeAsync(5);
+      const result = await resultPromise;
+      expect(calls).toBe(1);
+      expect(result.shards).toEqual([]);
+      releaseLateVlm();
+      await Promise.resolve();
+      expect(completed).toBe(1);
+      expect(result.shards).toEqual([]);
+    } finally {
+      nowSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects text-only cached VLM output that has no grounded frame provenance", () => {
     const current = makeSegment("AST_CACHE", "");
     const cached = makeSegment("AST_CACHE", "");
@@ -152,10 +238,10 @@ describe("runParallelVlmAnalysis", () => {
       makeAsset("AST_004", "D.mov"),
     ];
     const segments = [
-      makeSegment("AST_001", "asset one"),
-      makeSegment("AST_002", "asset two"),
-      makeSegment("AST_003", "asset three"),
-      makeSegment("AST_004", "asset four"),
+      makeSegment("AST_001", "AST_001"),
+      makeSegment("AST_002", "AST_002"),
+      makeSegment("AST_003", "AST_003"),
+      makeSegment("AST_004", "AST_004"),
     ];
 
     let inFlight = 0;
@@ -190,6 +276,11 @@ describe("runParallelVlmAnalysis", () => {
     expect(callCount).toBe(3);
     expect(maxInFlight).toBeLessThanOrEqual(2);
     expect(result.shards).toHaveLength(3);
+    expect(result.shards.map((shard) => shard.segment_id)).toEqual([
+      "SEG_AST_001_0001",
+      "SEG_AST_003_0001",
+      "SEG_AST_004_0001",
+    ]);
     expect(result.summary.totalAssets).toBe(4);
     expect(result.summary.cachedAssets).toBe(1);
     expect(result.summary.analyzedAssets).toBe(3);
@@ -197,38 +288,98 @@ describe("runParallelVlmAnalysis", () => {
     expect(statuses).toContain("AST_002:cached");
   });
 
-  it("retries 429 responses with exponential backoff", async () => {
+  it("keeps the general 429 retry helper behavior unchanged", async () => {
     const delays: number[] = [];
     let attempts = 0;
 
-    const result = await runParallelVlmAnalysis({
-      assets: [makeAsset("AST_001", "retry.mov")],
-      segments: [makeSegment("AST_001", "retry transcript")],
-      vlmPolicy,
-      samplingPolicy,
-      minSegmentDurationUs: 750_000,
-      retryPolicy: {
-        initialDelayMs: 5,
-        maxDelayMs: 20,
-        maxRetries: 5,
-      },
-      sleepFn: async (delayMs) => {
-        delays.push(delayMs);
-      },
-      ...groundingOptions([makeAsset("AST_001", "retry.mov")]),
-      vlmFn: async () => {
-        attempts += 1;
-        if (attempts < 3) {
-          throw new Error("Gemini API error 429: Resource exhausted");
-        }
-        return successResponse("retried");
-      },
+    const result = await withRateLimitRetry(async () => {
+      attempts += 1;
+      if (attempts < 3) {
+        throw new Error("Gemini API error 429: Resource exhausted");
+      }
+      return "retried";
+    }, {
+      initialDelayMs: 5,
+      maxDelayMs: 20,
+      maxRetries: 5,
+    }, async (delayMs) => {
+      delays.push(delayMs);
     });
 
     expect(attempts).toBe(3);
     expect(delays).toEqual([5, 10]);
-    expect(result.summary.failedAssets).toHaveLength(0);
-    expect(result.shards[0]?.result.success).toBe(true);
+    expect(result).toBe("retried");
+  });
+
+  it("caps M2 provider requests at two and returns transport provenance", async () => {
+    const policy = { ...vlmPolicy, parse_retry_max: 1 };
+    const successAsset = makeAsset("AST_M2_SUCCESS", "m2-success.mov");
+    const successDelays: number[] = [];
+    let successfulCalls = 0;
+    const recovered = await runParallelVlmAnalysis({
+      assets: [successAsset],
+      segments: [makeSegment(successAsset.asset_id, "m2 transport retry")],
+      vlmPolicy: policy,
+      samplingPolicy,
+      minSegmentDurationUs: 750_000,
+      retryPolicy: { initialDelayMs: 5, maxDelayMs: 20, maxRetries: 5 },
+      sleepFn: async (delayMs) => { successDelays.push(delayMs); },
+      ...groundingOptions([successAsset]),
+      vlmFn: async () => {
+        successfulCalls += 1;
+        if (successfulCalls === 1) {
+          throw new Error("Gemini API error 429: Resource exhausted");
+        }
+        return successResponse("recovered");
+      },
+    });
+
+    expect(VLM_M2_MAX_PROVIDER_REQUESTS).toBe(2);
+    expect(successfulCalls).toBe(VLM_M2_MAX_PROVIDER_REQUESTS);
+    expect(successDelays).toEqual([]);
+    expect(recovered.shards[0]?.result).toMatchObject({
+      success: true,
+      attempt_count: VLM_M2_MAX_PROVIDER_REQUESTS,
+      retry_reason: "call_failure",
+    });
+    expect(recovered.shards[0]?.result.parse_diagnostics).toEqual([
+      expect.objectContaining({
+        attempt_outcome: "call_failure",
+        error_code: "vlm_call_failed",
+      }),
+    ]);
+
+    const failureAsset = makeAsset("AST_M2_FAILURE", "m2-failure.mov");
+    const failureDelays: number[] = [];
+    let failedCalls = 0;
+    const exhausted = await runParallelVlmAnalysis({
+      assets: [failureAsset],
+      segments: [makeSegment(failureAsset.asset_id, "m2 transport failure")],
+      vlmPolicy: policy,
+      samplingPolicy,
+      minSegmentDurationUs: 750_000,
+      retryPolicy: { initialDelayMs: 5, maxDelayMs: 20, maxRetries: 5 },
+      sleepFn: async (delayMs) => { failureDelays.push(delayMs); },
+      ...groundingOptions([failureAsset]),
+      vlmFn: async () => {
+        failedCalls += 1;
+        throw new Error("Gemini API error 429: Resource exhausted");
+      },
+    });
+
+    expect(failedCalls).toBe(VLM_M2_MAX_PROVIDER_REQUESTS);
+    expect(failureDelays).toEqual([]);
+    expect(exhausted.shards[0]?.result).toMatchObject({
+      success: false,
+      attempt_count: VLM_M2_MAX_PROVIDER_REQUESTS,
+      retry_reason: "call_failure",
+    });
+    expect(exhausted.shards[0]?.result.parse_diagnostics).toHaveLength(
+      VLM_M2_MAX_PROVIDER_REQUESTS,
+    );
+    expect(exhausted.shards[0]?.result.parse_diagnostics?.every((item) =>
+      item.attempt_outcome === "call_failure" && item.error_code === "vlm_call_failed",
+    )).toBe(true);
   });
 
   it("continues after per-asset failures and reports only failed assets", async () => {

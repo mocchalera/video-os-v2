@@ -226,6 +226,11 @@ async function executeFullPipelinePhase(
     const reviewOptions: ReviewCommandOptions = {
       ...options?.review,
       requireCompiledTimeline: true,
+      // Whole-cut semantic review is a production gate. Keep the first-30s
+      // preview for orientation, but render the complete rough output before
+      // the critic receives its context unless a caller explicitly disables
+      // rendering for a deliberate HOLD.
+      render: options?.review?.render ?? true,
     };
     const review = await runReview(projectDir, deps.reviewAgent, reviewOptions);
     result.review = review;

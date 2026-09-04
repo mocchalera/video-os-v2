@@ -1,0 +1,42 @@
+{
+  "version": "private-pilot-gate-receipt/v1",
+  "pilot_id": "PILOT_RFA016_PENDING",
+  "project_id": "rfa-016-pending",
+  "gate": "nle_handoff",
+  "requirement": "required",
+  "status": "pending",
+  "decision": "hold",
+  "evidence": {
+    "record_type": "nle_handoff",
+    "summary": "Required external NLE handoff confirmation is pending.",
+    "recorded_at": "2026-08-22T00:00:00Z",
+    "recorded_by": "synthetic-fixture",
+    "artifacts": [
+      { "path": "evidence-nle.json", "sha256": "sha256:8ffc71392de77193e458c5c4e710265aee1b8160a67e82d8c920ac3084db8add" }
+    ],
+    "handoff": {
+      "confirmation": "pending",
+      "route_kind": "external_manual_nle",
+      "artifacts": [
+        { "path": "evidence-nle.json", "sha256": "sha256:8ffc71392de77193e458c5c4e710265aee1b8160a67e82d8c920ac3084db8add" }
+      ]
+    }
+  },
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "pending-metadata",
+    "captured_at": "2026-08-22T00:00:00Z",
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:1fcb423d2644bba0cf1d7dd177bf7336af5bedefa2f1d1614739bf91dd88f246" },
+      { "path": "evidence-nle.json", "sha256": "sha256:8ffc71392de77193e458c5c4e710265aee1b8160a67e82d8c920ac3084db8add" }
+    ],
+    "synthetic_fixture": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-08-22T00:00:00Z",
+    "input_fingerprint": "sha256:50ac53111441e8c614c5538f588a9636724c0f3fe1a9b4181944ec8770e2ee76",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "reason": "fixture inputs are hash-bound and current"
+  }
+}

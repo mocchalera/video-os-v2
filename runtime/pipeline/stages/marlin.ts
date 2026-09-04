@@ -3,12 +3,24 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { resolvePolicy } from "../../policy-resolver.js";
-import type { MarlinAssetEvents, MarlinEventsArtifact, MarlinFn, MarlinModelRecord } from "../../connectors/marlin-types.js";
+import type {
+  MarlinAssetEvents,
+  MarlinEvent,
+  MarlinEventsArtifact,
+  MarlinFailureRecord,
+  MarlinFindResult,
+  MarlinFn,
+  MarlinModelRecord,
+  MarlinRawCaption,
+  MarlinFailureReasonClass,
+  MarlinFailureStage,
+} from "../../connectors/marlin-types.js";
 import { createMarlinWorkerClient } from "../../connectors/marlin-local.js";
 import {
   createMarlinEventsArtifact,
   MARLIN_CONNECTOR_VERSION,
   normalizeMarlinAssetEvents,
+  normalizeMarlinFindResult,
 } from "../../connectors/marlin-normalize.js";
 import {
   applyContextKnowledgeToSummary,
@@ -18,6 +30,7 @@ import {
 import { atomicWriteJson, readJsonIfExists } from "./_util.js";
 import { createMarlinRangeProxy, prepareMarlinProxy, probeVideoDurationSeconds } from "./marlin-proxy.js";
 import { loadSourceMap, type MediaSourceMapEntry } from "../../media/source-map.js";
+import { readAuthoritativeAssetMediaCapabilities } from "../../artifacts/source-media-capabilities.js";
 
 export const MARLIN_EVENTS_RELATIVE_PATH = "03_analysis/marlin_events.json";
 export const MARLIN_REPORTER_METHOD = "marlin_reporter";
@@ -32,7 +45,28 @@ export interface MarlinPolicy {
   worker_path?: string;
   mock?: boolean;
   default_find_queries?: string[];
+  caption_max_new_tokens_short?: number;
+  caption_max_new_tokens_max?: number;
+  caption_short_source_max_seconds?: number;
+  chunk_target_us?: number;
+  chunk_overlap_us?: number;
 }
+
+/** Explicit bounded-caption budget resolved from analysis policy. */
+export interface MarlinCaptionTokenBudget {
+  /** Token cap for sources at or below shortSourceMaxSeconds. */
+  shortSourceMaxNewTokens: number;
+  /** Hard cap for longer sources and unknown durations. */
+  longSourceMaxNewTokens: number;
+  /** Duration threshold in seconds separating short from long sources. */
+  shortSourceMaxSeconds: number;
+}
+
+export const MARLIN_CAPTION_TOKEN_BUDGET_DEFAULTS: MarlinCaptionTokenBudget = {
+  shortSourceMaxNewTokens: 512,
+  longSourceMaxNewTokens: 2048,
+  shortSourceMaxSeconds: 120,
+};
 
 export interface MarlinAnalysisOptions {
   projectDir: string;
@@ -49,6 +83,8 @@ export interface MarlinAnalysisOptions {
   chunkOverlapSeconds?: number;
   maxChunks?: number;
   applyToSegments?: boolean;
+  /** Repo root for analysis policy resolution (required for external projects). */
+  repoRoot?: string;
 }
 
 /** Failure from the optional proxy/model/worker boundary. */
@@ -67,8 +103,17 @@ interface AssetDocItem {
   asset_id?: string;
   filename?: string;
   source_locator?: string;
+  media_kind?: string;
   video_stream?: unknown;
   audio_stream?: unknown;
+  source_capabilities?: { has_temporal_video?: unknown };
+}
+
+function hasTemporalVideoForMarlin(item: Pick<AssetDocItem, "media_kind" | "video_stream" | "source_capabilities">): boolean {
+  if (item.media_kind === "image" || item.media_kind === "audio") return false;
+  const declared = item.source_capabilities?.has_temporal_video;
+  if (typeof declared === "boolean") return declared;
+  return Boolean(item.video_stream);
 }
 
 export interface MarlinAssetInput {
@@ -162,7 +207,22 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
   const outputPath = opts.outputPath ?? path.join(absProjectDir, MARLIN_EVENTS_RELATIVE_PATH);
   const model = opts.model ?? defaultMarlinModel();
   const queries = normalizeQueries(opts.queries);
-  const chunkingEnabled = opts.chunkSeconds !== undefined;
+  // Auto long-clip chunking: when no explicit --chunk-seconds is given,
+  // fall open to the analysis policy's marlin.chunk_target_us/chunk_overlap_us
+  // (already part of the policy contract). Invalid/zero targets disable
+  // auto chunking and keep the single whole-asset path.
+  const marlinPolicy = safeMarlinPolicy(absProjectDir, opts.repoRoot);
+  let chunkSeconds = opts.chunkSeconds;
+  let chunkOverlapSeconds = opts.chunkOverlapSeconds;
+  if (chunkSeconds === undefined) {
+    const autoChunk = marlinAutoChunkConfigFromPolicy(marlinPolicy);
+    chunkSeconds = autoChunk.chunkSeconds;
+    if (chunkOverlapSeconds === undefined) {
+      chunkOverlapSeconds = autoChunk.chunkOverlapSeconds;
+    }
+  }
+  const runOpts: MarlinAnalysisOptions = { ...opts, chunkSeconds, chunkOverlapSeconds };
+  const chunkingEnabled = chunkSeconds !== undefined;
   const deferMaxSourcesUntilUnfinished = chunkingEnabled && opts.skipExisting === true;
   const assetInputs = selectMarlinAssetInputsForRun(
     loadMarlinAssetInputs(absProjectDir, opts.sourceFiles),
@@ -174,24 +234,32 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
   );
 
   const items: MarlinAssetEvents[] = [];
+  const captionBudget = normalizeMarlinCaptionTokenBudget(marlinPolicy);
   let evaluatedSourceCount = 0;
   for (const asset of assetInputs) {
+    // One duration probe per asset feeds both the chunk decision and the
+    // caption token budget; probe failures fail open to the whole path.
+    const durationSec = await probeVideoDurationSeconds(asset.sourcePath);
     const assetItem = chunkingEnabled
       ? await runMarlinAssetChunks({
-        opts,
+        opts: runOpts,
         projectDir: absProjectDir,
         outputPath,
         model,
         queries,
         asset,
         items,
+        captionBudget,
+        durationSec,
       })
       : await runMarlinWholeAsset({
-        opts,
+        opts: runOpts,
         projectDir: absProjectDir,
         model,
         queries,
         asset,
+        captionBudget,
+        durationSec,
       });
 
     if (assetItem) {
@@ -231,6 +299,8 @@ async function runMarlinWholeAsset(args: {
   model: MarlinModelRecord;
   queries: string[];
   asset: MarlinAssetInput;
+  captionBudget: MarlinCaptionTokenBudget;
+  durationSec: number | null;
 }): Promise<MarlinAssetEvents> {
   // Bounded proxy: never hand an unbounded-resolution source to the
   // worker (marlin-proxy.ts). Timestamps are unaffected — the proxy
@@ -240,7 +310,9 @@ async function runMarlinWholeAsset(args: {
     args.asset.sourcePath,
   );
   const caption = await optionalMarlinOperation(() =>
-    args.opts.marlinFn.caption(proxy.evaluationPath),
+    args.opts.marlinFn.caption(proxy.evaluationPath, {
+      maxNewTokens: marlinCaptionMaxNewTokens(args.captionBudget, args.durationSec),
+    }),
     args.asset.sourcePath,
   );
   const findResults = [];
@@ -252,14 +324,24 @@ async function runMarlinWholeAsset(args: {
       ));
     }
   }
-  return normalizeMarlinAssetEvents({
-    projectId: args.opts.projectId,
-    assetId: args.asset.assetId,
-    sourcePath: toProjectRelativePath(args.projectDir, args.asset.sourcePath),
-    model: args.model,
-    caption,
-    findResults,
-  });
+  return {
+    ...normalizeMarlinAssetEvents({
+      projectId: args.opts.projectId,
+      assetId: args.asset.assetId,
+      sourcePath: toProjectRelativePath(args.projectDir, args.asset.sourcePath),
+      model: args.model,
+      caption,
+      findResults,
+    }),
+    evaluation_status: "complete",
+    checkpoint_signature: marlinCheckpointSignature({
+      sourcePath: args.asset.sourcePath,
+      durationSec: args.durationSec,
+      chunkSeconds: args.opts.chunkSeconds,
+      chunkOverlapSeconds: args.opts.chunkOverlapSeconds,
+      modelSnapshot: args.model.model_snapshot,
+    }),
+  };
 }
 
 async function runMarlinAssetChunks(args: {
@@ -270,19 +352,35 @@ async function runMarlinAssetChunks(args: {
   queries: string[];
   asset: MarlinAssetInput;
   items: MarlinAssetEvents[];
+  captionBudget: MarlinCaptionTokenBudget;
+  durationSec: number | null;
 }): Promise<MarlinAssetEvents | null> {
   const existingArtifact = readJsonIfExists<MarlinEventsArtifact>(args.outputPath);
+  // Checkpoint binding: an existing item is only reusable when its
+  // signature still matches the current source identity, chunk plan, and
+  // model snapshot; stale items are re-evaluated from scratch.
+  const checkpointSignature = marlinCheckpointSignature({
+    sourcePath: args.asset.sourcePath,
+    durationSec: args.durationSec,
+    chunkSeconds: args.opts.chunkSeconds,
+    chunkOverlapSeconds: args.opts.chunkOverlapSeconds,
+    modelSnapshot: args.model.model_snapshot,
+  });
+  const existingItem = existingArtifact?.items.find((item) => item.asset_id === args.asset.assetId);
+  const bindingValid = existingItem?.checkpoint_signature === checkpointSignature;
   let assetItem = cloneAssetItem(
-    existingArtifact?.items.find((item) => item.asset_id === args.asset.assetId),
+    bindingValid ? existingItem : undefined,
     args.asset,
     args.projectDir,
   );
-  const chunks = await marlinChunksForAsset(args.asset.sourcePath, {
+  const failures: MarlinFailureRecord[] = [...(assetItem.failures ?? [])];
+  const chunks = marlinChunksForDuration(args.durationSec, {
     chunkSeconds: args.opts.chunkSeconds,
     chunkOverlapSeconds: args.opts.chunkOverlapSeconds,
   });
   if (chunks === null) {
-    const alreadyEvaluated = existingArtifact?.items.some((item) => item.asset_id === args.asset.assetId) ?? false;
+    const alreadyEvaluated = bindingValid &&
+      (existingArtifact?.items.some((item) => item.asset_id === args.asset.assetId) ?? false);
     if (args.opts.skipExisting && alreadyEvaluated) {
       return null;
     }
@@ -292,11 +390,19 @@ async function runMarlinAssetChunks(args: {
       model: args.model,
       queries: args.queries,
       asset: args.asset,
+      captionBudget: args.captionBudget,
+      durationSec: args.durationSec,
     });
   }
 
   const completed = args.opts.skipExisting ? completedChunkIndices(assetItem) : new Set<number>();
-  let selectedChunks = chunks.filter((chunk) => !completed.has(chunk.index));
+  let selectedChunks = chunks.filter((chunk) => {
+    if (!completed.has(chunk.index)) return true;
+    // Completed chunks with outstanding find failures only retry their finds.
+    return failures.some((failure) =>
+      failure.stage === "find" && failure.chunk_index === chunk.index
+    );
+  });
   if (args.opts.maxChunks !== undefined) {
     selectedChunks = selectedChunks.slice(0, args.opts.maxChunks);
   }
@@ -304,41 +410,99 @@ async function runMarlinAssetChunks(args: {
     return null;
   }
 
+  const overlapUs = Math.round((args.opts.chunkOverlapSeconds ?? 0) * 1_000_000);
   for (const chunk of selectedChunks) {
-    const range = await optionalMarlinOperation(() => createMarlinRangeProxy(
-      args.projectDir,
-      args.asset.sourcePath,
-      chunk.startSec,
-      chunk.endSec,
-    ), args.asset.sourcePath);
-    const proxy = await optionalMarlinOperation(() =>
-      prepareMarlinProxy(args.projectDir, range.rangePath),
-      args.asset.sourcePath,
-    );
-    const caption = await optionalMarlinOperation(() =>
-      args.opts.marlinFn.caption(proxy.evaluationPath),
-      args.asset.sourcePath,
-    );
-    const findResults = [];
-    if (!args.opts.captionOnly) {
-      for (const query of args.queries) {
-        findResults.push(await optionalMarlinOperation(() =>
-          args.opts.marlinFn.find(proxy.evaluationPath, query),
-          args.asset.sourcePath,
-        ));
+    // A completed chunk only owes outstanding find retries; its saved
+    // caption/events are reused and the caption is never re-run.
+    const retryFindsOnly = completed.has(chunk.index);
+    let proxy;
+    try {
+      const range = await createMarlinRangeProxy(
+        args.projectDir,
+        args.asset.sourcePath,
+        chunk.startSec,
+        chunk.endSec,
+      );
+      proxy = await prepareMarlinProxy(args.projectDir, range.rangePath);
+    } catch (error) {
+      recordChunkFailure(failures, { stage: "proxy", chunk_index: chunk.index }, error);
+      assetItem = withEvaluationStatus(assetItem, failures, checkpointSignature);
+      upsertAssetItem(args.items, assetItem);
+      writeMarlinArtifactCheckpoint({
+        projectDir: args.projectDir,
+        projectId: args.opts.projectId,
+        outputPath: args.outputPath,
+        model: args.model,
+        items: args.items,
+        applyToSegments: args.opts.applyToSegments,
+      });
+      continue;
+    }
+    const chunkStartUs = Math.round(chunk.startSec * 1_000_000);
+    const chunkEndUs = Math.round(chunk.endSec * 1_000_000);
+    let chunkCaption: MarlinRawCaption | undefined;
+    if (!retryFindsOnly) {
+      // Retrying a whole chunk supersedes any failure record left by earlier runs.
+      removeFailureRecordsForChunk(failures, chunk.index);
+      const chunkDurationSec = chunk.endSec - chunk.startSec;
+      try {
+        chunkCaption = await args.opts.marlinFn.caption(proxy.evaluationPath, {
+          maxNewTokens: marlinCaptionMaxNewTokens(args.captionBudget, chunkDurationSec),
+        });
+      } catch (error) {
+        recordChunkFailure(failures, { stage: "caption", chunk_index: chunk.index }, error);
+        assetItem = withEvaluationStatus(assetItem, failures, checkpointSignature);
+        upsertAssetItem(args.items, assetItem);
+        writeMarlinArtifactCheckpoint({
+          projectDir: args.projectDir,
+          projectId: args.opts.projectId,
+          outputPath: args.outputPath,
+          model: args.model,
+          items: args.items,
+          applyToSegments: args.opts.applyToSegments,
+        });
+        continue;
       }
     }
-    const chunkItem = normalizeMarlinAssetEvents({
-      projectId: args.opts.projectId,
-      assetId: args.asset.assetId,
-      sourcePath: toProjectRelativePath(args.projectDir, args.asset.sourcePath),
-      model: args.model,
-      caption,
-      findResults,
-      chunkOffsetUs: Math.round(chunk.startSec * 1_000_000),
-      chunkIndex: chunk.index,
-    });
-    assetItem = mergeMarlinChunkItem(assetItem, chunkItem, chunk);
+    const findResults = [];
+    if (!args.opts.captionOnly) {
+      const queryIndexes = retryFindsOnly
+        ? uniqueQueryIndexes(failures, chunk.index, args.queries.length)
+        : args.queries.map((_query, index) => index);
+      for (const queryIndex of queryIndexes) {
+        try {
+          findResults.push(await args.opts.marlinFn.find(proxy.evaluationPath, args.queries[queryIndex]));
+          removeFailureRecord(failures, chunk.index, "find", queryIndex);
+        } catch (error) {
+          recordChunkFailure(failures, { stage: "find", chunk_index: chunk.index, query_index: queryIndex }, error);
+        }
+      }
+    }
+    if (retryFindsOnly) {
+      // Reuse the saved caption/events and previously successful query
+      // results; append only this round's retried find results.
+      const offsetFindResults = findResults.map((result) => normalizeMarlinFindResult(result, chunkStartUs));
+      assetItem = withEvaluationStatus(withCompletedChunk({
+        ...assetItem,
+        find_results: [...assetItem.find_results, ...offsetFindResults],
+      }, chunk.index), failures, checkpointSignature);
+    } else if (chunkCaption !== undefined) {
+      const chunkItem = normalizeMarlinAssetEvents({
+        projectId: args.opts.projectId,
+        assetId: args.asset.assetId,
+        sourcePath: toProjectRelativePath(args.projectDir, args.asset.sourcePath),
+        model: args.model,
+        caption: chunkCaption,
+        findResults,
+        chunkOffsetUs: chunkStartUs,
+        chunkIndex: chunk.index,
+      });
+      assetItem = withEvaluationStatus(
+        withCompletedChunk(mergeMarlinChunkItem(assetItem, chunkItem, chunk, overlapUs), chunk.index),
+        failures,
+        checkpointSignature,
+      );
+    }
     upsertAssetItem(args.items, assetItem);
     writeMarlinArtifactCheckpoint({
       projectDir: args.projectDir,
@@ -388,17 +552,20 @@ export function computeMarlinChunkBoundaries(
   return chunks;
 }
 
-async function marlinChunksForAsset(
-  sourcePath: string,
+/**
+ * Deterministic chunk plan from an already-probed duration. Returns null
+ * for short/unknown-duration sources so they keep the whole-asset path.
+ */
+function marlinChunksForDuration(
+  durationSec: number | null,
   options: {
     chunkSeconds?: number;
     chunkOverlapSeconds?: number;
   },
-): Promise<MarlinChunkBoundary[] | null> {
+): MarlinChunkBoundary[] | null {
   if (options.chunkSeconds === undefined) {
     return null;
   }
-  const durationSec = await probeVideoDurationSeconds(sourcePath);
   if (durationSec === null || durationSec <= options.chunkSeconds) {
     return null;
   }
@@ -407,6 +574,24 @@ async function marlinChunksForAsset(
     options.chunkSeconds,
     options.chunkOverlapSeconds ?? 0,
   );
+}
+
+/** Auto-chunk config resolved from the marlin policy section (fail-open to disabled). */
+export function marlinAutoChunkConfigFromPolicy(
+  policy: MarlinPolicy | undefined,
+): { chunkSeconds?: number; chunkOverlapSeconds?: number } {
+  const targetUs = policy?.chunk_target_us;
+  if (typeof targetUs !== "number" || !Number.isFinite(targetUs) || targetUs <= 0) {
+    return {};
+  }
+  const chunkSeconds = targetUs / 1_000_000;
+  const overlapUs = policy?.chunk_overlap_us;
+  let chunkOverlapSeconds = 0;
+  if (typeof overlapUs === "number" && Number.isFinite(overlapUs) && overlapUs > 0) {
+    // Keep overlap strictly below the chunk length (boundary invariant).
+    chunkOverlapSeconds = Math.min(overlapUs / 1_000_000, chunkSeconds / 2);
+  }
+  return { chunkSeconds, chunkOverlapSeconds };
 }
 
 function cloneAssetItem(
@@ -431,7 +616,10 @@ function cloneAssetItem(
 }
 
 function completedChunkIndices(item: MarlinAssetEvents): Set<number> {
-  const indices = new Set<number>();
+  // Explicit completed-chunk markers keep zero-event successful chunks
+  // from being re-inferred on resume; event chunk indices remain a
+  // compatible fallback for older artifacts.
+  const indices = new Set<number>(item.completed_chunks ?? []);
   for (const event of item.events) {
     if (event.chunk_index !== undefined) {
       indices.add(event.chunk_index);
@@ -444,28 +632,168 @@ function mergeMarlinChunkItem(
   existing: MarlinAssetEvents,
   chunkItem: MarlinAssetEvents,
   chunk: MarlinChunkBoundary,
+  overlapUs = 0,
 ): MarlinAssetEvents {
   const chunkStartUs = Math.round(chunk.startSec * 1_000_000);
   const chunkEndUs = Math.round(chunk.endSec * 1_000_000);
-  const events = [
-    ...existing.events.filter((event) => event.chunk_index !== chunk.index),
-    ...chunkItem.events,
-  ].sort((a, b) => a.start_us - b.start_us || a.event_id.localeCompare(b.event_id));
-  const findResults = [
-    ...existing.find_results.filter((result) =>
-      result.span_start_us === null ||
-      result.span_start_us < chunkStartUs ||
-      result.span_start_us >= chunkEndUs
-    ),
-    ...chunkItem.find_results,
-  ];
-
+  // Cross-chunk dedupe is confined to the real overlap window shared with
+  // the previous chunk; events outside it are never collapsed.
+  const hasOverlap = overlapUs > 0;
+  const events = dedupeIncomingChunkEvents(
+    existing.events.filter((event) => event.chunk_index !== chunk.index),
+    chunkItem.events,
+    {
+      incomingChunkIndex: chunk.index,
+      ...(hasOverlap ? {
+        overlapStartUs: chunkStartUs,
+        overlapEndUs: Math.min(chunkStartUs + overlapUs, chunkEndUs),
+      } : {}),
+    },
+  );
   return {
     ...existing,
     scene: appendUniqueText(existing.scene, chunkItem.scene, " / "),
     caption: appendOptionalText(existing.caption, chunkItem.caption),
     events,
-    find_results: findResults,
+    find_results: mergeFindResults(existing.find_results, chunkItem.find_results, chunkStartUs, chunkEndUs),
+  };
+}
+
+function mergeFindResults(
+  existing: MarlinFindResult[],
+  incoming: MarlinFindResult[],
+  chunkStartUs: number,
+  chunkEndUs: number,
+): MarlinFindResult[] {
+  return [
+    ...existing.filter((result) =>
+      result.span_start_us === null ||
+      result.span_start_us < chunkStartUs ||
+      result.span_start_us >= chunkEndUs
+    ),
+    ...incoming,
+  ];
+}
+
+/**
+ * Local deterministic boundary-overlap rule. Only events from *different*
+ * chunks are compared, and only when BOTH lie inside the actual overlap
+ * window shared by the adjacent chunks, so distinct same-description
+ * events outside the window — and all events inside one chunk — are
+ * always kept. The earliest event wins; output stays sorted by asset time.
+ */
+export function dedupeIncomingChunkEvents(
+  existing: MarlinEvent[],
+  incoming: MarlinEvent[],
+  options: { incomingChunkIndex?: number; overlapStartUs?: number; overlapEndUs?: number },
+): MarlinEvent[] {
+  const sorted = [...existing, ...incoming].sort(
+    (a, b) => a.start_us - b.start_us || a.event_id.localeCompare(b.event_id),
+  );
+  const windowActive = options.overlapStartUs !== undefined &&
+    options.overlapEndUs !== undefined &&
+    options.overlapEndUs > options.overlapStartUs;
+  if (!windowActive) return sorted;
+  const inWindow = (event: MarlinEvent) =>
+    event.start_us >= options.overlapStartUs! && event.start_us < options.overlapEndUs!;
+  const kept: MarlinEvent[] = [];
+  for (const event of sorted) {
+    // Same-chunk pairs are never duplicates (candidate-side chunk check);
+    // only distinct-chunk pairs fully inside the overlap window collapse.
+    const duplicate = kept.some((candidate) =>
+      candidate.chunk_index !== event.chunk_index &&
+      candidate.description === event.description &&
+      inWindow(candidate) &&
+      inWindow(event)
+    );
+    if (!duplicate) kept.push(event);
+  }
+  return kept;
+}
+
+function removeFailureRecordsForChunk(failures: MarlinFailureRecord[], chunkIndex: number): void {
+  for (let index = failures.length - 1; index >= 0; index -= 1) {
+    if (failures[index].chunk_index === chunkIndex) failures.splice(index, 1);
+  }
+}
+
+function removeFailureRecord(
+  failures: MarlinFailureRecord[],
+  chunkIndex: number,
+  stage: MarlinFailureStage,
+  queryIndex?: number,
+): void {
+  for (let index = failures.length - 1; index >= 0; index -= 1) {
+    const failure = failures[index];
+    if (
+      failure.chunk_index === chunkIndex &&
+      failure.stage === stage &&
+      failure.query_index === queryIndex
+    ) {
+      failures.splice(index, 1);
+    }
+  }
+}
+
+/**
+ * Record a failure without any secret material: raw error text and raw
+ * query strings never enter the artifact — only the location, a stable
+ * reason class, and a non-secret query ordinal.
+ */
+function recordChunkFailure(
+  failures: MarlinFailureRecord[],
+  target: { stage: MarlinFailureStage; chunk_index: number; query_index?: number },
+  _error: unknown,
+): void {
+  // A retried target supersedes its previous record instead of duplicating.
+  removeFailureRecord(failures, target.chunk_index, target.stage, target.query_index);
+  failures.push({
+    stage: target.stage,
+    reason_class: classifyMarlinFailure(_error),
+    chunk_index: target.chunk_index,
+    ...(target.query_index !== undefined ? { query_index: target.query_index } : {}),
+  });
+}
+
+/** Outstanding find-failure ordinals for one chunk, clamped to the query list. */
+function uniqueQueryIndexes(failures: MarlinFailureRecord[], chunkIndex: number, queryCount: number): number[] {
+  const indexes = new Set<number>();
+  for (const failure of failures) {
+    if (
+      failure.stage === "find" &&
+      failure.chunk_index === chunkIndex &&
+      failure.query_index !== undefined &&
+      failure.query_index >= 0 &&
+      failure.query_index < queryCount
+    ) {
+      indexes.add(failure.query_index);
+    }
+  }
+  return [...indexes].sort((a, b) => a - b);
+}
+
+function withCompletedChunk(item: MarlinAssetEvents, chunkIndex: number): MarlinAssetEvents {
+  const indexes = new Set(item.completed_chunks ?? []);
+  indexes.add(chunkIndex);
+  return { ...item, completed_chunks: [...indexes].sort((a, b) => a - b) };
+}
+
+function withEvaluationStatus(
+  item: MarlinAssetEvents,
+  failures: MarlinFailureRecord[],
+  checkpointSignature?: string,
+): MarlinAssetEvents {
+  const boundItem: MarlinAssetEvents = checkpointSignature
+    ? { ...item, checkpoint_signature: checkpointSignature }
+    : item;
+  if (failures.length === 0) {
+    const { failures: _omitted, ...rest } = boundItem;
+    return { ...rest, evaluation_status: "complete" };
+  }
+  return {
+    ...boundItem,
+    evaluation_status: "degraded",
+    failures: failures.map((entry) => ({ ...entry })),
   };
 }
 
@@ -544,10 +872,24 @@ export function applyMarlinEventsToSegments(projectDir: string, artifact: Marlin
     return false;
   }
   const contextKnowledge = loadBriefContextKnowledge(absProjectDir);
+  const nonTemporalAssetIds = new Set(
+    [...readAuthoritativeAssetMediaCapabilities(absProjectDir)]
+      .filter(([, capability]) => capability.media_kind !== "image" && (
+        capability.media_kind === "audio" || capability.source_capabilities.has_video === false
+      ))
+      .map(([assetId]) => assetId),
+  );
 
   const eventsByAsset = new Map(artifact.items.map((item) => [item.asset_id, item]));
   let changed = false;
   const nextItems = segments.items.map((segment) => {
+    if (nonTemporalAssetIds.has(segment.asset_id)) {
+      if (segment.peak_analysis === undefined) return segment;
+      const nextSegment: SegmentDocItem = { ...segment };
+      delete nextSegment.peak_analysis;
+      changed = true;
+      return nextSegment;
+    }
     const assetEvents = eventsByAsset.get(segment.asset_id);
     if (!assetEvents) return segment;
 
@@ -635,6 +977,10 @@ export function createMarlinFnFromEnvironment(
     device: process.env.VOS_MARLIN_DEVICE,
     mock: mockFromEnv ?? policy.mock,
     requestTimeoutMs: overrides.requestTimeoutMs,
+    captionMaxNewTokensMax: positiveIntegerOr(
+      policy.caption_max_new_tokens_max,
+      MARLIN_CAPTION_TOKEN_BUDGET_DEFAULTS.longSourceMaxNewTokens,
+    ),
   });
 }
 
@@ -679,7 +1025,10 @@ export function loadMarlinAssetInputs(projectDir: string, sourceFiles: string[])
 
   const inputs = items
     .filter((item): item is AssetDocItem & { asset_id: string } =>
-      Boolean(item.asset_id) && !(Boolean(item.audio_stream) && !item.video_stream)
+      Boolean(item.asset_id) &&
+      item.media_kind !== "audio" &&
+      item.source_capabilities?.has_temporal_video !== false &&
+      !(Boolean(item.audio_stream) && !hasTemporalVideoForMarlin(item))
     )
     .map((item, index) => ({
       assetId: item.asset_id,
@@ -986,6 +1335,35 @@ function stableHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 }
 
+/**
+ * Small binding signature for an asset checkpoint: source identity
+ * (path/size/mtime, the same convention as the proxy cache), chunk
+ * plan/policy, and model snapshot. A mismatch means the saved events must
+ * not be reused under new attribution — only that asset re-evaluates.
+ */
+export function marlinCheckpointSignature(args: {
+  sourcePath: string;
+  durationSec: number | null;
+  chunkSeconds?: number;
+  chunkOverlapSeconds?: number;
+  modelSnapshot: string;
+}): string {
+  let sourceIdentity = `${path.basename(args.sourcePath)}:missing`;
+  try {
+    const stat = fs.statSync(args.sourcePath);
+    sourceIdentity = `${path.basename(args.sourcePath)}:${stat.size}:${Math.floor(stat.mtimeMs)}`;
+  } catch {
+    // Missing/unreadable source keeps a stable placeholder identity.
+  }
+  return stableHash({
+    source_identity: sourceIdentity,
+    duration_sec: args.durationSec,
+    chunk_seconds: args.chunkSeconds ?? null,
+    chunk_overlap_seconds: args.chunkOverlapSeconds ?? null,
+    model_snapshot: args.modelSnapshot,
+  });
+}
+
 function isMarlinPeakAnalysis(peakAnalysis: NonNullable<SegmentDocItem["peak_analysis"]>): boolean {
   const mode = peakAnalysis.provenance?.precision_mode;
   const sourcePass = peakAnalysis.peak_moments?.[0]?.source_pass;
@@ -1035,6 +1413,84 @@ function resolveMarlinPolicy(projectDir: string, repoRoot?: string): MarlinPolic
   const { resolved } = resolvePolicy(projectDir, repoRoot);
   const policy = resolved.marlin;
   return isRecord(policy) ? policy as MarlinPolicy : {};
+}
+
+/** Policy resolution that fails open to "no policy" (e.g. unreadable config). */
+function safeMarlinPolicy(projectDir: string, repoRoot?: string): MarlinPolicy | undefined {
+  try {
+    return resolveMarlinPolicy(projectDir, repoRoot);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Shared failure classification for readiness reasons and degraded records. */
+export function classifyMarlinFailure(error: unknown): MarlinFailureReasonClass {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/timed?\s*out|timeout/i.test(message)) return "marlin_worker_timeout";
+  if (/model[^\n]*(?:missing|not found|unavailable)|model_not_found/i.test(message)) {
+    return "marlin_model_unavailable";
+  }
+  if (/\bENOENT\b|\bspawn\b|worker[^\n]*(?:missing|not found|unavailable)/i.test(message)) {
+    return "marlin_worker_unavailable";
+  }
+  return "marlin_worker_failure";
+}
+
+/**
+ * Normalize the caption token budget from a marlin policy section.
+ * Invalid / zero / negative values fall back per-field to safe defaults;
+ * generation is always bounded.
+ */
+export function normalizeMarlinCaptionTokenBudget(
+  marlinPolicy: MarlinPolicy | undefined,
+): MarlinCaptionTokenBudget {
+  const defaults = MARLIN_CAPTION_TOKEN_BUDGET_DEFAULTS;
+  const longSourceMaxNewTokens = positiveIntegerOr(
+    marlinPolicy?.caption_max_new_tokens_max,
+    defaults.longSourceMaxNewTokens,
+  );
+  // short <= max is a policy invariant; the max is the hard ceiling.
+  const shortSourceMaxNewTokens = Math.min(
+    positiveIntegerOr(marlinPolicy?.caption_max_new_tokens_short, defaults.shortSourceMaxNewTokens),
+    longSourceMaxNewTokens,
+  );
+  return {
+    shortSourceMaxNewTokens,
+    longSourceMaxNewTokens,
+    shortSourceMaxSeconds: nonNegativeNumberOr(
+      marlinPolicy?.caption_short_source_max_seconds,
+      defaults.shortSourceMaxSeconds,
+    ),
+  };
+}
+
+/** Pure budget choice: known-short sources get the smaller cap, everything else the hard max. */
+export function marlinCaptionMaxNewTokens(
+  budget: MarlinCaptionTokenBudget,
+  durationSeconds: number | null | undefined,
+): number {
+  if (
+    typeof durationSeconds === "number" &&
+    Number.isFinite(durationSeconds) &&
+    durationSeconds > 0 &&
+    durationSeconds <= budget.shortSourceMaxSeconds
+  ) {
+    return budget.shortSourceMaxNewTokens;
+  }
+  return budget.longSourceMaxNewTokens;
+}
+
+function positiveIntegerOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : fallback;
+}
+
+function nonNegativeNumberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : fallback;
 }
 
 function resolveAssetSourcePath(

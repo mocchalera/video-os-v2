@@ -17,9 +17,21 @@ import {
   type CanonicalRenderInputSet,
 } from "../render/canonical-render-input.js";
 import { assertSourceInputsUnchanged, createSourceInputAttestation } from "../render/source-input-attestation.js";
-import { buildStillVideoArgs } from "../render/assembler.js";
+import {
+  assembleTimelineToMp4,
+  buildStillVideoArgs,
+  resolveStillRenderMotion,
+  type ExecFileLike as AssemblerExecFileLike,
+} from "../render/assembler.js";
+import {
+  renderStillMotionSegment,
+  buildStillVerticalStaticArgs,
+  type ExecFileLike,
+} from "../render/still-motion-render.js";
 import { computeSha256 } from "../packaging/manifest.js";
 import { assertMediaWriteReady } from "../system/media-write-doctor.js";
+import type { CaptionVisualTreatmentInput } from "../caption/visual-treatment.js";
+import type { StillImageTimelineMetadata } from "../compiler/types.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -32,7 +44,9 @@ export interface PreviewClip {
   timeline_duration_frames: number;
   beat_id: string;
   media_kind?: string;
-  still_image?: { fit_mode?: "contain" | "cover"; background?: string };
+  still_image?: Partial<StillImageTimelineMetadata>;
+  /** Original plan duration kept when firstNSec trims this clip's output. */
+  motion_frame_count?: number;
 }
 
 export interface PreviewSegmentOptions {
@@ -48,6 +62,12 @@ export interface PreviewSegmentOptions {
   execFileImpl?: typeof execFile;
   /** Test/host seam for the fail-closed toolchain and capacity gate. */
   assertMediaWriteReadyImpl?: typeof assertMediaWriteReady;
+  /** Optional output geometry for the canonical baseline path. */
+  outputGeometry?: { width: number; height: number };
+  /** Pre-resolved RFA-020 input shared with final/package rendering. */
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput;
+  /** Narrow review-only seam for a hash-bound input before production visual approval. */
+  captionVisualTreatmentReviewOnlyPreapproval?: boolean;
 }
 
 export interface PreviewSegmentResult {
@@ -76,11 +96,18 @@ interface TimelineData {
         timeline_duration_frames: number;
         beat_id: string;
         media_kind?: string;
-        still_image?: { fit_mode?: "contain" | "cover"; background?: string };
+        still_image?: Partial<StillImageTimelineMetadata>;
       }>;
     }>;
   };
   markers: Array<{ frame: number; kind: string; label: string }>;
+  transitions?: Array<{
+    transition_id: string;
+    from_clip_id: string;
+    to_clip_id: string;
+    transition_type: string;
+    transition_frames?: number;
+  }>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -158,6 +185,9 @@ export function filterByDuration(
       src_out_us: imageAssetIds.has(c.asset_id) || c.media_kind === "image" || c.still_image
         ? c.src_out_us
         : c.src_in_us + Math.round(srcDurationUs * ratio),
+      ...(imageAssetIds.has(c.asset_id) || c.media_kind === "image" || c.still_image
+        ? { motion_frame_count: c.timeline_duration_frames }
+        : {}),
     };
   });
 }
@@ -194,6 +224,7 @@ export function buildClipExtractArgs(
   srcOutUs: number,
   outputPath: string,
   targetDurationSec?: number,
+  outputGeometry?: { width: number; height: number },
 ): string[] {
   const startSec = srcInUs / 1_000_000;
   const sourceDurationSec = Math.max(0, (srcOutUs - srcInUs) / 1_000_000);
@@ -206,7 +237,9 @@ export function buildClipExtractArgs(
     "-ss", startSec.toFixed(6),
     "-i", sourcePath,
     "-t", durationSec.toFixed(6),
-    "-vf", "scale=-2:720",
+    "-vf", outputGeometry
+      ? `scale=${outputGeometry.width}:${outputGeometry.height}:force_original_aspect_ratio=decrease,pad=${outputGeometry.width}:${outputGeometry.height}:(ow-iw)/2:(oh-ih)/2`
+      : "scale=-2:720",
     "-c:v", "libx264",
     "-preset", "ultrafast",
     "-crf", "28",
@@ -251,6 +284,81 @@ export function defaultOutputPath(
     return path.join(dir, `preview-first${firstNSec}s.mp4`);
   }
   return path.join(dir, "preview-full.mp4");
+}
+
+function hasRenderableTransitions(
+  timeline: TimelineData,
+  clips: PreviewClip[],
+): boolean {
+  const clipIds = new Set(clips.map((clip) => clip.clip_id));
+  return (timeline.transitions ?? []).some((transition) =>
+    clipIds.has(transition.from_clip_id)
+    && clipIds.has(transition.to_clip_id)
+    && transition.transition_type !== "cut",
+  );
+}
+
+function buildPreviewSourceOverrides(
+  clips: PreviewClip[],
+  sourceMap: LoadedSourceMap,
+  canonicalInputs: CanonicalRenderInputSet,
+): Record<string, string> {
+  const overrides: Record<string, string> = {};
+  for (const clip of clips) {
+    const sourcePath = resolveSourcePath(sourceMap, clip.asset_id, canonicalInputs);
+    if (!sourcePath) {
+      throw new Error(
+        `Source file not found for asset ${clip.asset_id}. `
+        + "Ensure source_map.json exists in 02_media/ with valid paths.",
+      );
+    }
+    overrides[clip.asset_id] = sourcePath;
+  }
+  return overrides;
+}
+
+/**
+ * Render a transitioned preview through the exact final assembler chain, then
+ * take a prefix by frame copy when firstNSec is requested. Rendering the full
+ * canonical chain first keeps overlap/xfade timing intact at the preview
+ * boundary and makes preview/final frame hashes comparable.
+ */
+async function renderCanonicalTransitionPreview(
+  opts: PreviewSegmentOptions,
+  timelinePath: string,
+  timeline: TimelineData,
+  outputPath: string,
+  tmpDir: string,
+  canonicalInputs: CanonicalRenderInputSet,
+): Promise<number> {
+  const allClips = extractVideoClips(timeline);
+  const fullPath = path.join(tmpDir, "canonical-transition-full.mp4");
+  const sourceOverrides = buildPreviewSourceOverrides(allClips, opts.sourceMap, canonicalInputs);
+  const assembly = await assembleTimelineToMp4({
+    projectDir: opts.projectDir,
+    timelinePath,
+    outputPath: fullPath,
+    includeAudio: false,
+    sourceOverrides,
+    ...(opts.execFileImpl
+      ? { execFileImpl: opts.execFileImpl as unknown as AssemblerExecFileLike }
+      : {}),
+  });
+  const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
+  const requestedFrames = opts.firstNSec === undefined
+    ? assembly.timelineDurationFrames
+    : Math.min(assembly.timelineDurationFrames, Math.max(1, Math.ceil(opts.firstNSec * fps)));
+
+  if (requestedFrames === assembly.timelineDurationFrames) {
+    fs.copyFileSync(fullPath, outputPath);
+  } else {
+    await execFilePromise("ffmpeg", [
+      "-y", "-i", fullPath,
+      "-map", "0:v:0", "-frames:v", String(requestedFrames),
+      "-c:v", "copy", "-an", outputPath,
+    ], opts.execFileImpl);
+  }
+  return requestedFrames;
 }
 
 // ── Main Render Function ───────────────────────────────────────────
@@ -334,58 +442,127 @@ export async function renderPreviewSegment(
   try {
     const clipPaths: string[] = [];
 
-    // Extract each clip
-    for (let i = 0; i < clips.length; i++) {
-      const clip = clips[i];
-      const sourcePath = resolveSourcePath(opts.sourceMap, clip.asset_id, canonicalInputs);
-      if (!sourcePath) {
-        throw new Error(
-          `Source file not found for asset ${clip.asset_id}. ` +
-          `Ensure source_map.json exists in 02_media/ with valid paths.`,
+    let durationSec: number;
+    if (!opts.beatId && hasRenderableTransitions(timeline, extractVideoClips(timeline))) {
+      const renderedFrames = await renderCanonicalTransitionPreview(
+        opts,
+        opts.timelinePath,
+        timeline,
+        outputPath,
+        tmpDir,
+        canonicalInputs,
+      );
+      durationSec = renderedFrames / fps;
+    } else {
+      // Extract each clip
+      for (let i = 0; i < clips.length; i++) {
+        const clip = clips[i];
+        const sourcePath = resolveSourcePath(opts.sourceMap, clip.asset_id, canonicalInputs);
+        if (!sourcePath) {
+          throw new Error(
+            `Source file not found for asset ${clip.asset_id}. `
+            + "Ensure source_map.json exists in 02_media/ with valid paths.",
+          );
+        }
+
+        const clipOutPath = path.join(tmpDir, `clip_${String(i).padStart(4, "0")}.mp4`);
+        const targetDurationSec = clipTimelineDurationSec(
+          clip,
+          timeline.sequence.fps_num,
+          timeline.sequence.fps_den,
         );
+        const isStill = canonicalInputs.imageAssetIds.has(clip.asset_id);
+        const fpsRational = `${timeline.sequence.fps_num}/${timeline.sequence.fps_den}`;
+        if (isStill) {
+          // Canonical preview uses the exact same still-render lane as final
+          // assembly: the NumPy Float64 Lanczos worker for camera motion
+          // (fail-closed on missing capability), the static composite for the
+          // vertical blur-backdrop, and the plain filter otherwise.
+          const render = resolveStillRenderMotion(clip.still_image, {
+            width: timeline.sequence.width,
+            height: timeline.sequence.height,
+            frameCount: clip.motion_frame_count ?? clip.timeline_duration_frames,
+          });
+          if (render.motion) {
+            await renderStillMotionSegment({
+              execFileImpl: opts.execFileImpl as unknown as ExecFileLike,
+              inputPath: sourcePath, outputPath: clipOutPath,
+              frameCount: clip.timeline_duration_frames,
+              width: timeline.sequence.width,
+              height: timeline.sequence.height,
+              fpsRational,
+              motion: render.motion,
+              composition: render.composition,
+              fitMode: render.fitMode,
+              background: render.background,
+              clipId: clip.clip_id,
+              sourceStillId: clip.still_image?.source_still_id,
+              stillInstanceId: clip.still_image?.still_instance_id,
+              hold: clip.still_image?.hold_resolution
+                ? {
+                    unit: clip.still_image.hold_resolution.unit,
+                    resolved_frames: clip.still_image.hold_resolution.resolved_frames,
+                    ...(clip.still_image.hold_resolution.section_id
+                      ? { section_id: clip.still_image.hold_resolution.section_id }
+                      : {}),
+                    ...(clip.still_image.hold_resolution.boundary
+                      ? { boundary: clip.still_image.hold_resolution.boundary }
+                      : {}),
+                    ...(clip.still_image.hold_resolution.boundary_frame !== undefined
+                      ? { boundary_frame: clip.still_image.hold_resolution.boundary_frame }
+                      : {}),
+                  }
+                : undefined,
+            });
+          } else if (render.composition) {
+            await execFilePromise("ffmpeg", buildStillVerticalStaticArgs(
+              sourcePath, clipOutPath, clip.timeline_duration_frames,
+              render.composition, fpsRational,
+            ), opts.execFileImpl);
+          } else {
+            await execFilePromise("ffmpeg", buildStillVideoArgs(
+              sourcePath, clipOutPath, clip.timeline_duration_frames,
+              timeline.sequence.width, timeline.sequence.height,
+              fpsRational,
+              clip.still_image?.fit_mode ?? "contain", clip.still_image?.background ?? "black",
+              clip.still_image?.transform,
+            ), opts.execFileImpl);
+          }
+        } else {
+          await execFilePromise("ffmpeg", buildClipExtractArgs(
+            sourcePath,
+            clip.src_in_us,
+            clip.src_out_us,
+            clipOutPath,
+            targetDurationSec,
+            opts.outputGeometry,
+          ), opts.execFileImpl);
+        }
+        clipPaths.push(clipOutPath);
       }
 
-      const clipOutPath = path.join(tmpDir, `clip_${String(i).padStart(4, "0")}.mp4`);
-      const targetDurationSec = clipTimelineDurationSec(
-        clip,
-        timeline.sequence.fps_num,
-        timeline.sequence.fps_den,
-      );
-      const isStill = canonicalInputs.imageAssetIds.has(clip.asset_id);
-      const args = isStill
-        ? buildStillVideoArgs(
-            sourcePath, clipOutPath, clip.timeline_duration_frames,
-            timeline.sequence.width, timeline.sequence.height,
-            `${timeline.sequence.fps_num}/${timeline.sequence.fps_den}`,
-            clip.still_image?.fit_mode ?? "contain", clip.still_image?.background ?? "black",
-          )
-        : buildClipExtractArgs(sourcePath, clip.src_in_us, clip.src_out_us, clipOutPath, targetDurationSec);
-      await execFilePromise("ffmpeg", args, opts.execFileImpl);
-      clipPaths.push(clipOutPath);
+      // Concatenate clips
+      if (clipPaths.length === 1) {
+        // Single clip — just move it
+        fs.renameSync(clipPaths[0], outputPath);
+      } else {
+        // Multiple clips — use concat demuxer
+        const concatFilePath = path.join(tmpDir, "concat.txt");
+        fs.writeFileSync(concatFilePath, buildConcatFileContent(clipPaths), "utf-8");
+
+        await execFilePromise("ffmpeg", [
+          "-y",
+          "-f", "concat",
+          "-safe", "0",
+          "-i", concatFilePath,
+          "-c", "copy",
+          outputPath,
+        ], opts.execFileImpl);
+      }
+
+      const totalFrames = clips.reduce((sum, c) => sum + c.timeline_duration_frames, 0);
+      durationSec = totalFrames / fps;
     }
-
-    // Concatenate clips
-    if (clipPaths.length === 1) {
-      // Single clip — just move it
-      fs.renameSync(clipPaths[0], outputPath);
-    } else {
-      // Multiple clips — use concat demuxer
-      const concatFilePath = path.join(tmpDir, "concat.txt");
-      fs.writeFileSync(concatFilePath, buildConcatFileContent(clipPaths), "utf-8");
-
-      await execFilePromise("ffmpeg", [
-        "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", concatFilePath,
-        "-c", "copy",
-        outputPath,
-      ], opts.execFileImpl);
-    }
-
-    // Compute total duration
-    const totalFrames = clips.reduce((sum, c) => sum + c.timeline_duration_frames, 0);
-    const durationSec = totalFrames / fps;
 
     if (sourceInputsBefore) try {
       const sourceInputsAfter = createSourceInputAttestation(opts.projectDir, {

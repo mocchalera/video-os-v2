@@ -1,0 +1,29 @@
+version: platform-safe-zone-profile/v1
+profile_id: fixture-unknown-v1
+platform: fixture
+surface: fixture
+delivery_variant: unknown
+evidence_status: unavailable
+source_references:
+  - url: https://www.w3.org/TR/SVG/
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: video-os-test-fixture
+    evidence_kind: decision_hold
+    notes: No screenshot or measured coordinates are available.
+measured_at: null
+geometry:
+  status: unknown
+  coordinate_system: unknown
+  viewport: { status: unknown }
+  ui_regions: { unknown: true, regions: [] }
+  safe_regions: { unknown: true, regions: [] }
+  method: unknown
+  confidence: unknown
+device_evidence: { status: unknown }
+screenshot_evidence: { status: unknown }
+supersession: { state: active }
+fallback:
+  mode: hold
+  human_preview_required: true
+  reason: Unknown safe-zone evidence requires human platform preview.

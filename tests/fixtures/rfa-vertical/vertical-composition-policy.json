@@ -1,0 +1,27 @@
+{
+  "version": "vertical-composition-policy/v1",
+  "policy_id": "fixture-vertical-composition-v1",
+  "output": { "aspect_ratio": "9:16", "coordinate_system": "normalized_top_left", "width": 1080, "height": 1920 },
+  "checks": {
+    "person_occupancy": { "minimum": 0.08, "maximum": 0.65 },
+    "headroom": { "minimum_top_margin": 0.04, "maximum_top_margin": 0.24 },
+    "look_room": { "minimum_margin": 0.08 },
+    "hands": { "mode": "protect_if_present", "minimum_confidence": 0.35 },
+    "microphone": { "mode": "protect_if_present", "minimum_confidence": 0.35 },
+    "evidence": { "mode": "required", "minimum_confidence": 0.5 }
+  },
+  "layout_anchors": {
+    "speech_lower": { "x": 0.08, "y": 0.68, "width": 0.84, "height": 0.2 },
+    "keyword_center": { "x": 0.1, "y": 0.35, "width": 0.8, "height": 0.3 },
+    "evidence_lower": { "x": 0.08, "y": 0.55, "width": 0.84, "height": 0.28 }
+  },
+  "zoom_intents": {
+    "emphasis": { "max_zoom": 1.3, "allow": true },
+    "reaction": { "max_zoom": 1.2, "allow": true },
+    "evidence": { "max_zoom": 1.12, "allow": true },
+    "reset": { "max_zoom": 1, "allow": true }
+  },
+  "frames": { "required_roles": ["first", "representative", "last"], "representative_count": 1 },
+  "source": { "require_identity": true, "require_av_geometry": true },
+  "degrade": { "missing_evidence": "human_hold", "failed_check": "safe_degrade", "safe_mode": "identity" }
+}

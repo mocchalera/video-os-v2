@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vertical Social Composition"
+  short_description: "Resolve evidence-backed vertical composition inputs"
+  default_prompt: "Inspect source framing evidence and resolve a registered vertical composition input."

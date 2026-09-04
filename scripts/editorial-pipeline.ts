@@ -4,7 +4,7 @@
  *
  * Hybrid two-pass editorial pipeline.
  *
- *   npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render] [--skip-qa]
+ *   npx tsx scripts/editorial-pipeline.ts --project <dir> [--lyrics <path> --timing-plan <path>] [--skip-fine] [--skip-render] [--skip-qa]
  */
 
 import * as path from "node:path";
@@ -54,6 +54,12 @@ import {
 import {
   readAssetMediaCapabilities,
 } from "../runtime/artifacts/source-media-capabilities.js";
+import {
+  buildSelectionCoverageUncertaintyRegister,
+  SelectionCoverageBlockedError,
+} from "../runtime/pipeline/editorial-planning-contract.js";
+import { captionCommand } from "../runtime/commands/caption.js";
+import { readAuthoredCaptionStatus } from "../runtime/caption/authored-lyrics.js";
 
 export { loadMarlinEvents } from "../runtime/pipeline/editorial-context.js";
 export {
@@ -66,7 +72,7 @@ export {
   type EditorialPipelineTerminalStatus,
 } from "./editorial-downstream.js";
 
-const USAGE = "Usage: npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render] [--qa] [--skip-qa]";
+const USAGE = "Usage: npx tsx scripts/editorial-pipeline.ts --project <dir> [--lyrics <path> --timing-plan <path>] [--skip-fine] [--skip-render] [--qa] [--skip-qa]";
 
 export interface EditorialPipelineArgs {
   projectDir: string;
@@ -75,6 +81,33 @@ export interface EditorialPipelineArgs {
   qa?: boolean;
   skipQa?: boolean;
   stageProgress?: PipelineStageProgress;
+  firstPreviewDeadlineAtMs?: number;
+  firstPreviewCompileRenderReserveMs?: number;
+  firstPreviewFineEstimateMs?: number;
+  firstPreviewFineProviderBudgetMs?: number;
+  now?: () => number;
+  onFirstPreviewReady?: () => void;
+  lyricsPath?: string;
+  timingPlanPath?: string;
+}
+
+export function shouldSkipFineForFirstPreviewBudget(args: Pick<
+  EditorialPipelineArgs,
+  "firstPreviewDeadlineAtMs" | "firstPreviewCompileRenderReserveMs" | "firstPreviewFineEstimateMs" |
+  "firstPreviewFineProviderBudgetMs" | "now"
+>): boolean {
+  if (
+    args.firstPreviewDeadlineAtMs === undefined ||
+    args.firstPreviewCompileRenderReserveMs === undefined ||
+    args.firstPreviewFineEstimateMs === undefined
+  ) return false;
+  const now = args.now ?? Date.now;
+  const fineRequiredMs = Math.max(
+    args.firstPreviewFineEstimateMs,
+    args.firstPreviewFineProviderBudgetMs ?? 0,
+  );
+  return now() + fineRequiredMs +
+    args.firstPreviewCompileRenderReserveMs > args.firstPreviewDeadlineAtMs;
 }
 
 export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs {
@@ -84,6 +117,8 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
   let skipRender = false;
   let qa = true;
   let skipQa = false;
+  let lyricsPath: string | undefined;
+  let timingPlanPath: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -112,6 +147,14 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
       skipQa = true;
       continue;
     }
+    if (arg === "--lyrics" && index + 1 < args.length) {
+      lyricsPath = args[++index];
+      continue;
+    }
+    if (arg === "--timing-plan" && index + 1 < args.length) {
+      timingPlanPath = args[++index];
+      continue;
+    }
     if (arg.startsWith("--")) {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -123,12 +166,17 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
   }
 
   if (!projectDir) throw new Error(USAGE);
+  if ((lyricsPath && !timingPlanPath) || (!lyricsPath && timingPlanPath)) {
+    throw new Error("--lyrics and --timing-plan must be supplied together");
+  }
   return {
     projectDir: path.resolve(projectDir),
     skipFine,
     skipRender,
     qa,
     skipQa,
+    ...(lyricsPath ? { lyricsPath: path.resolve(lyricsPath) } : {}),
+    ...(timingPlanPath ? { timingPlanPath: path.resolve(timingPlanPath) } : {}),
   };
 }
 
@@ -207,6 +255,12 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
           planned.blueprint,
           "edit-blueprint.schema.json",
         );
+        writeValidatedYamlArtifact(
+          projectDir,
+          "04_plan/uncertainty_register.yaml",
+          buildSelectionCoverageUncertaintyRegister(planned.selects),
+          "uncertainty-register.schema.json",
+        );
         console.log(
           `[editorial] longform ready: ${planned.selects.candidates.length} windows, ` +
           `${planned.plan.chapters.length} chapters, ` +
@@ -269,6 +323,13 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
       );
       writeValidatedYamlArtifact(
         projectDir,
+        "04_plan/uncertainty_register.yaml",
+        buildSelectionCoverageUncertaintyRegister(planned.selects),
+        "uncertainty-register.schema.json",
+      );
+      SelectionCoverageBlockedError.assertReady(planned.selects);
+      writeValidatedYamlArtifact(
+        projectDir,
         "04_plan/edit_blueprint.yaml",
         planned.blueprint,
         "edit-blueprint.schema.json",
@@ -278,7 +339,8 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
 
     let selects: SelectsCandidates = rough.selects;
     let blueprint: EditBlueprint = rough.blueprint;
-    if (!args.skipFine && !isLongformEventBrief(brief)) {
+    const skipFineForBudget = shouldSkipFineForFirstPreviewBudget(args);
+    if (!args.skipFine && !skipFineForBudget && !isLongformEventBrief(brief)) {
       blueprint = await runStage("blueprint", async () => {
         console.log("[editorial] extracting fine-cut key frames");
         const keyFrames = await extractCraftKeyFrames(
@@ -315,7 +377,9 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
       await runStage("blueprint", async () => {
         console.log(isLongformEventBrief(brief)
           ? "[editorial] longform deterministic blueprint ready"
-          : "[editorial] fine pass skipped");
+          : skipFineForBudget
+            ? "[editorial] fine pass skipped to preserve first-preview compile/render reserve"
+            : "[editorial] fine pass skipped");
       });
     }
 
@@ -329,6 +393,23 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
       qa: args.qa,
       skipQa: args.skipQa,
       runStage,
+      onFirstPreviewReady: args.onFirstPreviewReady,
+      ...(args.lyricsPath && args.timingPlanPath ? {
+        shouldSkipCompile: () => readAuthoredCaptionStatus(projectDir).status === "ready",
+        beforeRender: async () => {
+          const captionResult = captionCommand(projectDir, {
+            source: "authored",
+            lyricsPath: args.lyricsPath,
+            timingPlanPath: args.timingPlanPath,
+            editorialEnabled: false,
+          });
+          if (!captionResult.success) throw new Error(captionResult.error?.message ?? "authored caption draft failed");
+          const captionStatus = readAuthoredCaptionStatus(projectDir);
+          if (captionStatus.status !== "ready") {
+            throw new Error(`authored caption gate pending (${captionStatus.status}); explicit human approval is required before render/review. Next: ${captionStatus.next_command}`);
+          }
+        },
+      } : {}),
     });
     ownProgress?.finish("completed");
   } catch (error) {

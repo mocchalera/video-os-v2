@@ -82,6 +82,7 @@ export interface SoundDesignRequest {
     library_id: string;
     library_version: string;
     manifest_hash: string;
+    scope?: "repo_common" | "project_local";
   };
   candidates: SoundDesignCandidate[];
   dialogue_windows: Array<{

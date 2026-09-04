@@ -36,7 +36,6 @@ import {
 } from "../../connectors/editorial-llm.js";
 import { atomicWriteJson } from "./_util.js";
 import type { SegmentsJson } from "../pipeline-types.js";
-import { mapWithConcurrency } from "./vlm.js";
 import {
   reduceEditorialObservation,
   type ObservationContribution,
@@ -92,6 +91,8 @@ export interface AppraiserStageOptions {
   editorialLlmOptions?: EditorialLlmConnectorOptions;
   execFileImpl?: ExecFileLike;
   eligibleAssetIds?: ReadonlySet<string>;
+  deadlineAtMs?: number;
+  now?: () => number;
 }
 
 export interface AppraiserSegmentFailure {
@@ -278,6 +279,7 @@ export async function extractAppraiserFrame(
 export async function runAppraiserStage(
   options: AppraiserStageOptions,
 ): Promise<AppraiserStageSummary> {
+  const now = options.now ?? Date.now;
   const summary: AppraiserStageSummary = {
     totalSegments: options.segmentsJson.items.length,
     appraisedSegments: 0,
@@ -320,93 +322,110 @@ export async function runAppraiserStage(
   if (candidates.length === 0) {
     return summary;
   }
+  if (options.deadlineAtMs !== undefined && now() >= options.deadlineAtMs) {
+    summary.skippedSegments += candidates.length;
+    return summary;
+  }
 
   const model = options.model ?? DEFAULT_APPRAISER_MODEL;
   const promptHash = computeAppraiserPromptHash();
 
-  const shards = await mapWithConcurrency(
-    candidates,
-    options.concurrency ?? DEFAULT_APPRAISER_CONCURRENCY,
-    async (segment): Promise<AppraiserShard> => {
-      const sourcePath = options.sourceFileMap.get(segment.asset_id);
-      if (!sourcePath) {
-        return {
-          segment_id: segment.segment_id,
-          asset_id: segment.asset_id,
-          model,
-          error: "source_file_missing",
-        };
+  const analyzeCandidate = async (
+    segment: SegmentItem,
+  ): Promise<AppraiserShard> => {
+    const sourcePath = options.sourceFileMap.get(segment.asset_id);
+    if (!sourcePath) {
+      return {
+        segment_id: segment.segment_id,
+        asset_id: segment.asset_id,
+        model,
+        error: "source_file_missing",
+      };
+    }
+
+    try {
+      if (deadlineReached(options.deadlineAtMs, now)) {
+        return deadlineAppraiserShard(segment, model);
       }
+      const frame = await extractAppraiserFrame({
+        segment,
+        sourcePath,
+        outputDir: options.outputDir,
+        execFileImpl: options.execFileImpl,
+      });
+      if (deadlineReached(options.deadlineAtMs, now)) {
+        return deadlineAppraiserShard(segment, model);
+      }
+      const marlinScene = marlinSceneContext(segment);
+      const requestHash = computeAppraiserRequestHash({
+        segment_id: segment.segment_id,
+        frame_cache_hash: frame.cacheHash,
+        marlin_scene_hash: shortHash(marlinScene),
+        model_snapshot: model,
+        prompt_hash: promptHash,
+        response_format: APPRAISER_RESPONSE_FORMAT,
+      });
 
-      try {
-        const frame = await extractAppraiserFrame({
-          segment,
-          sourcePath,
-          outputDir: options.outputDir,
-          execFileImpl: options.execFileImpl,
-        });
-        const marlinScene = marlinSceneContext(segment);
-        const requestHash = computeAppraiserRequestHash({
-          segment_id: segment.segment_id,
-          frame_cache_hash: frame.cacheHash,
-          marlin_scene_hash: shortHash(marlinScene),
-          model_snapshot: model,
-          prompt_hash: promptHash,
-          response_format: APPRAISER_RESPONSE_FORMAT,
-        });
-
-        if (hasReusableAppraisal(segment, frame, requestHash)) {
-          return {
-            segment_id: segment.segment_id,
-            asset_id: segment.asset_id,
-            frame,
-            model,
-            promptHash,
-            requestHash,
-            cachedAppraisal: true,
-          };
-        }
-
-        const completion = await runAppraiserCompletion({
-          framePath: frame.framePath,
-          marlinScene,
-          model,
-          appraiserFn: options.appraiserFn,
-          completeEditorialJsonImpl: options.completeEditorialJsonImpl,
-          editorialLlmOptions: options.editorialLlmOptions,
-        });
-        if (completion.skipReason) {
-          return {
-            segment_id: segment.segment_id,
-            asset_id: segment.asset_id,
-            frame,
-            model,
-            promptHash,
-            requestHash,
-            runtimeRecord: completion.runtimeRecord,
-            skipReason: completion.skipReason,
-          };
-        }
+      if (hasReusableAppraisal(segment, frame, requestHash)) {
         return {
           segment_id: segment.segment_id,
           asset_id: segment.asset_id,
           frame,
-          result: completion.result,
+          model,
+          promptHash,
+          requestHash,
+          cachedAppraisal: true,
+        };
+      }
+
+      const completion = await runAppraiserCompletion({
+        framePath: frame.framePath,
+        marlinScene,
+        model,
+        appraiserFn: options.appraiserFn,
+        completeEditorialJsonImpl: options.completeEditorialJsonImpl,
+        editorialLlmOptions: options.editorialLlmOptions,
+      });
+      if (completion.skipReason) {
+        return {
+          segment_id: segment.segment_id,
+          asset_id: segment.asset_id,
+          frame,
           model,
           promptHash,
           requestHash,
           runtimeRecord: completion.runtimeRecord,
-        };
-      } catch (error) {
-        return {
-          segment_id: segment.segment_id,
-          asset_id: segment.asset_id,
-          model,
-          error: error instanceof Error ? error.message : String(error),
+          skipReason: completion.skipReason,
         };
       }
-    },
+      return {
+        segment_id: segment.segment_id,
+        asset_id: segment.asset_id,
+        frame,
+        result: completion.result,
+        model,
+        promptHash,
+        requestHash,
+        runtimeRecord: completion.runtimeRecord,
+      };
+    } catch (error) {
+      return {
+        segment_id: segment.segment_id,
+        asset_id: segment.asset_id,
+        model,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
+  const shards = await runAppraiserCandidatesUntilDeadline(
+    candidates,
+    options.concurrency ?? DEFAULT_APPRAISER_CONCURRENCY,
+    options.deadlineAtMs,
+    now,
+    analyzeCandidate,
   );
+  summary.skippedSegments += Math.max(0, candidates.length - shards.length);
 
   for (const shard of shards) {
     if (shard.frame?.cached) summary.cachedFrames += 1;
@@ -441,6 +460,80 @@ export async function runAppraiserStage(
   }
 
   return summary;
+}
+
+function deadlineReached(deadlineAtMs: number | undefined, now: () => number): boolean {
+  return deadlineAtMs !== undefined && now() >= deadlineAtMs;
+}
+
+function deadlineAppraiserShard(segment: SegmentItem, model: string): AppraiserShard {
+  return {
+    segment_id: segment.segment_id,
+    asset_id: segment.asset_id,
+    model,
+    error: "visual_stage_deadline_exceeded",
+  };
+}
+
+async function runAppraiserCandidatesUntilDeadline(
+  candidates: SegmentItem[],
+  concurrency: number,
+  deadlineAtMs: number | undefined,
+  now: () => number,
+  worker: (segment: SegmentItem) => Promise<AppraiserShard>,
+): Promise<AppraiserShard[]> {
+  if (deadlineAtMs === undefined) {
+    const results = new Array<AppraiserShard>(candidates.length);
+    let nextIndex = 0;
+    async function runWorker(): Promise<void> {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= candidates.length) return;
+        results[index] = await worker(candidates[index]);
+      }
+    }
+    await Promise.all(Array.from(
+      { length: Math.min(normalizeAppraiserConcurrency(concurrency), candidates.length) },
+      () => runWorker(),
+    ));
+    return results;
+  }
+  if (now() >= deadlineAtMs) return [];
+  const deadline = deadlineAtMs;
+
+  const results = new Array<AppraiserShard | undefined>(candidates.length);
+  let nextIndex = 0;
+  let timedOut = false;
+  async function runWorker(): Promise<void> {
+    while (!timedOut && now() < deadline) {
+      const index = nextIndex++;
+      if (index >= candidates.length) return;
+      const result = await worker(candidates[index]);
+      if (!timedOut && now() <= deadline) results[index] = result;
+    }
+  }
+
+  const completion = Promise.all(Array.from(
+    { length: Math.min(normalizeAppraiserConcurrency(concurrency), candidates.length) },
+    () => runWorker(),
+  ));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    completion,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        resolve();
+      }, Math.max(0, deadline - now()));
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return results.filter((result): result is AppraiserShard => result !== undefined);
+}
+
+function normalizeAppraiserConcurrency(concurrency: number): number {
+  if (!Number.isFinite(concurrency) || concurrency < 1) return DEFAULT_APPRAISER_CONCURRENCY;
+  return Math.max(1, Math.floor(concurrency));
 }
 
 export function mergeAppraiserVisualQuality(

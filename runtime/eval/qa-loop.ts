@@ -11,7 +11,7 @@ import type {
   SelectsCandidates,
   TimelineIR,
 } from "../artifacts/types.js";
-import { compile, type CompileResult } from "../compiler/index.js";
+import { runCanonicalCompile } from "../compiler/index.js";
 import type { MarlinQAReport } from "./marlin-qa-types.js";
 import { isMarlinQAReportVerified } from "./marlin-qa-types.js";
 import type { BriefAlignmentReport } from "./brief-alignment-types.js";
@@ -879,13 +879,15 @@ async function defaultProposeFixes(
   return proposeFixes(issues, timeline, selects, projectDir, { discovery });
 }
 
-function defaultCompile(
+async function defaultCompile(
   projectDir: string,
   _selects: SelectsCandidates,
   _blueprint: EditBlueprint,
   _iteration: number,
-): TimelineIR {
-  const result: CompileResult = compile({
+): Promise<TimelineIR> {
+  // Canonical route: image-gated projects require the fresh QC orchestration;
+  // non-gated projects compile directly.
+  const result = await runCanonicalCompile({
     projectPath: projectDir,
     createdAt: new Date().toISOString(),
   });

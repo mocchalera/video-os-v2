@@ -7,6 +7,12 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
+import {
+  cleanupRegisteredRenderPathsSync,
+  disableRenderCleanupSignalHandler,
+  terminateRegisteredRenderChildren,
+} from "./render/render-cleanup-registry.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -20,7 +26,7 @@ export type ProgressPhase =
   | "render"
   | "package";
 
-export type ProgressStatus = "running" | "completed" | "failed" | "blocked";
+export type ProgressStatus = "running" | "completed" | "failed" | "blocked" | "aborted";
 
 export interface ProgressReport {
   project_id: string;
@@ -30,7 +36,10 @@ export interface ProgressReport {
   completed: number;
   total: number;
   eta_sec: number | null;
+  /** Process that owns this run; recovery uses it to detect stale runs. */
+  pid?: number;
   artifacts_created: string[];
+  artifact_hashes?: Record<string, string>;
   errors: ProgressError[];
   started_at: string;
   updated_at: string;
@@ -79,11 +88,31 @@ export interface PipelineTimingRun {
   stages: PipelineStageTiming[];
 }
 
+export type FirstPreviewSlaStatus = "running" | "passed" | "missed" | "hold" | "not_eligible";
+
+export interface FirstPreviewSlaReceipt {
+  version: 1;
+  original_started_at_ms: number;
+  deadline_at_ms: number;
+  eligible: boolean;
+  status: FirstPreviewSlaStatus;
+  completed_at_ms?: number;
+  ended_at_ms?: number;
+  preview_artifact_path?: string;
+  reason?: "legacy_resume_without_checkpoint" | "invalid_resume_checkpoint" | "render_skipped" | "preview_missing" | "deadline_exceeded" | "pipeline_failed";
+}
+
+export type FirstPreviewSlaCheckpoint =
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "valid"; receipt: FirstPreviewSlaReceipt };
+
 export interface PipelineTimingsFile {
   version: 1;
   project_id: string;
   updated_at: string;
   runs: PipelineTimingRun[];
+  first_preview_sla?: FirstPreviewSlaReceipt;
 }
 
 export interface PipelineStageProgressHandle {
@@ -129,6 +158,13 @@ export interface StageEstimate {
   source: "history" | "segments" | "unknown";
 }
 
+export const FIRST_PREVIEW_SLA_MS = 600_000;
+
+export interface FirstPreviewStageBudget {
+  fineEstimateMs: number;
+  compileRenderReserveMs: number;
+}
+
 // ── Phase → Gate mapping ───────────────────────────────────────────
 
 const PHASE_GATE_MAP: Record<ProgressPhase, number> = {
@@ -158,6 +194,129 @@ const FALLBACK_STAGE_ESTIMATE: Record<PipelineTimingStage, { baseMs: number; per
 
 // ── ProgressTracker class ──────────────────────────────────────────
 
+/**
+ * Live ProgressTrackers for this process. SIGINT/SIGTERM handlers close them
+ * all as aborted so an interrupted run never leaves progress.json "running".
+ */
+const ACTIVE_TRACKERS = new Set<ProgressTracker>();
+let abortHandlersInstalled = false;
+const abortSignalInFlight = new Set<"SIGINT" | "SIGTERM">();
+const abortHandlerBySignal = new Map<"SIGINT" | "SIGTERM", () => void>();
+
+/** Test/entry hook: close every live tracker; returns how many were closed. */
+export function closeActiveTrackersOnSignal(signal: NodeJS.Signals): number {
+  let closed = 0;
+  for (const tracker of [...ACTIVE_TRACKERS]) {
+    tracker.abort("process", `received ${signal}; closing progress as aborted`);
+    closed += 1;
+  }
+  return closed;
+}
+
+function installAbortSignalHandlers(): void {
+  if (abortHandlersInstalled) return;
+  abortHandlersInstalled = true;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    const handler = (): void => {
+      void handleAbortSignal(signal);
+    };
+    abortHandlerBySignal.set(signal, handler);
+    process.on(signal, handler);
+  }
+}
+
+async function handleAbortSignal(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+  if (abortSignalInFlight.has(signal)) return;
+  abortSignalInFlight.add(signal);
+  // ProgressTracker is constructed before the public /render command reaches
+  // the assembler. Disable the registry's later signal listener immediately,
+  // then await exact ffmpeg/Python child termination before removing scratch
+  // and re-delivering the signal natively to this process.
+  disableRenderCleanupSignalHandler(signal);
+  try {
+    closeActiveTrackersOnSignal(signal);
+    const children = await terminateRegisteredRenderChildren(signal);
+    if (children.retained.length > 0) {
+      process.stderr.write(
+        `[render-cleanup] ${signal} child teardown retained ${children.retained.length}`
+        + " exact child process(es)\n",
+      );
+    }
+    const cleanup = cleanupRegisteredRenderPathsSync();
+    if (cleanup.retained.length > 0) {
+      process.stderr.write(
+        `[render-cleanup] ${signal} teardown retained ${cleanup.retained.length}`
+        + " path(s); ownership remains visible until retry\n",
+      );
+    }
+  } catch (error) {
+    // Never fall back to process.exit: the same signal must remain the native
+    // termination cause even when a cleanup coordinator reports an error.
+    process.stderr.write(`[render-cleanup] ${signal} coordinator failed: ${String(error)}\n`);
+  } finally {
+    const handler = abortHandlerBySignal.get(signal);
+    if (handler) process.removeListener(signal, handler);
+    // The handler is removed before this exact self-delivery, so it cannot
+    // re-enter while preserving native SIGINT/SIGTERM semantics.
+    process.kill(process.pid, signal);
+    abortSignalInFlight.delete(signal);
+  }
+}
+
+function isProcessAlive(pid: number | undefined): boolean {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to another user.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Close a stale running progress.json as aborted. A run whose owning process
+ * no longer exists cannot close its own progress file, so the next entry
+ * point reconciles it. Returns true when the file was rewritten.
+ */
+export function closeStaleRunningProgress(
+  projectDir: string,
+  options: { currentPid?: number } = {},
+): boolean {
+  const progressPath = path.join(path.resolve(projectDir), "progress.json");
+  if (!fs.existsSync(progressPath)) return false;
+  let report: ProgressReport;
+  try {
+    report = JSON.parse(fs.readFileSync(progressPath, "utf-8")) as ProgressReport;
+  } catch {
+    return false;
+  }
+  if (report?.status !== "running") return false;
+
+  const currentPid = options.currentPid ?? process.pid;
+  const ownerPid = report.pid;
+  // Our own freshly-created tracker or a live foreign run must be left alone.
+  if (ownerPid === undefined && currentPid !== process.pid) {
+    // Legacy report without pid: only the recovery path (explicit caller)
+    // closes it, which passes a different currentPid sentinel.
+    return false;
+  }
+  if (ownerPid === currentPid || isProcessAlive(ownerPid)) return false;
+
+  report.status = "aborted";
+  report.errors.push({
+    stage: "recovery",
+    message: `Interrupted run detected (pid ${ownerPid ?? "unknown"} is gone); progress closed as aborted.`,
+    timestamp: new Date().toISOString(),
+    retriable: true,
+  });
+  report.updated_at = new Date().toISOString();
+  const tmp = `${progressPath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(report, null, 2));
+  fs.renameSync(tmp, progressPath);
+  return true;
+}
+
 export class ProgressTracker {
   private projectDir: string;
   private projectId: string;
@@ -180,20 +339,36 @@ export class ProgressTracker {
       completed: 0,
       total,
       eta_sec: null,
+      pid: process.pid,
       artifacts_created: [],
+      artifact_hashes: {},
       errors: [],
       started_at: now,
       updated_at: now,
     };
 
+    ACTIVE_TRACKERS.add(this);
+    installAbortSignalHandlers();
     this.flush();
+  }
+
+  /**
+   * Close the report as aborted (interrupted run). Unlike fail(), the phase
+   * did not deterministically fail — it stopped mid-flight.
+   */
+  abort(stage: string, message: string): void {
+    if (this.report.status === "running") {
+      this.report.status = "aborted";
+    }
+    ACTIVE_TRACKERS.delete(this);
+    this.recordError(stage, message, true);
   }
 
   /** Advance completed count and optionally register a new artifact. */
   advance(artifact?: string): void {
     this.report.completed = Math.min(this.report.completed + 1, this.report.total);
     if (artifact) {
-      this.report.artifacts_created.push(artifact);
+      this.addVerifiedArtifact(artifact);
     }
     this.report.eta_sec = this.estimateEta();
     this.report.updated_at = new Date().toISOString();
@@ -219,24 +394,36 @@ export class ProgressTracker {
     this.report.eta_sec = 0;
     if (finalArtifacts) {
       for (const a of finalArtifacts) {
-        if (!this.report.artifacts_created.includes(a)) {
-          this.report.artifacts_created.push(a);
-        }
+        this.addVerifiedArtifact(a);
       }
     }
     this.report.updated_at = new Date().toISOString();
+    ACTIVE_TRACKERS.delete(this);
     this.flush();
+  }
+
+  /**
+   * Register an artifact only after resolving a real regular file and hashing
+   * its current contents. Returns false for placeholders or missing outputs.
+   */
+  registerArtifact(artifact: string): boolean {
+    const added = this.addVerifiedArtifact(artifact);
+    this.report.updated_at = new Date().toISOString();
+    this.flush();
+    return added;
   }
 
   /** Mark the phase as failed. */
   fail(stage: string, message: string): void {
     this.report.status = "failed";
+    ACTIVE_TRACKERS.delete(this);
     this.recordError(stage, message, false);
   }
 
   /** Mark the phase as blocked. */
   block(stage: string, message: string): void {
     this.report.status = "blocked";
+    ACTIVE_TRACKERS.delete(this);
     this.recordError(stage, message, false);
   }
 
@@ -249,7 +436,12 @@ export class ProgressTracker {
 
   /** Get a snapshot of the current report (for testing). */
   snapshot(): Readonly<ProgressReport> {
-    return { ...this.report, errors: [...this.report.errors], artifacts_created: [...this.report.artifacts_created] };
+    return {
+      ...this.report,
+      errors: [...this.report.errors],
+      artifacts_created: [...this.report.artifacts_created],
+      artifact_hashes: { ...(this.report.artifact_hashes ?? {}) },
+    };
   }
 
   /** Get the path to progress.json. */
@@ -267,6 +459,33 @@ export class ProgressTracker {
     return Math.round(remaining / rate);
   }
 
+  private addVerifiedArtifact(artifact: string): boolean {
+    const resolved = this.resolveArtifactPath(artifact);
+    if (!resolved) return false;
+    const hash = hashFile(resolved);
+    if (!this.report.artifacts_created.includes(artifact)) {
+      this.report.artifacts_created.push(artifact);
+    }
+    if (!this.report.artifact_hashes) this.report.artifact_hashes = {};
+    this.report.artifact_hashes[artifact] = hash;
+    return true;
+  }
+
+  private resolveArtifactPath(artifact: string): string | undefined {
+    const candidates = [
+      path.isAbsolute(artifact) ? artifact : path.join(this.projectDir, artifact),
+      ...artifactPathAliases(artifact).map((relativePath) => path.join(this.projectDir, relativePath)),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch {
+        // A progress label can describe a skipped or optional artifact.
+      }
+    }
+    return undefined;
+  }
+
   private flush(): void {
     const dir = path.dirname(this.progressPath);
     fs.mkdirSync(dir, { recursive: true });
@@ -274,6 +493,41 @@ export class ProgressTracker {
     fs.writeFileSync(tmp, JSON.stringify(this.report, null, 2));
     fs.renameSync(tmp, this.progressPath);
   }
+}
+
+const ARTIFACT_PATH_ALIASES: Record<string, string[]> = {
+  "timeline.json": ["05_timeline/timeline.json"],
+  "preview-manifest.json": ["05_timeline/preview-manifest.json"],
+  "timeline-overview.png": ["05_timeline/timeline-overview.png"],
+  "assets.json": ["03_analysis/assets.json"],
+  "segments.json": ["03_analysis/segments.json"],
+  "marlin_events.json": ["03_analysis/marlin_events.json"],
+  "gap_report.yaml": ["03_analysis/gap_report.yaml"],
+  "cache_manifest.json": ["03_analysis/cache_manifest.json"],
+  "review_metrics.json": ["06_review/review_metrics.json"],
+  "review_report.yaml": ["06_review/review_report.yaml"],
+  "review_patch.json": ["06_review/review_patch.json"],
+  "qa-report.json": ["07_package/qa-report.json"],
+};
+
+function artifactPathAliases(artifact: string): string[] {
+  return ARTIFACT_PATH_ALIASES[artifact] ?? [];
+}
+
+function hashFile(filePath: string): string {
+  const hash = crypto.createHash("sha256");
+  const fd = fs.openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex");
 }
 
 // ── Staged pipeline timing + ETA ──────────────────────────────────
@@ -516,10 +770,101 @@ export function readPipelineTimings(projectDir: string): PipelineTimingsFile | n
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as PipelineTimingsFile;
     if (parsed.version !== 1 || !Array.isArray(parsed.runs)) return null;
+    if (parsed.first_preview_sla !== undefined) {
+      const receipt = parseFirstPreviewSlaReceipt(parsed.first_preview_sla);
+      if (receipt) parsed.first_preview_sla = receipt;
+      else delete parsed.first_preview_sla;
+    }
     return parsed;
   } catch {
     return null;
   }
+}
+
+export function readFirstPreviewSlaCheckpoint(projectDir: string): FirstPreviewSlaCheckpoint {
+  const filePath = pipelineTimingsPath(projectDir);
+  if (!fs.existsSync(filePath)) return { kind: "missing" };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    if (parsed.version !== 1 || !Array.isArray(parsed.runs)) return { kind: "invalid" };
+    if (!("first_preview_sla" in parsed)) return { kind: "missing" };
+    const receipt = parseFirstPreviewSlaReceipt(parsed.first_preview_sla);
+    return receipt ? { kind: "valid", receipt } : { kind: "invalid" };
+  } catch {
+    return { kind: "invalid" };
+  }
+}
+
+function parseFirstPreviewSlaReceipt(value: unknown): FirstPreviewSlaReceipt | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const receipt = value as Record<string, unknown>;
+  const startedAtMs = receipt.original_started_at_ms;
+  const deadlineAtMs = receipt.deadline_at_ms;
+  if (
+    receipt.version !== 1 ||
+    !Number.isInteger(startedAtMs) ||
+    !Number.isInteger(deadlineAtMs) ||
+    (startedAtMs as number) < 0 ||
+    (deadlineAtMs as number) < (startedAtMs as number) ||
+    (deadlineAtMs as number) - (startedAtMs as number) !== FIRST_PREVIEW_SLA_MS
+  ) return null;
+
+  const status = receipt.status;
+  const eligible = receipt.eligible;
+  if (
+    typeof eligible !== "boolean" ||
+    !["running", "passed", "missed", "hold", "not_eligible"].includes(String(status)) ||
+    (eligible ? status === "not_eligible" : status !== "not_eligible")
+  ) return null;
+
+  const completedAtMs = receipt.completed_at_ms;
+  const endedAtMs = receipt.ended_at_ms;
+  const previewPath = receipt.preview_artifact_path;
+  const reason = receipt.reason;
+  if (status === "passed" || status === "missed") {
+    if (
+      !Number.isInteger(completedAtMs) ||
+      (completedAtMs as number) < (startedAtMs as number) ||
+      previewPath !== "09_output/rough-cut.mp4"
+    ) return null;
+    if (status === "passed" && ((completedAtMs as number) > (deadlineAtMs as number) || reason !== undefined)) return null;
+    if (status === "missed" && ((completedAtMs as number) <= (deadlineAtMs as number) || reason !== "deadline_exceeded")) return null;
+  } else if (status === "hold" && reason === "pipeline_failed") {
+    const hasPreviewProvenance = completedAtMs !== undefined || previewPath !== undefined;
+    if (
+      hasPreviewProvenance &&
+      (
+        !Number.isInteger(completedAtMs) ||
+        (completedAtMs as number) < (startedAtMs as number) ||
+        previewPath !== "09_output/rough-cut.mp4"
+      )
+    ) return null;
+  } else if (completedAtMs !== undefined || previewPath !== undefined) {
+    return null;
+  }
+
+  if (status === "running" && reason !== undefined) return null;
+  if (status === "running" && endedAtMs !== undefined) return null;
+  if (endedAtMs !== undefined && (!Number.isInteger(endedAtMs) || (endedAtMs as number) < (startedAtMs as number))) return null;
+  if (
+    status === "hold" &&
+    !(
+      (reason === "preview_missing" && endedAtMs === undefined) ||
+      (reason === "pipeline_failed" && endedAtMs !== undefined)
+    )
+  ) return null;
+  if (
+    status === "hold" &&
+    reason === "pipeline_failed" &&
+    completedAtMs !== undefined &&
+    (completedAtMs as number) > (endedAtMs as number)
+  ) return null;
+  if (
+    status === "not_eligible" &&
+    !["legacy_resume_without_checkpoint", "invalid_resume_checkpoint", "render_skipped"].includes(String(reason))
+  ) return null;
+
+  return { ...(receipt as unknown as FirstPreviewSlaReceipt) };
 }
 
 export function appendPipelineTimingRun(projectDir: string, run: PipelineTimingRun): PipelineTimingsFile {
@@ -535,12 +880,34 @@ export function appendPipelineTimingRun(projectDir: string, run: PipelineTimingR
   doc.updated_at = new Date().toISOString();
   doc.runs.push(cloneTimingRun(run));
 
+  writePipelineTimings(projectDir, doc);
+  return doc;
+}
+
+export function writeFirstPreviewSlaReceipt(
+  projectDir: string,
+  receipt: FirstPreviewSlaReceipt,
+): FirstPreviewSlaReceipt {
+  const projectId = path.basename(path.resolve(projectDir));
+  const doc: PipelineTimingsFile = readPipelineTimings(projectDir) ?? {
+    version: 1,
+    project_id: projectId,
+    updated_at: new Date().toISOString(),
+    runs: [],
+  };
+  doc.project_id = doc.project_id || projectId;
+  doc.updated_at = new Date().toISOString();
+  doc.first_preview_sla = { ...receipt };
+  writePipelineTimings(projectDir, doc);
+  return receipt;
+}
+
+function writePipelineTimings(projectDir: string, doc: PipelineTimingsFile): void {
   const filePath = pipelineTimingsPath(projectDir);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(doc, null, 2)}\n`, "utf-8");
   fs.renameSync(tmp, filePath);
-  return doc;
 }
 
 export function estimatePipelineStages(
@@ -578,6 +945,27 @@ export function estimatePipelineStages(
     estimates.set(stage, { estimatedMs: null, source: "unknown" });
   }
   return estimates;
+}
+
+export function estimateFirstPreviewStageBudget(
+  projectDir: string,
+  segmentCount: number,
+  includeRender: boolean,
+): FirstPreviewStageBudget {
+  const stages: PipelineTimingStage[] = includeRender
+    ? ["blueprint", "compile", "render"]
+    : ["blueprint", "compile"];
+  const estimates = estimatePipelineStages(
+    readPipelineTimings(projectDir),
+    stages,
+    { segmentCount },
+  );
+  const estimatedMs = (stage: PipelineTimingStage): number =>
+    estimates.get(stage)?.estimatedMs ?? 0;
+  return {
+    fineEstimateMs: estimatedMs("blueprint"),
+    compileRenderReserveMs: estimatedMs("compile") + (includeRender ? estimatedMs("render") : 0),
+  };
 }
 
 export function formatPipelineProgress(input: FormatPipelineProgressInput): string {

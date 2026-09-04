@@ -3,6 +3,11 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { runPublicationPreflight } from "../runtime/packaging/publication-preflight.js";
 import {
+  distributeThroughPreflight,
+  type DistributionPreflightDecision,
+  type DistributionPreflightRequest,
+} from "../runtime/distribution/preflight.js";
+import {
   uploadYoutubeVideo,
   youtubeUploadMetadataSha256,
   type YoutubePublicationApproval,
@@ -20,6 +25,7 @@ interface YoutubeUploadCliArgs {
   sessionDir?: string;
   chunkSizeBytes?: number;
   processingTimeoutMs?: number;
+  distributionRequestPath: string;
 }
 
 export interface ResolveYoutubePublicationRequestInput {
@@ -43,6 +49,7 @@ function usage(message?: string): never {
   if (message) console.error(message);
   console.error(
     "Usage: npm run youtube-upload -- <project-dir> --metadata <metadata.json> " +
+    "[--distribution-request <request.json>] " +
     "[--privacy private|unlisted|public] [--expected-channel <channel-id>] " +
     "[--access-token-env YOUTUBE_ACCESS_TOKEN] [--chunk-size-mib 8] " +
     "[--processing-timeout-ms 1800000] [--receipt-dir <dir>] [--session-dir <dir>]",
@@ -73,6 +80,7 @@ export function parseYoutubeUploadArgs(argv: string[]): YoutubeUploadCliArgs {
   let sessionDir: string | undefined;
   let chunkSizeBytes: number | undefined;
   let processingTimeoutMs: number | undefined;
+  let distributionRequestPath = path.join(projectDir, "07_package", "distribution-preflight-request.json");
 
   for (let index = 1; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -87,6 +95,7 @@ export function parseYoutubeUploadArgs(argv: string[]): YoutubeUploadCliArgs {
     else if (flag === "--session-dir") sessionDir = value;
     else if (flag === "--chunk-size-mib") chunkSizeBytes = parsePositiveInteger(value, flag) * 1024 * 1024;
     else if (flag === "--processing-timeout-ms") processingTimeoutMs = parsePositiveInteger(value, flag);
+    else if (flag === "--distribution-request") distributionRequestPath = value;
     else usage(`Unknown option: ${flag}`);
     index += 1;
   }
@@ -97,12 +106,26 @@ export function parseYoutubeUploadArgs(argv: string[]): YoutubeUploadCliArgs {
     metadataPath,
     privacyStatus,
     accessTokenEnv,
+    distributionRequestPath,
     ...(expectedChannelId ? { expectedChannelId } : {}),
     ...(receiptDir ? { receiptDir } : {}),
     ...(sessionDir ? { sessionDir } : {}),
     ...(chunkSizeBytes ? { chunkSizeBytes } : {}),
     ...(processingTimeoutMs ? { processingTimeoutMs } : {}),
   };
+}
+
+export async function runYoutubeUploadThroughDistributionPreflight<T>(
+  request: DistributionPreflightRequest,
+  upload: (decision: DistributionPreflightDecision) => Promise<T>,
+): Promise<{ decision: DistributionPreflightDecision; sent: boolean; result: T | null }> {
+  if (request.action !== "public_upload") throw new Error("youtube_distribution_action_must_be_public_upload");
+  return distributeThroughPreflight("cli", request, { send: upload });
+}
+
+function readDistributionRequest(filePath: string): DistributionPreflightRequest {
+  try { return JSON.parse(fs.readFileSync(path.resolve(filePath), "utf8")) as DistributionPreflightRequest; }
+  catch { throw new Error("youtube_distribution_request_invalid"); }
 }
 
 function readMetadata(metadataPath: string): YoutubeUploadMetadata {
@@ -192,7 +215,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const accessToken = process.env[args.accessTokenEnv];
   if (!accessToken) throw new Error(`youtube_access_token_env_missing:${args.accessTokenEnv}`);
   const packageDir = path.join(projectDir, "07_package");
-  const receipt = await uploadYoutubeVideo({
+  const distributionRequest = readDistributionRequest(args.distributionRequestPath);
+  if (path.resolve(distributionRequest.project_dir) !== projectDir) throw new Error("youtube_distribution_project_mismatch");
+  const distribution = await runYoutubeUploadThroughDistributionPreflight(distributionRequest, async (decision) => {
+    if (decision.identity.output_sha256 !== request.videoSha256) throw new Error("youtube_distribution_output_mismatch");
+    return uploadYoutubeVideo({
     videoPath: request.videoPath,
     metadata: request.metadata,
     accessToken,
@@ -208,7 +235,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     ...(args.chunkSizeBytes ? { chunkSizeBytes: args.chunkSizeBytes } : {}),
     ...(args.processingTimeoutMs ? { processingTimeoutMs: args.processingTimeoutMs } : {}),
     logger: (event) => console.error(`[youtube-upload] ${JSON.stringify(event)}`),
+    });
   });
+  if (!distribution.sent || !distribution.result) {
+    throw new Error(`youtube_distribution_preflight_failed:${distribution.decision.reasons.map((item) => item.code).join(",")}`);
+  }
+  const receipt = distribution.result;
   console.log(JSON.stringify(receipt, null, 2));
   if (receipt.outcome !== "succeeded") process.exitCode = 1;
 }

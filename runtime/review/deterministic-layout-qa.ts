@@ -1,4 +1,13 @@
 import { createHash } from "node:crypto";
+import {
+  subjectOccupancyArtifactHash,
+  subjectOccupancyPayloadHash,
+  type SubjectOccupancyTrack,
+} from "./subject-occupancy.js";
+import {
+  verticalCompositionPolicyContentHash,
+  type VerticalCompositionPolicy,
+} from "../visual/vertical-composition.js";
 
 export const RENDER_LAYOUT_SNAPSHOT_VERSION =
   "render-layout-snapshot/v1" as const;
@@ -45,6 +54,7 @@ export interface RenderLayoutFontEvidence {
 export interface RenderLayoutLayer {
   layer_id: string;
   semantic_role: RenderLayoutSemanticRole;
+  caption_role?: "baseline" | "emphasis" | "title";
   source: RenderLayoutLayerSource;
   start_frame: number;
   end_frame: number;
@@ -54,6 +64,10 @@ export interface RenderLayoutLayer {
 
 export interface RenderLayoutSnapshot {
   version: typeof RENDER_LAYOUT_SNAPSHOT_VERSION;
+  binding?: {
+    generation_id: string;
+    renderer_capability_sha256: string;
+  };
   frame: {
     width: number;
     height: number;
@@ -77,6 +91,8 @@ export type DeterministicLayoutQAIssueCode =
   | "missing_glyph"
   | "duplicate_speech_caption_layer"
   | "caption_visual_collision"
+  | "caption_subject_collision"
+  | "caption_subject_evidence_incomplete"
   | "end_card_hold_invalid"
   | "final_frame_state_invalid";
 
@@ -87,6 +103,15 @@ export interface DeterministicLayoutQAIssue {
   layer_ids?: string[];
   start_frame?: number;
   end_frame?: number;
+  generation_id?: string;
+  caption_id?: string;
+  caption_role?: "baseline" | "emphasis" | "title";
+  collision_ratio?: number;
+  threshold?: number;
+  subject_track_id?: string;
+  candidate_anchors?: string[];
+  reason?: string;
+  evidence_status?: "verified" | "incomplete" | "human_hold";
 }
 
 export interface DeterministicLayoutQAReviewItem {
@@ -100,20 +125,49 @@ export interface DeterministicLayoutQAReviewItem {
   end_frame?: number;
   start_timecode?: string;
   end_timecode?: string;
+  generation_id?: string;
+  caption_id?: string;
+  caption_role?: "baseline" | "emphasis" | "title";
+  collision_ratio?: number;
+  threshold?: number;
+  subject_track_id?: string;
+  candidate_anchors?: string[];
+  reason?: string;
+  evidence_status?: "verified" | "incomplete" | "human_hold";
+}
+
+export interface SubjectCollisionBinding {
+  generation_id: string;
+  subject_occupancy_sha256: string;
+  subject_occupancy_payload_sha256: string;
+  snapshot_sha256: string;
+  policy_ref: string;
+  policy_sha256: string;
+  renderer_capability_sha256: string;
+  platform_geometry_status: "unknown" | "provisional" | "measured";
 }
 
 export interface DeterministicLayoutQAResult {
   version: typeof DETERMINISTIC_LAYOUT_QA_VERSION;
-  status: "verified" | "blocked" | "incomplete";
+  status: "verified" | "blocked" | "incomplete" | "human_hold";
   snapshot_version: typeof RENDER_LAYOUT_SNAPSHOT_VERSION;
   snapshot_sha256?: string;
   issues: DeterministicLayoutQAIssue[];
   review_items: DeterministicLayoutQAReviewItem[];
+  subject_collision_binding?: SubjectCollisionBinding;
 }
 
 export interface DeterministicLayoutQAOptions {
   minimumEndCardSec?: number;
   maximumEndCardSec?: number;
+  subjectCollision?: {
+    generationId: string;
+    rendererCapabilityHash: string;
+    subjectOccupancy?: SubjectOccupancyTrack;
+    verticalCompositionPolicy?: VerticalCompositionPolicy;
+    policyRef?: string;
+    policyHash?: string;
+  };
 }
 
 const DEFAULT_MINIMUM_END_CARD_SEC = 2;
@@ -145,6 +199,18 @@ const REVIEW_PRESENTATION: Record<
     priority: 2,
     title: "字幕と画面テキストが衝突",
     remediation: "字幕またはCTAの表示区間・位置を分離してください。",
+  },
+  caption_subject_collision: {
+    priority: 2,
+    title: "字幕と被写体が衝突",
+    remediation:
+      "候補anchorを参考に人間が配置を確認してください。字幕本文・timing・承認は変更しません。",
+  },
+  caption_subject_evidence_incomplete: {
+    priority: 0,
+    title: "被写体衝突の検証証拠が不足",
+    remediation:
+      "同じgenerationへ束縛した被写体占有、policy、renderer、layout snapshot証拠を揃えてください。",
   },
   glyph_clipped: {
     priority: 3,
@@ -324,6 +390,19 @@ export function evaluateDeterministicLayoutQA(
     }
   }
 
+  let subjectStatus: DeterministicLayoutQAResult["status"] = "verified";
+  let subjectBinding: SubjectCollisionBinding | undefined;
+  if (options.subjectCollision) {
+    const subject = evaluateSubjectCaptionCollisions(
+      snapshot,
+      captions,
+      options.subjectCollision,
+    );
+    issues.push(...subject.issues);
+    subjectStatus = subject.status;
+    subjectBinding = subject.binding;
+  }
+
   const endCard = snapshot.ending.end_card_layer_id
     ? snapshot.layers.find(
       (layer) => layer.layer_id === snapshot.ending.end_card_layer_id,
@@ -382,11 +461,18 @@ export function evaluateDeterministicLayoutQA(
 
   return {
     version: DETERMINISTIC_LAYOUT_QA_VERSION,
-    status: issues.length > 0 ? "blocked" : "verified",
+    status: subjectStatus === "human_hold"
+      ? "human_hold"
+      : subjectStatus === "incomplete"
+      ? "incomplete"
+      : issues.length > 0
+      ? "blocked"
+      : "verified",
     snapshot_version: RENDER_LAYOUT_SNAPSHOT_VERSION,
     snapshot_sha256: hashSnapshot(snapshot),
     issues,
     review_items: buildLayoutReviewItems(issues, snapshot.frame),
+    ...(subjectBinding ? { subject_collision_binding: subjectBinding } : {}),
   };
 }
 
@@ -451,6 +537,23 @@ export function buildLayoutReviewItems(
             : {}),
         }
         : {}),
+      ...(issue.generation_id ? { generation_id: issue.generation_id } : {}),
+      ...(issue.caption_id ? { caption_id: issue.caption_id } : {}),
+      ...(issue.caption_role ? { caption_role: issue.caption_role } : {}),
+      ...(issue.collision_ratio !== undefined
+        ? { collision_ratio: issue.collision_ratio }
+        : {}),
+      ...(issue.threshold !== undefined ? { threshold: issue.threshold } : {}),
+      ...(issue.subject_track_id
+        ? { subject_track_id: issue.subject_track_id }
+        : {}),
+      ...(issue.candidate_anchors
+        ? { candidate_anchors: [...issue.candidate_anchors] }
+        : {}),
+      ...(issue.reason ? { reason: issue.reason } : {}),
+      ...(issue.evidence_status
+        ? { evidence_status: issue.evidence_status }
+        : {}),
     };
   });
   return items.sort((left, right) => {
@@ -473,6 +576,15 @@ function stableReviewIssueID(issue: DeterministicLayoutQAIssue): string {
       layer_ids: issue.layer_ids ?? [],
       start_frame: issue.start_frame,
       end_frame: issue.end_frame,
+      generation_id: issue.generation_id,
+      caption_id: issue.caption_id,
+      caption_role: issue.caption_role,
+      collision_ratio: issue.collision_ratio,
+      threshold: issue.threshold,
+      subject_track_id: issue.subject_track_id,
+      candidate_anchors: issue.candidate_anchors,
+      reason: issue.reason,
+      evidence_status: issue.evidence_status,
     }))
     .digest("hex")
     .slice(0, 16)
@@ -596,6 +708,229 @@ function validBounds(bounds: RenderLayoutBounds | undefined): boolean {
     bounds!.height > 0;
 }
 
+function evaluateSubjectCaptionCollisions(
+  snapshot: RenderLayoutSnapshot,
+  captions: RenderLayoutLayer[],
+  options: NonNullable<DeterministicLayoutQAOptions["subjectCollision"]>,
+): {
+  status: DeterministicLayoutQAResult["status"];
+  issues: DeterministicLayoutQAIssue[];
+  binding?: SubjectCollisionBinding;
+} {
+  const incomplete = (
+    reason: string,
+    status: "incomplete" | "human_hold" = "incomplete",
+  ) => ({
+    status,
+    issues: captions.map((caption): DeterministicLayoutQAIssue => ({
+      code: "caption_subject_evidence_incomplete",
+      severity: "blocking",
+      detail: `${caption.layer_id}: ${reason}`,
+      layer_ids: [caption.layer_id],
+      start_frame: caption.start_frame,
+      end_frame: caption.end_frame,
+      generation_id: options.generationId,
+      caption_id: caption.layer_id,
+      caption_role: caption.caption_role ?? "baseline",
+      candidate_anchors: [],
+      reason,
+      evidence_status: status,
+    })),
+  });
+  const track = options.subjectOccupancy;
+  const policy = options.verticalCompositionPolicy;
+  if (!track) return incomplete("subject_occupancy_missing");
+  if (!policy || !options.policyRef || !options.policyHash) {
+    return incomplete("vertical_composition_collision_policy_missing");
+  }
+  const collisionPolicy = policy.checks.caption_collision;
+  if (!collisionPolicy) return incomplete("caption_collision_policy_missing");
+  if (collisionPolicy.auto_move !== false) {
+    return incomplete("caption_collision_auto_move_must_be_disabled", "human_hold");
+  }
+  if (!policy.layout_anchors[collisionPolicy.candidate_anchors.lower] ||
+    !policy.layout_anchors[collisionPolicy.candidate_anchors.upper]) {
+    return incomplete(
+      "caption_collision_candidate_anchor_is_unregistered",
+      "human_hold",
+    );
+  }
+  const actualPolicyHash = verticalCompositionPolicyContentHash(policy);
+  if (actualPolicyHash !== options.policyHash) {
+    return incomplete("vertical_composition_policy_hash_mismatch", "human_hold");
+  }
+  if (track.generation_id !== options.generationId) {
+    return incomplete("subject_occupancy_generation_mismatch", "human_hold");
+  }
+  if (snapshot.binding?.generation_id !== options.generationId) {
+    return incomplete("layout_snapshot_generation_mismatch", "human_hold");
+  }
+  if (snapshot.binding.renderer_capability_sha256 !==
+    options.rendererCapabilityHash) {
+    return incomplete("renderer_capability_hash_mismatch", "human_hold");
+  }
+  const platform = policy.platform_geometry;
+  if (!platform || platform.status === "unknown") {
+    return incomplete("platform_geometry_unknown", "human_hold");
+  }
+  if (platform.status === "provisional") {
+    return incomplete("platform_geometry_provisional", "human_hold");
+  }
+  if (platform.evidence_level === "policy_only" || !platform.source ||
+    !platform.observed_at || !platform.device || !platform.app ||
+    !platform.screenshot_sha256) {
+    return incomplete(
+      "platform_geometry_reproducible_evidence_missing",
+      "human_hold",
+    );
+  }
+  if (captions.some((caption) =>
+    caption.start_frame < track.coverage.start_frame ||
+    caption.end_frame > track.coverage.end_frame
+  )) {
+    return incomplete("subject_occupancy_coverage_incomplete");
+  }
+  if (captions.some((caption) =>
+    !sampleUnionCoversRange(
+      track.tracks.flatMap((subject) => subject.samples),
+      caption.start_frame,
+      caption.end_frame,
+    )
+  )) {
+    return incomplete("subject_occupancy_coverage_incomplete");
+  }
+  const minimumConfidence = policy.checks.evidence.minimum_confidence;
+  if (track.provenance.confidence < minimumConfidence ||
+    track.tracks.some((subject) => subject.confidence < minimumConfidence)) {
+    return incomplete("subject_occupancy_confidence_below_policy");
+  }
+
+  const candidateAnchors = [
+    collisionPolicy.candidate_anchors.lower,
+    collisionPolicy.candidate_anchors.upper,
+  ];
+  const issues: DeterministicLayoutQAIssue[] = [];
+  for (const caption of captions) {
+    const role = caption.caption_role ?? "baseline";
+    const threshold = collisionPolicy.thresholds[role];
+    for (const subject of [...track.tracks].sort((left, right) =>
+      left.track_id.localeCompare(right.track_id, "en")
+    )) {
+      const collisions = subject.samples.flatMap((sample) => {
+        const start = Math.max(caption.start_frame, sample.start_frame);
+        const end = Math.min(caption.end_frame, sample.end_frame);
+        if (end <= start) return [];
+        const subjectBounds = {
+          x: sample.bounds.x * snapshot.frame.width,
+          y: sample.bounds.y * snapshot.frame.height,
+          width: sample.bounds.width * snapshot.frame.width,
+          height: sample.bounds.height * snapshot.frame.height,
+        };
+        const ratio = intersectionRatio(caption.bounds, subjectBounds);
+        return ratio > threshold ? [{ start, end, ratio }] : [];
+      });
+      for (const collision of mergeCollisionRanges(collisions)) {
+        const ratio = round6(collision.ratio);
+        issues.push({
+          code: "caption_subject_collision",
+          severity: "blocking",
+          detail:
+            `${caption.layer_id} ${role} intersects ${subject.track_id} ` +
+            `ratio=${ratio} threshold=${threshold}`,
+          layer_ids: [caption.layer_id],
+          start_frame: collision.start,
+          end_frame: collision.end,
+          generation_id: options.generationId,
+          caption_id: caption.layer_id,
+          caption_role: role,
+          collision_ratio: ratio,
+          threshold,
+          subject_track_id: subject.track_id,
+          candidate_anchors: candidateAnchors,
+          reason: "caption_subject_intersection_exceeds_policy_threshold",
+          evidence_status: "verified",
+        });
+      }
+    }
+  }
+  return {
+    status: issues.length > 0 ? "blocked" : "verified",
+    issues,
+    binding: {
+      generation_id: options.generationId,
+      subject_occupancy_sha256: subjectOccupancyArtifactHash(track),
+      subject_occupancy_payload_sha256: subjectOccupancyPayloadHash(track),
+      snapshot_sha256: hashSnapshot(snapshot),
+      policy_ref: options.policyRef,
+      policy_sha256: actualPolicyHash,
+      renderer_capability_sha256: options.rendererCapabilityHash,
+      platform_geometry_status: platform.status,
+    },
+  };
+}
+
+function sampleUnionCoversRange(
+  samples: Array<{ start_frame: number; end_frame: number }>,
+  startFrame: number,
+  endFrame: number,
+): boolean {
+  let coveredUntil = startFrame;
+  const ranges = samples
+    .map((sample) => ({
+      start: Math.max(startFrame, sample.start_frame),
+      end: Math.min(endFrame, sample.end_frame),
+    }))
+    .filter((range) => range.end > range.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  for (const range of ranges) {
+    if (range.start > coveredUntil) return false;
+    coveredUntil = Math.max(coveredUntil, range.end);
+    if (coveredUntil >= endFrame) return true;
+  }
+  return coveredUntil >= endFrame;
+}
+
+function intersectionRatio(
+  left: RenderLayoutBounds,
+  right: RenderLayoutBounds,
+): number {
+  const width = Math.max(
+    0,
+    Math.min(left.x + left.width, right.x + right.width) -
+      Math.max(left.x, right.x),
+  );
+  const height = Math.max(
+    0,
+    Math.min(left.y + left.height, right.y + right.height) -
+      Math.max(left.y, right.y),
+  );
+  return left.width > 0 && left.height > 0
+    ? width * height / (left.width * left.height)
+    : 0;
+}
+
+function mergeCollisionRanges(
+  collisions: Array<{ start: number; end: number; ratio: number }>,
+): Array<{ start: number; end: number; ratio: number }> {
+  const merged: Array<{ start: number; end: number; ratio: number }> = [];
+  for (const collision of collisions.sort((left, right) =>
+    left.start - right.start || left.end - right.end
+  )) {
+    const previous = merged.at(-1);
+    if (previous && collision.start <= previous.end) {
+      previous.end = Math.max(previous.end, collision.end);
+      previous.ratio = Math.max(previous.ratio, collision.ratio);
+    } else {
+      merged.push({ ...collision });
+    }
+  }
+  return merged;
+}
+
+function round6(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
 function containsRect(
   outer: RenderLayoutBounds,
   inner: RenderLayoutBounds,
@@ -625,8 +960,12 @@ function frameOverlap(
   return end > start ? { start, end } : null;
 }
 
-function hashSnapshot(snapshot: RenderLayoutSnapshot): string {
+export function hashRenderLayoutSnapshot(snapshot: RenderLayoutSnapshot): string {
   return createHash("sha256").update(canonicalJson(snapshot)).digest("hex");
+}
+
+function hashSnapshot(snapshot: RenderLayoutSnapshot): string {
+  return hashRenderLayoutSnapshot(snapshot);
 }
 
 function canonicalJson(value: unknown): string {

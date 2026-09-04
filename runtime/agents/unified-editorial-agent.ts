@@ -32,6 +32,8 @@ import {
   applySourceMediaContract,
   blueprintFromLlmResponse,
   buildCandidateIndex,
+  normalizeNarrativeArcBlueprint,
+  normalizeNarrativeArcCandidateEligibility,
   type CandidateIndex,
 } from "./llm-blueprint-agent.js";
 import {
@@ -73,6 +75,7 @@ import {
   refineClusters,
   type ClusterAssetMetadata,
 } from "../editorial/clustering.js";
+import { enrichSelectsFromAnalysis } from "./triage-enrichment.js";
 import { assessDialogueCompleteness } from "../editorial/dialogue-completeness.js";
 import {
   applyShortFormRetentionDefaults,
@@ -307,6 +310,44 @@ function nonNegativeInteger(value: unknown): number | undefined {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+const CANDIDATE_ROLE_PRECEDENCE: Record<Candidate["role"], number> = {
+  hero: 0,
+  dialogue: 1,
+  support: 2,
+  transition: 3,
+  texture: 4,
+  reject: 5,
+};
+
+function candidateWindowIdentity(candidate: Candidate): string {
+  return [
+    candidate.segment_id,
+    candidate.asset_id,
+    candidate.src_in_us,
+    candidate.src_out_us,
+  ].join("|");
+}
+
+function preferredWindowCandidate(left: Candidate, right: Candidate): Candidate {
+  const roleDelta = CANDIDATE_ROLE_PRECEDENCE[left.role] - CANDIDATE_ROLE_PRECEDENCE[right.role];
+  if (roleDelta !== 0) return roleDelta < 0 ? left : right;
+  if (left.confidence !== right.confidence) return left.confidence > right.confidence ? left : right;
+  const leftRank = left.semantic_rank ?? Number.MAX_SAFE_INTEGER;
+  const rightRank = right.semantic_rank ?? Number.MAX_SAFE_INTEGER;
+  if (leftRank !== rightRank) return leftRank < rightRank ? left : right;
+  return (left.candidate_id ?? "").localeCompare(right.candidate_id ?? "") <= 0 ? left : right;
+}
+
+function deduplicateCandidateWindows(candidates: Candidate[]): Candidate[] {
+  const byWindow = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    const identity = candidateWindowIdentity(candidate);
+    const current = byWindow.get(identity);
+    byWindow.set(identity, current ? preferredWindowCandidate(current, candidate) : candidate);
+  }
+  return [...byWindow.values()];
 }
 
 function resolveFramePath(framePath: string | undefined, projectDir?: string): string | undefined {
@@ -1113,6 +1154,18 @@ function storyRoleForIndex(index: number, total: number): SelectStoryRole {
   return "reaction";
 }
 
+function storyRoleFromSourceSignals(segment: SegmentItem): SelectStoryRole | undefined {
+  const tags = new Set(
+    (segment.tags ?? [])
+      .map((tag) => tag.normalize("NFKC").toLowerCase().trim().replace(/[^a-z0-9]+/g, "_"))
+      .filter(Boolean),
+  );
+  if (["hook", "opening", "opener"].some((tag) => tags.has(tag))) return "hook";
+  if (["closing", "close", "ending", "finish", "cta"].some((tag) => tags.has(tag))) return "closing";
+  if (["insight", "reflection", "lesson", "learning"].some((tag) => tags.has(tag))) return "experience";
+  return undefined;
+}
+
 function beatIdForStoryRole(role: SelectStoryRole): string {
   if (role === "hook") return "b01_hook";
   if (role === "setup") return "b02_setup";
@@ -1164,7 +1217,7 @@ function fallbackSelects(
     .slice(0, Math.min(50, Math.max(1, segments.length)));
 
   const candidates: Candidate[] = ranked.map((segment, index) => {
-    const storyRole = storyRoleForIndex(index, ranked.length);
+    const storyRole = storyRoleFromSourceSignals(segment) ?? storyRoleForIndex(index, ranked.length);
     const events = eventsByAsset.get(segment.asset_id) ?? [];
     const event = events.find((item) => overlapsSegment(segment, item)) ?? events[0];
     const role = roleForSegment(segment, index);
@@ -1186,7 +1239,7 @@ function fallbackSelects(
           : "No representative frame was available.",
       ],
       eligible_beats: [beatIdForStoryRole(storyRole)],
-      motif_tags: uniqueStrings([...(segment.tags ?? []), storyRole]).slice(0, 8),
+      motif_tags: uniqueStrings(segment.tags ?? []).slice(0, 8),
       ...(segment.transcript_excerpt ? { transcript_excerpt: segment.transcript_excerpt } : {}),
       trim_hint: {
         preferred_duration_us: Math.min(
@@ -1523,7 +1576,9 @@ function normalizeRoughSelects(
     selects = fallbackSelects(input.brief, input.marlinEvents, input.representativeFrames, input.segments);
   }
   selects.decision_runtime = decisionRuntime;
+  selects.candidates = deduplicateCandidateWindows(selects.candidates);
   ensureCandidateIds(projectId, selects.candidates);
+  selects = normalizeNarrativeArcCandidateEligibility(input.brief, selects);
   enrichSelectedCandidatesWithVisualEvidence(selects, input.visualEvidence);
   enrichSelectedCandidatesWithAudioEvidence(selects, input.audioEvidence);
   if (input.projectDir) materializeCandidateMediaCapabilities(input.projectDir, selects, input.segments);
@@ -1626,6 +1681,10 @@ async function normalizeRoughResult(
 ): Promise<{ selects: SelectsCandidates; blueprint: EditBlueprint }> {
   const projectId = projectIdFromBrief(input.brief);
   let selects = normalizeRoughSelects(parsed, input, decisionRuntime);
+  selects = enrichSelectsFromAnalysis(selects, input.segments, {
+    brief: input.brief,
+    applyQualityGate: false,
+  });
   selects = await refineClusters(selects, input.segments, {
     assets: clusterAssetsForRough(input),
     projectDir: input.projectDir,
@@ -1635,7 +1694,11 @@ async function normalizeRoughResult(
   selects = applyRoughCoverage(selects, input);
   validateArtifact<SelectsCandidates>(selects, "selects-candidates.schema.json");
 
-  const blueprint = normalizeRoughBlueprint(parsed, input, projectId, selects, decisionRuntime);
+  const blueprint = normalizeNarrativeArcBlueprint(
+    input.brief,
+    selects,
+    normalizeRoughBlueprint(parsed, input, projectId, selects, decisionRuntime),
+  );
 
   return { selects, blueprint };
 }
@@ -1651,7 +1714,11 @@ function normalizeRoughResultSync(
   selects = applyRoughQualityGate(selects, input);
   selects = applyRoughCoverage(selects, input);
   validateArtifact<SelectsCandidates>(selects, "selects-candidates.schema.json");
-  const blueprint = normalizeRoughBlueprint(parsed, input, projectId, selects, decisionRuntime);
+  const blueprint = normalizeNarrativeArcBlueprint(
+    input.brief,
+    selects,
+    normalizeRoughBlueprint(parsed, input, projectId, selects, decisionRuntime),
+  );
   return { selects, blueprint };
 }
 
@@ -1749,7 +1816,12 @@ export async function roughCutPlanning(
       parseJson: parseLlmResponse,
       validateJson: validateRoughJson,
       repairPrompt,
-    }, options?.editorialLlm ?? {});
+    }, {
+      // Persist the sanitized attempt journal next to the analysis artifacts
+      // unless the caller already chose a sink.
+      projectDir: options?.projectDir,
+      ...options?.editorialLlm,
+    });
   try {
     const completion = await completeRoughJson(prompt);
     usedLiveRuntime = completion.runtime !== "deterministic";
@@ -1831,6 +1903,8 @@ function enforceSelectedCandidatePool(blueprint: EditBlueprint, selects: Selects
     beat.candidate_plan = {
       primary_candidate_ref: primary,
       fallback_candidate_refs: fallbacks.filter((ref) => ref !== primary),
+      ...(plan.still_image ? { still_image: { ...plan.still_image } } : {}),
+      ...(plan.freeze_frame_hold ? { freeze_frame_hold: { ...plan.freeze_frame_hold } } : {}),
     };
   }
 
@@ -2019,6 +2093,7 @@ function normalizeFineBlueprint(
   },
   decisionRuntime: DecisionRuntimeRecord = injectedDecisionRuntime("unified-editorial-fine"),
 ): EditBlueprint {
+  normalizeNarrativeArcCandidateEligibility(input.brief, input.selects);
   applyDeterministicFineTrimHints(input.selects, input.marlinEvents);
   applyLlmClipCraft(input.selects, parsed);
   input.selects.decision_runtime = decisionRuntime;
@@ -2039,6 +2114,7 @@ function normalizeFineBlueprint(
 
   next = enforceSelectedCandidatePool(next, input.selects);
   next = mergeFineCraft(next);
+  next = normalizeNarrativeArcBlueprint(input.brief, input.selects, next);
   next.decision_runtime = decisionRuntime;
   if (input.bgmDurationSec !== null) {
     next.music_policy = {
@@ -2111,7 +2187,10 @@ export async function fineCutRefinement(
         });
       },
       repairPrompt,
-    }, options?.editorialLlm ?? {});
+    }, {
+      projectDir: options?.projectDir,
+      ...options?.editorialLlm,
+    });
     decisionRuntime = decisionRuntimeRecord(completion, "unified-editorial-fine");
     parsed = completion.runtime === "deterministic" ? undefined : completion.parsed;
   } catch {

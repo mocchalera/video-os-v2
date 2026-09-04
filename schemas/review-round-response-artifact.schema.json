@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-round-response-artifact.schema.json",
+  "title": "Review Round Response Artifact",
+  "description": "Immutable per-event durable record of one human review response. Identity is sha256 of the canonical JSON of the record; the filename must be the identity without prefix.",
+  "type": "object",
+  "required": ["version", "project_id", "generation_id", "review_identity", "ask_event", "ask_id", "decision", "text", "output"],
+  "properties": {
+    "version": { "const": "review-round-response-artifact/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "generation_id": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "review_identity": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "ask_event": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "ask_id": { "type": "string", "minLength": 1 },
+    "decision": { "enum": ["approve", "request_changes", "free_text"] },
+    "text": { "type": ["string", "null"] },
+    "output": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,43 @@
+version: "1"
+project_id: day3-equivalent-fixture
+policy_refs:
+  vertical_composition_policy_ref:
+    ref: 04_plan/vertical-composition-policy.json
+sequence_goals:
+  - restore the opening before the body
+  - place three short cutaways
+  - hold two authored hook titles
+beats:
+  - id: day3
+    label: day3 review
+    target_duration_frames: 50
+    required_roles:
+      - hero
+pacing:
+  opening_cadence: brisk
+  middle_cadence: measured
+  ending_cadence: open
+music_policy:
+  start_sparse: true
+  allow_release_late: true
+  entry_beat: day3
+dialogue_policy:
+  preserve_natural_breath: true
+  avoid_wall_to_wall_voiceover: true
+transition_policy:
+  prefer_match_texture_over_flashy_fx: true
+  allow_hard_cuts: true
+ending_policy:
+  should_feel: resolved
+rejection_rules:
+  - do not synthesize captions
+  - do not silently drop overlays
+duration_policy:
+  mode: guide
+  source: global_default
+  target_source: material_total
+  target_duration_sec: 2
+  min_duration_sec: 0
+  max_duration_sec: null
+  hard_gate: false
+  protect_vlm_peaks: true

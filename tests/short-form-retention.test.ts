@@ -254,7 +254,8 @@ describe("short-form retention planning", () => {
       styleContent: null,
     });
     expect(prompt).toContain("## Short-social retention contract");
-    expect(prompt).toContain("roughly 65% of total runtime");
+    expect(prompt).toContain("registered payoff window");
+    expect(prompt).not.toContain("6-12 seconds");
     expect(prompt).toContain("beat.viewer_label");
     expect(prompt).toContain("caption_policy.semantic_timing");
     expect(prompt).toContain("protected reveal");

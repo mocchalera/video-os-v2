@@ -24,16 +24,50 @@ public final class StudioFeedbackSession: ObservableObject {
     @Published public private(set) var baseTimelineVersion: String?
     @Published public private(set) var patchHistory: [PatchHistoryRecord] = []
     @Published public private(set) var isDirty = false
+    @Published public private(set) var hookLockRejectionReason: String?
+
+    private var baselineTimeline: TimelineDocument?
 
     public init() {}
 
-    public func addOp(_ op: ReviewPatchOperation) {
-        guard op.isValidForStudioSession else { return }
+    @discardableResult
+    public func addOp(_ op: ReviewPatchOperation) -> Bool {
+        guard op.isValidForStudioSession else { return false }
+        if let baselineTimeline,
+           let rejection = baselineTimeline.hookLockRejection(for: op) {
+            hookLockRejectionReason = rejection
+            return false
+        }
+        hookLockRejectionReason = nil
         if let deduplicationKey = op.deduplicationKey {
             pendingOps.removeAll { $0.deduplicationKey == deduplicationKey }
         }
         pendingOps.append(op)
         updateDirtyState()
+        return true
+    }
+
+    /// Preflight and queue a batch as one Studio mutation. A Hook+Body batch
+    /// is rejected before any pending operation or displayed-timeline update
+    /// can be committed.
+    @discardableResult
+    public func addOps(
+        _ operations: [ReviewPatchOperation],
+        against timeline: TimelineDocument? = nil
+    ) -> Bool {
+        guard operations.allSatisfy(\.isValidForStudioSession) else { return false }
+        if baselineTimeline == nil, let timeline {
+            captureBaseline(from: timeline)
+        }
+        let guardTimeline = timeline ?? baselineTimeline
+        if let rejection = operations.compactMap({ guardTimeline?.hookLockRejection(for: $0) }).first {
+            hookLockRejectionReason = rejection
+            return false
+        }
+        for operation in operations {
+            guard addOp(operation) else { return false }
+        }
+        return true
     }
 
     public func removePendingOps(targetClipID: String, opNames: Set<String>) {
@@ -124,12 +158,16 @@ public final class StudioFeedbackSession: ObservableObject {
         pendingOps.removeAll()
         approvedClipIDs.removeAll()
         rejectedClipIDs.removeAll()
+        hookLockRejectionReason = nil
+        baselineTimeline = nil
         updateDirtyState()
     }
 
     public func clearBaseline() {
         baseTimelineHash = nil
         baseTimelineVersion = nil
+        baselineTimeline = nil
+        hookLockRejectionReason = nil
     }
 
     public func serialize(projectID: String) -> StudioPatchEnvelope {
@@ -202,6 +240,8 @@ public final class StudioFeedbackSession: ObservableObject {
     public func captureBaseline(from timeline: TimelineDocument) {
         baseTimelineHash = timeline.sourceHash ?? Self.fallbackHash(from: timeline)
         baseTimelineVersion = timeline.version
+        baselineTimeline = timeline
+        hookLockRejectionReason = nil
     }
 
     public func loadHistory(projectURL: URL) {

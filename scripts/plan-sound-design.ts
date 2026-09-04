@@ -8,6 +8,10 @@ import { pathToFileURL } from "node:url";
 import { validateArtifact } from "../runtime/artifacts/loaders.js";
 import type { TimelineIR } from "../runtime/compiler/types.js";
 import {
+  assertSfxAssetSelectable,
+  getSfxLibraryHoldReason,
+} from "../runtime/audio/sfx-library.js";
+import {
   hashFile,
   resolveSfxLibraryPin,
   type SfxCuesDoc,
@@ -21,6 +25,7 @@ import {
 
 export interface PlanSoundDesignArgs {
   projectDir: string;
+  repoSfxRoot?: string;
   timelinePath: string;
   requestPath: string;
   decisionOutputPath: string;
@@ -29,7 +34,7 @@ export interface PlanSoundDesignArgs {
 }
 
 const USAGE = `Usage:
-  npm run sound-design:plan -- --project <dir> --timeline <timeline.json> --request <sound-design-request.json> --decision-output <new-decision.json> --cues-output <new-sfx-cues.json> [--dry-run] [--help]
+  npm run sound-design:plan -- --project <dir> --timeline <timeline.json> --request <sound-design-request.json> --decision-output <new-decision.json> --cues-output <new-sfx-cues.json> [--repo-sfx-root <repo/resources/sfx>] [--dry-run] [--help]
 
 Validates project/timeline identity, SFX rights/provenance and content pins,
 then runs the semantic-first, tempo-secondary solver and projects only adopted
@@ -50,6 +55,7 @@ export function parsePlanSoundDesignArgs(
 ): PlanSoundDesignArgs {
   const values = argv.slice(2);
   let projectDir: string | undefined;
+  let repoSfxRoot: string | undefined;
   let timelinePath: string | undefined;
   let requestPath: string | undefined;
   let decisionOutputPath: string | undefined;
@@ -59,6 +65,7 @@ export function parsePlanSoundDesignArgs(
     const arg = values[index];
     if (arg === "--help" || arg === "-h") throw new Error(USAGE);
     if (arg === "--project") projectDir = required(values, ++index, arg);
+    else if (arg === "--repo-sfx-root") repoSfxRoot = required(values, ++index, arg);
     else if (arg === "--timeline") timelinePath = required(values, ++index, arg);
     else if (arg === "--request") requestPath = required(values, ++index, arg);
     else if (arg === "--decision-output") {
@@ -79,6 +86,7 @@ export function parsePlanSoundDesignArgs(
   }
   return {
     projectDir: path.resolve(projectDir),
+    ...(repoSfxRoot ? { repoSfxRoot: path.resolve(repoSfxRoot) } : {}),
     timelinePath: path.resolve(timelinePath),
     requestPath: path.resolve(requestPath),
     decisionOutputPath: path.resolve(decisionOutputPath),
@@ -182,7 +190,12 @@ function validateRequestPins(
     request.timeline_ref.content_hash,
   );
 
-  const library = resolveSfxLibraryPin(args.projectDir, request.library);
+  const library = resolveSfxLibraryPin(args.projectDir, request.library, { repoSfxRoot: args.repoSfxRoot });
+  const libraryHold = getSfxLibraryHoldReason(library.manifest);
+  if (libraryHold) throw new Error(`SFX library cannot be selected: ${libraryHold}`);
+  if (request.library.scope !== undefined && request.library.scope !== library.scope) {
+    throw new Error("sound-design request library scope does not match the manifest");
+  }
   for (const candidate of request.candidates) {
     const resolved = library.assets.get(candidate.asset_id);
     if (!resolved) {
@@ -191,6 +204,13 @@ function validateRequestPins(
       );
     }
     const { asset } = resolved;
+    try {
+      assertSfxAssetSelectable(asset, new Date(), "formal_render");
+    } catch (error) {
+      throw new Error(
+        `${candidate.candidate_id} cannot select SFX asset: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     if (!asset.semantic_roles.includes(candidate.semantic_role)) {
       throw new Error(
         `${candidate.asset_id} does not permit ${candidate.semantic_role}`,
@@ -216,13 +236,23 @@ function validateRequestPins(
         asset.provenance.source_ref,
         candidate.asset_pin.provenance_ref,
       ],
+      ["asset_path", asset.path, candidate.asset_pin.asset_path],
+      ["rights_status", asset.rights.status, candidate.asset_pin.rights_status],
+      ["provenance_status", asset.provenance.status, candidate.asset_pin.provenance_status],
+      ["review_status", asset.review_status, candidate.asset_pin.review_status],
+      ["rights_expires_at", asset.rights.expires_at, candidate.asset_pin.rights_expires_at],
+      ["permitted_derivatives", asset.rights.permitted_derivatives, candidate.asset_pin.permitted_derivatives],
     ] as Array<[string, unknown, unknown]>) {
-      assertEqual(`${candidate.candidate_id}.${label}`, expected, actual);
+      if (actual === undefined) continue;
+      const equal = Array.isArray(expected)
+        ? JSON.stringify(expected) === JSON.stringify(actual)
+        : expected === actual;
+      if (!equal) assertEqual(`${candidate.candidate_id}.${label}`, expected, actual);
     }
     if (
       candidate.audio.source_range.out_us
         <= candidate.audio.source_range.in_us
-      || candidate.audio.source_range.out_us > asset.duration_us
+        || candidate.audio.source_range.out_us > asset.duration_us!
     ) {
       throw new Error(
         `${candidate.candidate_id} source range exceeds the pinned SFX asset`,

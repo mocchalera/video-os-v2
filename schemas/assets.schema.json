@@ -47,6 +47,7 @@
         "source_fingerprint": { "type": "string" },
         "source_locator": { "type": "string" },
         "video_stream": { "$ref": "#/$defs/video-stream" },
+        "source_capabilities": { "$ref": "#/$defs/source-capabilities" },
         "frame_rate_mode": { "type": "string", "enum": ["cfr", "vfr", "audio_only", "still_image", "unknown"] },
         "rotation": { "type": ["integer", "null"], "enum": [0, 90, 180, 270, null] },
         "audio_stream": { "$ref": "#/$defs/audio-stream" },
@@ -232,6 +233,16 @@
         "sample_rate": { "type": "integer", "minimum": 1 },
         "channels": { "type": "integer", "minimum": 1 },
         "codec": { "type": "string", "minLength": 1 }
+      }
+    },
+    "source-capabilities": {
+      "type": "object",
+      "required": ["has_video", "has_audio", "has_temporal_video"],
+      "additionalProperties": false,
+      "properties": {
+        "has_video": { "type": "boolean" },
+        "has_audio": { "type": "boolean" },
+        "has_temporal_video": { "type": "boolean" }
       }
     }
   }

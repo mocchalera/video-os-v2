@@ -2,6 +2,7 @@ import type { Candidate, CreativeBrief, SelectsCandidates } from "../artifacts/t
 import { loadDefaults, resolvePolicy } from "../policy-resolver.js";
 import { deriveSemanticClusterId } from "./clustering.js";
 import { mustHaveMatches, type QualityGateSegment } from "./quality-gate.js";
+import { isProductionDirective } from "../eval/selection-coverage.js";
 
 export const SELECTION_COVERAGE_POLICY_NAME = "analysis-defaults.selection";
 
@@ -234,6 +235,12 @@ export function evaluateSelectionCoverage(
   }
 
   const mustHave = evaluateMustHaveCoverage(candidates, brief, segmentById);
+  const deferredDirectiveCount = mustHave.filter((item) => isProductionDirective(item.item)).length;
+  if (deferredDirectiveCount > 0) {
+    notes.push(
+      `${deferredDirectiveCount} production directive must_have items deferred to blueprint/timeline validation`,
+    );
+  }
   for (const item of mustHave) {
     if (item.status === "met") continue;
     unmet.push({
@@ -290,8 +297,13 @@ function evaluateMustHaveCoverage(
 ): CoverageMustHaveRecord[] {
   const mustHaves = briefMustHaveStrings(brief);
   if (mustHaves.length === 0) return [];
-  const active = candidates.filter((candidate) => !isQualityRejected(candidate));
+  const active = candidates.filter(
+    (candidate) => !isQualityRejected(candidate) && segmentById.has(candidate.segment_id),
+  );
   return mustHaves.map((item) => {
+    if (isProductionDirective(item)) {
+      return { item, status: "met", matched_segment_ids: [] };
+    }
     const matchedSegmentIds = active
       .filter((candidate) => mustHaveMatches(candidate, segmentById.get(candidate.segment_id), [item]).length > 0)
       .map((candidate) => candidate.segment_id)

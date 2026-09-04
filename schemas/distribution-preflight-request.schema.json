@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "distribution-preflight-request.schema.json", "type": "object",
+  "required": ["version", "project_dir", "project_id", "action", "generation_id", "review_identity", "output", "package", "platform_geometry", "declared_holds", "override_locator", "evaluated_at"],
+  "properties": {
+    "version": { "const": "distribution-preflight-request/v1" }, "project_dir": { "type": "string", "minLength": 1 }, "project_id": { "type": "string", "minLength": 1 },
+    "action": { "enum": ["review_share", "external_export", "external_upload", "production_release", "publication", "public_upload"] }, "generation_id": { "$ref": "#/$defs/hash" }, "review_identity": { "$ref": "#/$defs/hash" },
+    "output": { "type": "object", "required": ["locator", "sha256"], "properties": { "locator": { "$ref": "#/$defs/locator" }, "sha256": { "$ref": "#/$defs/hash" } }, "additionalProperties": false },
+    "package": { "type": "object", "required": ["manifest_locator", "manifest_sha256"], "properties": { "manifest_locator": { "$ref": "#/$defs/locator" }, "manifest_sha256": { "$ref": "#/$defs/hash" } }, "additionalProperties": false },
+    "platform_geometry": { "type": "object", "required": ["status", "evidence_level"], "properties": { "status": { "enum": ["unknown", "provisional", "measured"] }, "evidence_level": { "enum": ["policy_only", "platform_measured", "human_verified"] } }, "additionalProperties": false },
+    "declared_holds": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "override_locator": { "anyOf": [{ "$ref": "#/$defs/locator" }, { "type": "null" }] }, "evaluated_at": { "type": "string", "format": "date-time" }
+  }, "additionalProperties": false,
+  "$defs": { "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "locator": { "type": "string", "pattern": "^project:[^/].+" } }
+}

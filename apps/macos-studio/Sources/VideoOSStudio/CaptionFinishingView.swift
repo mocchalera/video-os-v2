@@ -4,11 +4,20 @@ import SwiftUI
 import VideoOSStudioCore
 
 struct CaptionFinishingView: View {
+    private enum CaptionReviewMode: String, CaseIterable, Identifiable {
+        case timing = "タイミング"
+        case visual = "Visual"
+
+        var id: String { rawValue }
+    }
+
     private enum QueueFilter: String, CaseIterable, Identifiable {
         case needsAttention = "要確認"
         case blocking = "修正必須"
         case unreviewed = "未確認"
         case verified = "確認済み"
+        case visualRisk = "Visual要確認"
+        case stale = "Stale"
         case all = "すべて"
 
         var id: String { rawValue }
@@ -22,8 +31,12 @@ struct CaptionFinishingView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var accessibilityHighContrast
     @StateObject private var session: CaptionReviewSession
     @StateObject private var previewController = CaptionMediaPreviewController()
+    @State private var mode: CaptionReviewMode = .timing
+    @State private var showsSafeZoneOverlay = true
     @State private var filter: QueueFilter = .needsAttention
     @State private var order: QueueOrder = .risk
     @State private var searchText = ""
@@ -99,9 +112,20 @@ struct CaptionFinishingView: View {
         .frame(minWidth: 1080, minHeight: 700)
         .task {
             await session.load()
+            if session.visualReview != nil {
+                await session.refreshVisualStatus(accessibility: visualAccessibility)
+            }
             preparePreview()
         }
         .onChange(of: session.selectedCaptionID) { _, _ in preparePreview() }
+        .onChange(of: accessibilityReduceMotion) { _, _ in
+            guard session.visualReview != nil else { return }
+            Task { await session.refreshVisualStatus(accessibility: visualAccessibility) }
+        }
+        .onChange(of: accessibilityHighContrast) { _, _ in
+            guard session.visualReview != nil else { return }
+            Task { await session.refreshVisualStatus(accessibility: visualAccessibility) }
+        }
         .onChange(of: session.draftStartFrame) { _, _ in
             updatePreviewCaptionRange()
             session.scheduleAutosave()
@@ -164,6 +188,28 @@ struct CaptionFinishingView: View {
                 summaryChip("注意", value: document.warningCount, color: .orange)
                 summaryChip("確認済み", value: document.verifiedCount, color: .green)
                 summaryChip("全件", value: document.items.count, color: .secondary)
+            }
+
+            Picker("編集モード", selection: $mode) {
+                ForEach(CaptionReviewMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 170)
+            .disabled(session.visualHasUnsavedChange)
+            .help(session.visualHasUnsavedChange ? "未保存のvisual patchを保存またはResetしてからモードを切り替えてください" : "text/timingとvisual treatmentを独立したモードで確認します")
+            .accessibilityIdentifier("CaptionReviewModePicker")
+
+            if mode == .visual, session.visualReview == nil {
+                Button {
+                    Task { await session.initializeVisualReview() }
+                } label: {
+                    Label("Visual reviewを開始", systemImage: "sparkles.rectangle.stack")
+                }
+                .disabled(session.isBusy || session.approvalStatus != "approved")
+                .help("確認済みのtext/timing approvalを基準に、独立したvisual treatment streamを作成します")
+                .accessibilityIdentifier("CaptionVisualInitializeButton")
             }
 
             Spacer()
@@ -285,10 +331,16 @@ struct CaptionFinishingView: View {
 
             List(selection: Binding(
                 get: { session.selectedCaptionID },
-                set: { session.select($0) }
+                set: { captionID in
+                    guard !session.visualHasUnsavedChange else {
+                        session.reportVisualSelectionBlocked()
+                        return
+                    }
+                    session.select(captionID)
+                }
             )) {
                 ForEach(filteredItems) { item in
-                    CaptionQueueRow(item: item)
+                    CaptionQueueRow(item: item, hasVisualRisk: session.visualRiskCaptionIDs.contains(item.captionID))
                         .tag(item.captionID)
                 }
             }
@@ -314,7 +366,7 @@ struct CaptionFinishingView: View {
                     } label: {
                         Label("前の字幕", systemImage: "chevron.left")
                     }
-                    .disabled(session.previousTimelineItem == nil || session.hasUnsavedChange)
+                    .disabled(session.previousTimelineItem == nil || session.hasUnsavedChange || session.visualHasUnsavedChange)
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.captionID)
@@ -330,7 +382,7 @@ struct CaptionFinishingView: View {
                         Label("次の字幕", systemImage: "chevron.right")
                     }
                     .labelStyle(.titleAndIcon)
-                    .disabled(session.nextTimelineItem == nil || session.hasUnsavedChange)
+                    .disabled(session.nextTimelineItem == nil || session.hasUnsavedChange || session.visualHasUnsavedChange)
 
                     Button {
                         onRevealInTimeline(item.timelineInFrame)
@@ -341,11 +393,15 @@ struct CaptionFinishingView: View {
                 }
                 .padding(16)
 
-                captionMediaPreview(text: session.draftText)
+                captionMediaPreview(
+                    text: mode == .timing ? session.draftText : item.text,
+                    mode: mode
+                )
                     .padding(.horizontal, 16)
                     .padding(.bottom, 14)
 
-                Text("本文・改行")
+                if mode == .timing {
+                    Text("本文・改行")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
@@ -430,6 +486,16 @@ struct CaptionFinishingView: View {
                     .accessibilityIdentifier("CaptionVerifyButton")
                 }
                 .padding(16)
+                } else {
+                    CaptionVisualTreatmentWorkspace(
+                        item: item,
+                        session: session,
+                        showsSafeZoneOverlay: $showsSafeZoneOverlay,
+                        accessibility: visualAccessibility
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }
             } else {
                 ContentUnavailableView(
                     "字幕を選択してください",
@@ -445,6 +511,14 @@ struct CaptionFinishingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let item = session.selectedItem {
+                    if mode == .visual {
+                        CaptionVisualTreatmentInspector(
+                            item: item,
+                            session: session,
+                            showsSafeZoneOverlay: $showsSafeZoneOverlay,
+                            accessibility: visualAccessibility
+                        )
+                    } else {
                     Label(item.reviewState.localizedLabel, systemImage: stateIcon(item.reviewState))
                         .font(.headline)
                         .foregroundStyle(stateColor(item.reviewState))
@@ -487,6 +561,7 @@ struct CaptionFinishingView: View {
                         .font(.caption2.monospaced())
                         .textSelection(.enabled)
                         .foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(16)
@@ -573,7 +648,7 @@ struct CaptionFinishingView: View {
 
     private var statusBar: some View {
         HStack(spacing: 10) {
-            if session.isBusy {
+            if session.isBusy || session.isVisualBusy {
                 ProgressView()
                     .controlSize(.small)
             }
@@ -587,9 +662,10 @@ struct CaptionFinishingView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.blue)
             }
-            Image(systemName: session.errorMessage == nil ? "info.circle" : "exclamationmark.triangle.fill")
-                .foregroundStyle(session.errorMessage == nil ? Color.secondary : Color.red)
-            Text(session.errorMessage ?? session.statusMessage)
+            let displayedError = session.errorMessage ?? session.visualErrorMessage
+            Image(systemName: displayedError == nil ? "info.circle" : "exclamationmark.triangle.fill")
+                .foregroundStyle(displayedError == nil ? Color.secondary : Color.red)
+            Text(displayedError ?? (mode == .visual ? session.visualStatusMessage : session.statusMessage))
                 .font(.caption)
                 .lineLimit(2)
             Spacer()
@@ -614,6 +690,10 @@ struct CaptionFinishingView: View {
                 matchesFilter = item.reviewState == .unreviewed
             case .verified:
                 matchesFilter = item.reviewState == .verified
+            case .visualRisk:
+                matchesFilter = session.visualRiskCaptionIDs.contains(item.captionID)
+            case .stale:
+                matchesFilter = session.visualConflict?.captionID == item.captionID
             case .all:
                 matchesFilter = true
             }
@@ -633,17 +713,51 @@ struct CaptionFinishingView: View {
         }
     }
 
-    private func captionMediaPreview(text: String) -> some View {
+    private func captionMediaPreview(text: String, mode: CaptionReviewMode) -> some View {
         VStack(spacing: 8) {
             ZStack(alignment: .bottom) {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.black.gradient)
                 VideoPlayer(player: previewController.player)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                CaptionActualSizeOverlay(
-                    text: text.isEmpty ? "字幕プレビュー" : text,
-                    style: session.document?.captionStyle ?? .default
-                )
+                if mode == .timing {
+                    CaptionActualSizeOverlay(
+                        text: text.isEmpty ? "字幕プレビュー" : text,
+                        style: session.document?.captionStyle ?? .default
+                    )
+                } else if let input = session.visualReview?.input,
+                          let operation = session.selectedVisualTreatment {
+                    if input.rendererRoute.speechCaptions == "ffmpeg-libass" {
+                        if let projection = input.projection(for: operation.captionID), projection.studioPreviewSupported {
+                            CaptionCanonicalTreatmentOverlay(
+                                text: text.isEmpty ? "字幕プレビュー" : text,
+                                projection: projection,
+                                operation: operation,
+                                input: input,
+                                safeZoneProfile: session.visualReview?.safeZoneProfile,
+                                status: session.visualReview?.status ?? input.status,
+                                reasons: (session.visualReview?.degradedReasons.map(\.reason) ?? [])
+                                    + (session.visualReview?.blockedReasons.map(\.reason) ?? []),
+                                showsSafeZoneOverlay: showsSafeZoneOverlay,
+                                isEditable: session.visualCanEdit,
+                                onOperationChanged: { session.updateVisualDraft($0) },
+                                onOperationCommitted: { _ in
+                                    Task { await session.applyVisualTreatment(accessibility: visualAccessibility) }
+                                }
+                            )
+                        } else {
+                            let reason = input.projection(for: operation.captionID)?.studioPreviewUnavailableReasons.joined(separator: " / ")
+                                ?? "canonical resolved projectionがありません"
+                            CaptionVisualReviewPlaceholder(message: "Studio exact preview unavailable: \(reason)。canonical rendererの選択は保持しますが、canonical preapproval preview receiptなしのparity主張・承認は停止しています。")
+                        }
+                    } else {
+                        CaptionVisualReviewPlaceholder(message: "external/NLE routeのためcanonical caption表示を停止しています。route receiptを確認してください。")
+                    }
+                } else {
+                    CaptionVisualReviewPlaceholder(
+                        message: session.visualErrorMessage ?? "Visual reviewを開始するとcanonical treatmentを表示します。"
+                    )
+                }
             }
             .frame(height: 190)
 
@@ -653,6 +767,7 @@ struct CaptionFinishingView: View {
                 loopEndSeconds: previewController.loopEndSeconds,
                 currentSeconds: previewController.currentSeconds,
                 fps: session.document?.fps ?? 24,
+                isEditable: mode == .timing,
                 captionStartFrame: $session.draftStartFrame,
                 captionEndFrame: $session.draftEndFrame
             )
@@ -763,6 +878,13 @@ struct CaptionFinishingView: View {
         )
     }
 
+    private var visualAccessibility: CaptionVisualAccessibility {
+        CaptionVisualAccessibility(
+            reducedMotion: accessibilityReduceMotion,
+            highContrast: accessibilityHighContrast
+        )
+    }
+
     private func formatSeconds(_ seconds: Double) -> String {
         String(format: "%.2fs", max(0, seconds))
     }
@@ -810,6 +932,450 @@ struct CaptionFinishingView: View {
         case .warn: return .orange
         case .block: return .red
         }
+    }
+}
+
+private struct CaptionVisualTreatmentWorkspace: View {
+    let item: CaptionReviewQueueItem
+    @ObservedObject var session: CaptionReviewSession
+    @Binding var showsSafeZoneOverlay: Bool
+    let accessibility: CaptionVisualAccessibility
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Visual mode", systemImage: "sparkles.rectangle.stack")
+                .font(.headline)
+            Text("text / timingは固定表示です。Viewerはcanonical resolved inputの座標・capabilityを投影します。caption boxをドラッグしてlocal previewを調整し、保存時だけcanonical serviceへpatchを送ります。pixel parityはcanonical preview receiptで確認します。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let operation = session.selectedVisualTreatment {
+                HStack(spacing: 8) {
+                    Label(operation.captionID, systemImage: "checkmark.circle")
+                    Text("anchor \(operation.anchor.localizedLabel)")
+                    Text("scale \(String(format: "%.2f", operation.referenceScale ?? 1))")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Label("波形・動画loopはtiming modeと同期", systemImage: "waveform")
+                Spacer()
+                Toggle("safe-zone", isOn: $showsSafeZoneOverlay)
+                    .toggleStyle(.checkbox)
+                    .accessibilityLabel("platform safe-zone overlayを表示")
+            }
+            .font(.caption)
+
+            if let error = session.visualErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("CaptionVisualTreatmentWorkspace.\(item.captionID)")
+    }
+}
+
+private struct CaptionVisualTreatmentInspector: View {
+    let item: CaptionReviewQueueItem
+    @ObservedObject var session: CaptionReviewSession
+    @Binding var showsSafeZoneOverlay: Bool
+    let accessibility: CaptionVisualAccessibility
+
+    private var operation: CaptionVisualTreatmentOperation? {
+        session.selectedVisualTreatment
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Graphical caption treatment", systemImage: "sparkles.rectangle.stack")
+                .font(.headline)
+            Text("\(item.captionID) / stable identity: \(session.selectedVisualIdentity?.stableRootID ?? "unknown")")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            visualStatusCard
+            if let conflict = session.visualConflict {
+                visualConflictCard(conflict)
+            }
+            Divider()
+
+            Toggle("platform safe-zone overlay", isOn: $showsSafeZoneOverlay)
+                .accessibilityIdentifier("CaptionSafeZoneOverlayToggle")
+
+            if let operation {
+                anchorPicker(operation: operation)
+                scaleControl(operation: operation)
+                capabilityControls(operation: operation)
+                nudgeControls
+            } else {
+                CaptionVisualReviewPlaceholder(message: "選択字幕のcanonical treatmentがありません。visual stateをrefreshしてください。")
+            }
+
+            Divider()
+            actionControls
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("CaptionVisualTreatmentInspector")
+    }
+
+    private var visualStatusCard: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            let status = session.visualReview?.status ?? session.visualReview?.input?.status
+            Label(status?.localizedLabel ?? "state unknown", systemImage: statusIcon(status))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(statusColor(status))
+            if let input = session.visualReview?.input {
+                Text("input \(input.inputHash)")
+                    .font(.caption2.monospaced())
+                    .textSelection(.enabled)
+                Label(
+                    input.rendererRoute.speechCaptions == "ffmpeg-libass"
+                        ? "canonical speech route: ffmpeg-libass"
+                        : "external/NLE route: canonical表示不可",
+                    systemImage: input.rendererRoute.speechCaptions == "ffmpeg-libass" ? "checkmark.circle" : "hand.raised.fill"
+                )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(input.rendererRoute.speechCaptions == "ffmpeg-libass" ? .green : .orange)
+                if !input.degradedReasons.isEmpty {
+                    Text(input.degradedReasons.map { "\($0.captionID): \($0.reason)" }.joined(separator: " / "))
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !input.blockedReasons.isEmpty {
+                    Text(input.blockedReasons.map { "\($0.captionID): \($0.reason)" }.joined(separator: " / "))
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let profile = session.visualReview?.safeZoneProfile {
+                Label(
+                    profile.isHumanHold ? "safe-zone HOLD / 実測保証なし" : "safe-zone 実測profile",
+                    systemImage: profile.isHumanHold ? "hand.raised.fill" : "checkmark.shield"
+                )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(profile.isHumanHold ? .orange : .green)
+                Text("\(profile.platform) / version \(profile.version) / \(profile.deliveryVariant) / \(profile.profileID)")
+                    .font(.caption2)
+                Text("実測: \(profile.measuredAt ?? "unknown") / evidence: \(profile.evidenceStatus)")
+                    .font(.caption2)
+                Text("profile hash: \(session.visualReview?.input?.platformSafeZoneProfileHash ?? "unknown")")
+                    .font(.caption2.monospaced())
+                    .textSelection(.enabled)
+            } else {
+                Label("safe-zone unknown / dragは安全範囲を保証しません", systemImage: "questionmark.diamond")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
+            HStack(spacing: 8) {
+                Label(
+                    accessibility.reducedMotion ? "reduced motion ON" : "reduced motion system default",
+                    systemImage: accessibility.reducedMotion ? "figure.walk.motion" : "figure.walk"
+                )
+                Label(
+                    accessibility.highContrast ? "high contrast ON" : "high contrast system default",
+                    systemImage: accessibility.highContrast ? "circle.lefthalf.filled" : "circle"
+                )
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func visualConflictCard(_ conflict: CaptionVisualReviewConflict) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label("Visual stale conflict", systemImage: "arrow.triangle.branch")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text(conflict.message)
+                .font(.caption2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("expected: \(conflict.expectedPatchHash)\ncurrent: \(conflict.currentPatchHash ?? "unknown")")
+                .font(.caption2.monospaced())
+                .textSelection(.enabled)
+            HStack(spacing: 8) {
+                Button("現在canonicalをrefresh") {
+                    Task { await session.refreshVisualStatus(accessibility: accessibility, preservingDraft: session.visualDraft) }
+                }
+                .accessibilityIdentifier("CaptionVisualConflictRefreshButton")
+                Button("draftをrebaseして保存") {
+                    Task { await session.rebaseVisualConflict(accessibility: accessibility) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(session.isBusy || session.isVisualRebaseInFlight)
+                .accessibilityIdentifier("CaptionVisualConflictRebaseButton")
+                Button("現在版を採用") {
+                    Task { await session.discardVisualConflictAndAdoptCurrent(accessibility: accessibility) }
+                }
+                .accessibilityIdentifier("CaptionVisualConflictAdoptCurrentButton")
+            }
+            Text("refresh/rebaseを明示するまで、別のvisual patchで上書きしません。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.orange.opacity(0.45), lineWidth: 1)
+        }
+    }
+
+    private func anchorPicker(operation: CaptionVisualTreatmentOperation) -> some View {
+        Picker("Anchor", selection: operationBinding(operation, keyPath: \.anchor)) {
+            ForEach(CaptionVisualAnchor.allCases, id: \.rawValue) { anchor in
+                Text(anchor.localizedLabel).tag(anchor)
+            }
+        }
+        .pickerStyle(.menu)
+        .disabled(!session.visualCanEdit)
+        .accessibilityLabel("caption anchor")
+    }
+
+    private func scaleControl(operation: CaptionVisualTreatmentOperation) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("Reference scale")
+                Spacer()
+                Text(String(format: "%.2f", operation.referenceScale ?? 1))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { operation.referenceScale ?? 1 },
+                    set: { value in
+                        mutateOperation { $0.referenceScale = min(max(value, 0.25), 4) }
+                    }
+                ),
+                in: 0.25...4,
+                step: 0.05
+            )
+            .accessibilityLabel("reference scale、canonical policy bounds 0.25から4")
+            .disabled(!session.visualCanEdit)
+            Text("canonical policy bounds: 0.25–4.00。保存時にserviceが再検証します。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func capabilityControls(operation: CaptionVisualTreatmentOperation) -> some View {
+        if let capabilities = session.visualCapabilities {
+            capabilityPicker(title: "Registered style", values: capabilities.styleRefs, value: operation.styleRef) { value in
+                mutateOperation { $0.styleRef = value }
+            }
+            capabilityPicker(title: "Hierarchy", values: capabilities.hierarchyRoles, value: operation.hierarchyRole?.rawValue ?? "speech") { value in
+                mutateOperation { $0.hierarchyRole = CaptionVisualHierarchyRole(rawValue: value) }
+            }
+            capabilityPicker(title: "Emphasis", values: capabilities.emphasisRefs, value: operation.emphasisRef ?? "") { value in
+                mutateOperation { $0.emphasisRef = value.isEmpty ? nil : value }
+            }
+            capabilityPicker(title: "Animation", values: capabilities.animationRefs, value: operation.animationRef ?? "") { value in
+                mutateOperation { $0.animationRef = value.isEmpty ? nil : value }
+            }
+            capabilityPicker(title: "Effect", values: capabilities.effectRefs, value: operation.effectRef ?? "") { value in
+                mutateOperation { $0.effectRef = value.isEmpty ? nil : value }
+            }
+            if capabilities.hierarchyRoles.contains(where: { ["annotation", "speaker", "cta"].contains($0) }) == false {
+                Text("speaker / annotation / CTA はこのrenderer capabilityに未登録です。NLE/blockerとして扱い、approximate表示しません。")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            Label("renderer capabilityが未取得のためcontrolsを無効化", systemImage: "lock.slash")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    private func capabilityPicker(
+        title: String,
+        values: [String],
+        value: String,
+        onChange: @escaping (String) -> Void
+    ) -> some View {
+        Picker(title, selection: Binding(
+            get: { value },
+            set: onChange
+        )) {
+            Text("なし").tag("")
+            ForEach(values, id: \.self) { entry in
+                Text(entry).tag(entry)
+            }
+        }
+        .pickerStyle(.menu)
+        .disabled(values.isEmpty || !session.visualCanEdit)
+        .help(values.isEmpty ? "canonical renderer capabilityが未登録です。NLE/blocker理由を確認してください。" : "canonical serviceが登録した選択肢のみ表示します")
+        .accessibilityLabel(title)
+    }
+
+    private var nudgeControls: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Position / anchor")
+                .font(.caption.weight(.semibold))
+            HStack(spacing: 4) {
+                Button("←") { commitNudge(horizontal: -0.01) }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                Button("↑") { commitNudge(vertical: -0.01) }
+                    .keyboardShortcut(.upArrow, modifiers: [])
+                Button("↓") { commitNudge(vertical: 0.01) }
+                    .keyboardShortcut(.downArrow, modifiers: [])
+                Button("→") { commitNudge(horizontal: 0.01) }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                Button("size −") { commitResize(delta: -0.05) }
+                    .keyboardShortcut("[", modifiers: [])
+                Button("size +") { commitResize(delta: 0.05) }
+                    .keyboardShortcut("]", modifiers: [])
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!session.visualCanEdit)
+            Text("矢印キー / [ ] は1操作ずつcanonical historyへ保存します。Resetはlocal draftを破棄します。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func commitNudge(horizontal: Double = 0, vertical: Double = 0) {
+        session.nudgeVisualDraft(horizontal: horizontal, vertical: vertical)
+        Task { await session.applyVisualTreatment(accessibility: accessibility) }
+    }
+
+    private func commitResize(delta: Double) {
+        session.resizeVisualDraft(delta: delta)
+        Task { await session.applyVisualTreatment(accessibility: accessibility) }
+    }
+
+    private var actionControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button("Visual patch保存") {
+                    Task { await session.applyVisualTreatment(accessibility: accessibility) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!session.visualCanEdit || !session.visualHasUnsavedChange)
+                .accessibilityIdentifier("CaptionVisualApplyButton")
+
+                Button("Reset") { session.resetVisualDraft() }
+                    .disabled(!session.visualHasUnsavedChange)
+                    .accessibilityIdentifier("CaptionVisualResetButton")
+            }
+            if session.isVisualBusy {
+                Label("canonical visual operation pending", systemImage: "hourglass")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Button("Visual undo") {
+                    Task { await session.undoVisualTreatment(accessibility: accessibility) }
+                }
+                .disabled(session.isBusy || session.isVisualBusy || !session.canUndoVisual)
+                .accessibilityIdentifier("CaptionVisualUndoButton")
+
+                Button("canonical preview更新") {
+                    Task { await session.refreshCanonicalPreview() }
+                }
+                .disabled(session.isBusy || session.isVisualBusy)
+                .accessibilityIdentifier("CaptionCanonicalPreviewRefreshButton")
+                Button("candidate preview receipt") {
+                    Task { await session.refreshPreapprovalPreview(accessibility: accessibility) }
+                }
+                .disabled(session.isBusy || session.isVisualBusy || session.visualReview?.patchHash == nil)
+                .help("approvalを書き換えず、current candidate patch/inputにhash-bound canonical evidenceを作成します")
+                .accessibilityIdentifier("CaptionPreapprovalPreviewButton")
+            }
+            Button("Visualを人間承認") {
+                Task { await session.approveVisualTreatment(accessibility: accessibility) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!session.canApproveVisual)
+            .help("自動承認は行わず、既存のtext/timing human approvalにvisual inputを結び、canonical preview receiptを更新します")
+            .accessibilityIdentifier("CaptionVisualApproveButton")
+
+            if !session.visualApprovalBlockers.isEmpty {
+                Text(session.visualApprovalBlockers.joined(separator: "\n"))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let preview = session.canonicalPreview {
+                Label(
+                    preview.evidenceKind == "preapproval"
+                        ? (preview.parityMatches == true ? "candidate canonical receipt一致" : "candidate receipt未確認 / 不一致")
+                        : (preview.parityMatches == true ? "canonical parity一致" : "canonical parity未確認 / 不一致"),
+                    systemImage: preview.parityMatches == true ? "checkmark.shield" : "exclamationmark.triangle"
+                )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(preview.parityMatches == true ? .green : .orange)
+                if let receiptPath = preview.receiptPath {
+                    Text(receiptPath)
+                        .font(.caption2.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private func mutateOperation(_ change: (inout CaptionVisualTreatmentOperation) -> Void) {
+        guard var operation = session.visualDraft ?? session.selectedVisualTreatment else { return }
+        change(&operation)
+        session.updateVisualDraft(operation)
+    }
+
+    private func operationBinding<Value: Equatable>(
+        _ operation: CaptionVisualTreatmentOperation,
+        keyPath: WritableKeyPath<CaptionVisualTreatmentOperation, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { operation[keyPath: keyPath] },
+            set: { value in mutateOperation { $0[keyPath: keyPath] = value } }
+        )
+    }
+
+    private func statusIcon(_ status: CaptionVisualTreatmentStatus?) -> String {
+        switch status {
+        case .ready: return "checkmark.circle.fill"
+        case .fallback: return "arrow.triangle.branch"
+        case .humanHold: return "hand.raised.fill"
+        case .blocked: return "xmark.octagon.fill"
+        case nil: return "questionmark.diamond"
+        }
+    }
+
+    private func statusColor(_ status: CaptionVisualTreatmentStatus?) -> Color {
+        switch status {
+        case .ready: return .green
+        case .fallback, .humanHold: return .orange
+        case .blocked: return .red
+        case nil: return .secondary
+        }
+    }
+}
+
+private struct CaptionVisualReviewPlaceholder: View {
+    let message: String
+
+    var body: some View {
+        Label(message, systemImage: "questionmark.diamond")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel(message)
     }
 }
 
@@ -902,6 +1468,7 @@ private struct CaptionConflictResolutionView: View {
 
 private struct CaptionQueueRow: View {
     let item: CaptionReviewQueueItem
+    let hasVisualRisk: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -927,6 +1494,9 @@ private struct CaptionQueueRow: View {
                     if !item.issues.isEmpty {
                         Text("・\(item.issues.count)件")
                     }
+                    if hasVisualRisk {
+                        Label("Visual", systemImage: "sparkles")
+                    }
                 }
                 .font(.caption2)
                 .foregroundStyle(indicatorColor)
@@ -934,7 +1504,7 @@ private struct CaptionQueueRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.captionID)、\(item.reviewState.localizedLabel)、リスク\(Int(item.riskScore))、\(item.text)")
+        .accessibilityLabel("\(item.captionID)、\(item.reviewState.localizedLabel)、リスク\(Int(item.riskScore))、\(hasVisualRisk ? "Visual要確認、" : "")\(item.text)")
     }
 
     private var indicatorColor: Color {
@@ -959,6 +1529,7 @@ private struct CaptionWaveformStrip: View {
     let loopEndSeconds: Double
     let currentSeconds: Double
     let fps: Double
+    let isEditable: Bool
     @Binding var captionStartFrame: Int
     @Binding var captionEndFrame: Int
     @State private var startDragOriginFrame: Int?
@@ -1027,19 +1598,21 @@ private struct CaptionWaveformStrip: View {
                     context.stroke(playheadPath, with: .color(.primary), lineWidth: 1)
                 }
 
-                timingHandle(label: "IN", frame: captionStartFrame)
-                    .position(x: handlePosition(captionStartX, width: size.width), y: size.height / 2)
-                    .gesture(startHandleGesture(width: size.width, duration: duration))
-                    .accessibilityAdjustableAction { direction in
-                        adjustStartFrame(direction)
-                    }
+                if isEditable {
+                    timingHandle(label: "IN", frame: captionStartFrame)
+                        .position(x: handlePosition(captionStartX, width: size.width), y: size.height / 2)
+                        .gesture(startHandleGesture(width: size.width, duration: duration))
+                        .accessibilityAdjustableAction { direction in
+                            adjustStartFrame(direction)
+                        }
 
-                timingHandle(label: "OUT", frame: captionEndFrame)
-                    .position(x: handlePosition(captionEndX, width: size.width), y: size.height / 2)
-                    .gesture(endHandleGesture(width: size.width, duration: duration))
-                    .accessibilityAdjustableAction { direction in
-                        adjustEndFrame(direction)
-                    }
+                    timingHandle(label: "OUT", frame: captionEndFrame)
+                        .position(x: handlePosition(captionEndX, width: size.width), y: size.height / 2)
+                        .gesture(endHandleGesture(width: size.width, duration: duration))
+                        .accessibilityAdjustableAction { direction in
+                            adjustEndFrame(direction)
+                        }
+                }
             }
         }
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 6))
@@ -1047,7 +1620,9 @@ private struct CaptionWaveformStrip: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
         )
-        .accessibilityLabel("発話前後の音声波形。青いINとOUTハンドルをドラッグして字幕表示区間を調整できます")
+        .accessibilityLabel(isEditable
+            ? "発話前後の音声波形。INとOUTハンドルをドラッグして字幕表示区間を調整できます"
+            : "発話前後の音声波形。Visual modeでは字幕タイミングを変更しません")
     }
 
     private func xPosition(_ seconds: Double, duration: Double, width: CGFloat) -> CGFloat {

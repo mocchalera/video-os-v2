@@ -1,0 +1,35 @@
+version: platform-safe-zone-profile/v1
+profile_id: youtube-shorts-organic-production-hold-v1
+platform: youtube_shorts
+surface: organic
+delivery_variant: production-organic
+evidence_status: partial
+source_references:
+  - url: https://support.google.com/youtube/answer/10343433
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: YouTube Help
+    evidence_kind: official_documentation
+    notes: Supports square or vertical Shorts handling and visual-guide concepts, not current pixel coordinates.
+  - url: https://support.google.com/youtube/answer/16215842
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: YouTube Help
+    evidence_kind: official_documentation
+    notes: Supports organic Shorts editor guidance; device/app/screenshot hash evidence is unavailable.
+measured_at: null
+geometry:
+  status: unknown
+  coordinate_system: unknown
+  viewport: { status: unknown }
+  ui_regions: { unknown: true, regions: [] }
+  safe_regions: { unknown: true, regions: [] }
+  method: unknown
+  confidence: unknown
+device_evidence: { status: unknown }
+screenshot_evidence: { status: unknown }
+supersession: { state: active, reason: Current device/app/screenshot evidence is unavailable. }
+fallback:
+  mode: human_platform_preview
+  human_preview_required: true
+  reason: Keep safe-zone geometry unknown until current human Shorts preview evidence is captured.

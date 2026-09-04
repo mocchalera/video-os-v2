@@ -11,6 +11,22 @@ import type {
 } from "./segmenter.js";
 import type { TextOverlay } from "./overlay.js";
 
+export interface CaptionAccessibilitySelection {
+  reduced_motion: boolean;
+  high_contrast: boolean;
+  audio_off: boolean;
+  small_screen: boolean;
+}
+
+export interface CaptionVisualTreatmentContext {
+  accessibility: CaptionAccessibilitySelection;
+  safe_zone_profile?: {
+    profile_id: string;
+    path: string;
+    sha256: string;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -22,6 +38,10 @@ export interface CaptionApproval {
   caption_policy: CaptionPolicy;
   speech_captions: SpeechCaption[];
   text_overlays: TextOverlay[];
+  /** Present only for the Issue #41 authored-lyrics route. */
+  text_authority?: import("./authored-lyrics.js").AuthoredTextAuthority;
+  /** Present only for the Issue #41 authored-lyrics route. */
+  timing_authority?: import("./authored-lyrics.js").AuthoredTimingAuthority;
   approval: {
     status: "approved" | "stale";
     approved_by?: string;
@@ -29,6 +49,12 @@ export interface CaptionApproval {
     base_caption_draft_hash?: string;
     caption_review_patch_hash?: string;
     validation_hash?: string;
+    base_timeline_hash?: string;
+    typography_policy_hash?: string;
+    platform_safe_zone_profile_hash?: string;
+    caption_visual_treatment_patch_hash?: string;
+    visual_treatment_input_hash?: string;
+    visual_treatment_context?: CaptionVisualTreatmentContext;
   };
 }
 
@@ -36,6 +62,11 @@ export interface CaptionApprovalProvenance {
   base_caption_draft_hash: string;
   caption_review_patch_hash: string;
   validation_hash: string;
+  base_timeline_hash?: string;
+  typography_policy_hash?: string;
+  platform_safe_zone_profile_hash?: string;
+  caption_visual_treatment_patch_hash?: string;
+  visual_treatment_input_hash?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +90,8 @@ export function createDraftApproval(
     caption_policy: { ...source.caption_policy },
     speech_captions: source.speech_captions.map((sc) => ({ ...sc })),
     text_overlays: source.text_overlays.map((to) => ({ ...to })),
+    ...(source.text_authority ? { text_authority: structuredClone(source.text_authority) } : {}),
+    ...(source.timing_authority ? { timing_authority: structuredClone(source.timing_authority) } : {}),
     approval: {
       status: "approved",
       approved_by: approvedBy,
@@ -149,12 +182,15 @@ export function projectCaptionsToTimeline(
       metadata: {
         caption: {
           caption_id: sc.caption_id,
+          ...(sc.line_id ? { line_id: sc.line_id } : {}),
+          ...(sc.cue_id ? { cue_id: sc.cue_id } : {}),
           text: sc.text,
           styling_class: sc.styling_class,
           transcript_ref: sc.transcript_ref,
           transcript_item_ids: sc.transcript_item_ids,
           source: sc.source,
           metrics: sc.metrics,
+          ...(sc.timing ? { timing: structuredClone(sc.timing) } : {}),
           ...(sc.reveal_timing ? { reveal_timing: sc.reveal_timing } : {}),
         },
       },

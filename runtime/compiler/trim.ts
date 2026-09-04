@@ -35,6 +35,35 @@ export interface ResolvedTrim {
   clip_trim_source?: string;
 }
 
+export interface TrimRangeReport {
+  beat_id: string;
+  clip_id: string;
+  candidate_ref?: string;
+  requested: {
+    src_in_us: number;
+    src_out_us: number;
+    duration_us: number;
+  };
+  resolved: {
+    src_in_us: number;
+    src_out_us: number;
+    duration_us: number;
+  };
+  delta: {
+    src_in_us: number;
+    src_out_us: number;
+    duration_us: number;
+  };
+  reason: string;
+}
+
+export interface ApplyAdaptiveTrimOptions {
+  /** Keep the approved candidate range authoritative for strict golden plans. */
+  preserveAuthoredRanges?: boolean;
+  /** Optional sink for beat-level source-range resolution receipts. */
+  rangeReport?: TrimRangeReport[];
+}
+
 export interface TrimContext {
   /** Beat target duration in microseconds */
   beatTargetDurationUs: number;
@@ -504,6 +533,7 @@ export function applyAdaptiveTrim(
   beats: NormalizedBeat[],
   usPerFrame: number,
   clipTrimPlans: ClipTrimPlan[] = [],
+  options: ApplyAdaptiveTrimOptions = {},
 ): Map<string, ResolvedTrim> {
   const trimResults = new Map<string, ResolvedTrim>();
   const candidateMap = new Map<string, Candidate>();
@@ -539,6 +569,37 @@ export function applyAdaptiveTrim(
       ? rawClipTrimPlan
       : undefined;
 
+    const requested = {
+      src_in_us: candidate.src_in_us,
+      src_out_us: candidate.src_out_us,
+      duration_us: candidate.src_out_us - candidate.src_in_us,
+    };
+
+    if (options.preserveAuthoredRanges) {
+      const resolved: ResolvedTrim = {
+        src_in_us: candidate.src_in_us,
+        src_out_us: candidate.src_out_us,
+        mode: "fixed_authored",
+      };
+      recordTrimRange(
+        options.rangeReport,
+        clip,
+        candidate,
+        requested,
+        resolved,
+        "human_golden_order_authoritative_source_range",
+      );
+      if (!clip.metadata) clip.metadata = {};
+      (clip.metadata as Record<string, unknown>).trim = {
+        mode: resolved.mode,
+        resolved_src_in_us: resolved.src_in_us,
+        resolved_src_out_us: resolved.src_out_us,
+        reason: "human_golden_order_authoritative_source_range",
+      };
+      trimResults.set(clip.clip_id, resolved);
+      continue;
+    }
+
     // Skip if no trim hint, no trim policy, and no beat craft trim directive.
     if (!clipTrimPlan && !candidate.trim_hint && !blueprint.trim_policy && !craftInPoint && !craftOutPoint) continue;
 
@@ -554,6 +615,15 @@ export function applyAdaptiveTrim(
       craftOutPoint,
       clipTrimPlan,
     });
+
+    recordTrimRange(
+      options.rangeReport,
+      clip,
+      candidate,
+      requested,
+      resolved,
+      trimReason(resolved, blueprint),
+    );
 
     // Apply resolved trim to clip
     if (resolved.mode !== "fixed_authored") {
@@ -606,6 +676,48 @@ export function applyAdaptiveTrim(
   }
 
   return trimResults;
+}
+
+function recordTrimRange(
+  report: TrimRangeReport[] | undefined,
+  clip: TimelineClip,
+  candidate: Candidate,
+  requested: TrimRangeReport["requested"],
+  resolved: Pick<ResolvedTrim, "src_in_us" | "src_out_us">,
+  reason: string,
+): void {
+  if (!report) return;
+  const resolvedRange = {
+    src_in_us: resolved.src_in_us,
+    src_out_us: resolved.src_out_us,
+    duration_us: resolved.src_out_us - resolved.src_in_us,
+  };
+  report.push({
+    beat_id: clip.beat_id,
+    clip_id: clip.clip_id,
+    candidate_ref: clip.candidate_ref ?? candidate.candidate_id ?? candidate.segment_id,
+    requested,
+    resolved: resolvedRange,
+    delta: {
+      src_in_us: resolvedRange.src_in_us - requested.src_in_us,
+      src_out_us: resolvedRange.src_out_us - requested.src_out_us,
+      duration_us: resolvedRange.duration_us - requested.duration_us,
+    },
+    reason,
+  });
+}
+
+function trimReason(resolved: ResolvedTrim, blueprint: EditBlueprint): string {
+  if (resolved.mode === "fixed_authored") return "authored_source_range_preserved";
+  if (resolved.mode === "clip_trim_plan") return "clip_trim_plan";
+  if (blueprint.trim_policy?.default_max_duration_frames !== undefined) {
+    return "trim_policy_default_max_duration_frames";
+  }
+  if (blueprint.trim_policy?.default_min_duration_frames !== undefined) {
+    return "trim_policy_default_min_duration_frames";
+  }
+  if (resolved.craft_in_point || resolved.craft_out_point) return "beat_craft_directive";
+  return `adaptive_${resolved.mode}`;
 }
 
 function clipTrimPlanOverlapsCandidate(plan: ClipTrimPlan, candidate: Candidate): boolean {

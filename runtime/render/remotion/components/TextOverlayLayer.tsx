@@ -1,4 +1,4 @@
-import { Sequence } from "remotion";
+import { AbsoluteFill, Sequence, useVideoConfig } from "remotion";
 import type { TrackOutput } from "../../../compiler/types.js";
 import { normalizeOverlayClipContent } from "../../../content/normalize.js";
 import {
@@ -6,12 +6,18 @@ import {
   type OverlayPreset,
   type OverlayPresetProps,
 } from "../styles/overlay-presets.js";
+import {
+  hasExplicitRect,
+  overlayWrapperStyle,
+} from "../overlay-layout.js";
 import { resolveRemotionOverlayClip } from "../overlay-clip-resolver.js";
 
 export interface TextOverlayLayerProps {
   tracks?: TrackOutput[];
   fps: number;
 }
+
+const ZERO_SAFE_AREA = { top: 0, right: 0, bottom: 0, left: 0 };
 
 interface OverlayPresetRendererProps extends OverlayPresetProps {
   preset: OverlayPreset;
@@ -28,6 +34,7 @@ function OverlayPresetRenderer({ preset, ...props }: OverlayPresetRendererProps)
 }
 
 export function TextOverlayLayer({ tracks, fps }: TextOverlayLayerProps) {
+  const { width, height } = useVideoConfig();
   if (!tracks || tracks.length === 0) {
     return null;
   }
@@ -58,6 +65,40 @@ export function TextOverlayLayer({ tracks, fps }: TextOverlayLayerProps) {
             return null;
           }
 
+          const layout = resolved.layout;
+          const rectMode = layout !== undefined && hasExplicitRect(layout.width, layout.height);
+          const wrapperStyle = overlayWrapperStyle({
+            anchor: resolved.anchor,
+            x: layout?.x ?? 0,
+            y: layout?.y ?? 0,
+            width: layout?.width,
+            height: layout?.height,
+            scale: resolved.scale ?? 1,
+            rotationDeg: layout?.rotationDeg ?? 0,
+            opacity: layout?.opacity ?? 1,
+            safeArea: layout?.safeArea ?? true,
+            zIndex: layout?.zIndex,
+          }, { width, height });
+          // In explicit-rect mode the wrapper already applied the anchored
+          // safe margins; never inset the preset a second time.
+          const safeAreaProp = rectMode || (layout !== undefined && !layout.safeArea)
+            ? ZERO_SAFE_AREA
+            : resolved.safeArea;
+          const presetRenderer = (
+            <OverlayPresetRenderer
+              preset={preset}
+              text={resolved.text}
+              action_text={resolved.actionText}
+              brand_text={resolved.brandText}
+              writing_mode={resolved.writingMode}
+              anchor={resolved.anchor}
+              safe_area={safeAreaProp}
+              animation_in={resolved.animationIn}
+              durationInFrames={clip.timeline_duration_frames}
+              fps={fps}
+            />
+          );
+
           return (
             <Sequence
               key={`${track.track_id}:${clip.clip_id}`}
@@ -65,17 +106,11 @@ export function TextOverlayLayer({ tracks, fps }: TextOverlayLayerProps) {
               durationInFrames={clip.timeline_duration_frames}
               name={clip.clip_id}
             >
-              <OverlayPresetRenderer
-                preset={preset}
-                text={resolved.text}
-                action_text={resolved.actionText}
-                brand_text={resolved.brandText}
-                writing_mode={resolved.writingMode}
-                anchor={resolved.anchor}
-                safe_area={resolved.safeArea}
-                durationInFrames={clip.timeline_duration_frames}
-                fps={fps}
-              />
+              {rectMode ? (
+                <div style={wrapperStyle}>{presetRenderer}</div>
+              ) : (
+                <AbsoluteFill style={wrapperStyle}>{presetRenderer}</AbsoluteFill>
+              )}
             </Sequence>
           );
         }),

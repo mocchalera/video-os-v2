@@ -17,7 +17,6 @@ import {
   type VisualQualityMeasurements,
 } from "../../connectors/ffmpeg-motion.js";
 import { atomicWriteJson } from "./_util.js";
-import { mapWithConcurrency } from "./vlm.js";
 import type { SegmentsJson } from "../pipeline-types.js";
 import type { MediaKind } from "../../media/media-kind-registry.js";
 import {
@@ -44,6 +43,7 @@ export interface VisualQualityStageOptions {
   ffmpegOptions?: FfmpegMotionOptions;
   eligibleAssetIds?: ReadonlySet<string>;
   assetMediaKinds?: ReadonlyMap<string, MediaKind>;
+  deadlineAtMs?: number;
 }
 
 export interface VisualQualitySegmentFailure {
@@ -58,6 +58,7 @@ export interface VisualQualityStageSummary {
   partialSegments: number;
   failedSegments: VisualQualitySegmentFailure[];
   skippedSegments: number;
+  timedOut: boolean;
 }
 
 interface VisualQualityShard {
@@ -87,6 +88,7 @@ export async function runVisualQualityMeasurementStage(
     partialSegments: 0,
     failedSegments: [],
     skippedSegments: 0,
+    timedOut: false,
   };
   if (options.segmentsJson.items.length === 0) {
     return { segmentsJson: options.segmentsJson, summary };
@@ -98,10 +100,15 @@ export async function runVisualQualityMeasurementStage(
   const candidates = options.segmentsJson.items.filter((segment) =>
     !options.eligibleAssetIds || options.eligibleAssetIds.has(segment.asset_id)
   );
-  const shards = await mapWithConcurrency(
-    candidates,
-    options.concurrency ?? DEFAULT_VISUAL_QUALITY_CONCURRENCY,
-    async (segment): Promise<VisualQualityShard> => {
+  const shardsByIndex = new Array<VisualQualityShard | undefined>(candidates.length);
+  const candidatesByAsset = new Map<string, Array<{ segment: SegmentItem; index: number }>>();
+  for (const [index, segment] of candidates.entries()) {
+    const group = candidatesByAsset.get(segment.asset_id) ?? [];
+    group.push({ segment, index });
+    candidatesByAsset.set(segment.asset_id, group);
+  }
+
+  const analyzeSegment = async (segment: SegmentItem): Promise<VisualQualityShard> => {
       const sourcePath = options.sourceFileMap.get(segment.asset_id);
       const durationUs = Math.max(0, segment.src_out_us - segment.src_in_us);
       const mediaKind = options.assetMediaKinds?.get(segment.asset_id);
@@ -154,8 +161,15 @@ export async function runVisualQualityMeasurementStage(
           }),
         };
       }
-    },
-  );
+  };
+  summary.timedOut = await processVisualQualityAssetGroups({
+    assetGroups: [...candidatesByAsset.values()],
+    concurrency: options.concurrency ?? DEFAULT_VISUAL_QUALITY_CONCURRENCY,
+    deadlineAtMs: options.deadlineAtMs,
+    analyzeSegment,
+    shardsByIndex,
+  });
+  const shards = shardsByIndex.filter((shard): shard is VisualQualityShard => shard !== undefined);
 
   const shardBySegmentId = new Map(shards.map((shard) => [shard.segment_id, shard]));
   let updatedSegments = 0;
@@ -216,6 +230,54 @@ export async function runVisualQualityMeasurementStage(
 
   atomicWriteJson(options.segmentsOutputPath, options.segmentsJson);
   return { segmentsJson: options.segmentsJson, summary };
+}
+
+async function processVisualQualityAssetGroups(options: {
+  assetGroups: Array<Array<{ segment: SegmentItem; index: number }>>;
+  concurrency: number;
+  deadlineAtMs?: number;
+  analyzeSegment: (segment: SegmentItem) => Promise<VisualQualityShard>;
+  shardsByIndex: Array<VisualQualityShard | undefined>;
+}): Promise<boolean> {
+  if (options.assetGroups.length === 0) return false;
+  const limit = Number.isFinite(options.concurrency) && options.concurrency >= 1
+    ? Math.max(1, Math.floor(options.concurrency))
+    : DEFAULT_VISUAL_QUALITY_CONCURRENCY;
+  let nextAssetIndex = 0;
+  let timedOut = options.deadlineAtMs !== undefined && Date.now() >= options.deadlineAtMs;
+
+  async function runWorker(): Promise<void> {
+    while (!timedOut && (options.deadlineAtMs === undefined || Date.now() < options.deadlineAtMs)) {
+      const assetIndex = nextAssetIndex++;
+      if (assetIndex >= options.assetGroups.length) return;
+      for (const { segment, index } of options.assetGroups[assetIndex]) {
+        if (timedOut || (options.deadlineAtMs !== undefined && Date.now() >= options.deadlineAtMs)) return;
+        options.shardsByIndex[index] = await options.analyzeSegment(segment);
+      }
+    }
+  }
+
+  const completion = Promise.all(
+    Array.from({ length: Math.min(limit, options.assetGroups.length) }, () => runWorker()),
+  );
+  if (options.deadlineAtMs === undefined) {
+    await completion;
+    return false;
+  }
+  if (timedOut) return true;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await Promise.race([
+    completion.then(() => "complete" as const),
+    new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        resolve("timeout");
+      }, Math.max(0, options.deadlineAtMs! - Date.now()));
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return outcome === "timeout";
 }
 
 async function defaultAnalyzeFn(

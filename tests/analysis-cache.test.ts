@@ -16,6 +16,7 @@ import {
   clearCacheManifest,
   lookupCache,
   loadJsonFile,
+  inspectAnalysisCacheEligibility,
   type CacheManifestEntry,
 } from "../runtime/pipeline/analysis-cache.js";
 import { parseArgs } from "../scripts/analyze.js";
@@ -245,6 +246,59 @@ describe("parseArgs cache flags", () => {
 // ── Cache-hit filtering logic (integration-level unit test) ────────
 
 describe("cache-hit filtering", () => {
+  it("rejects invalid canonical segments and accepts the unchanged valid fixture", () => {
+    const projectDir = fs.mkdtempSync(path.resolve("test-fixtures-analysis-cache-"));
+    try {
+      const analysisDir = path.join(projectDir, "03_analysis");
+      fs.mkdirSync(analysisDir, { recursive: true });
+      fs.copyFileSync("projects/sample/03_analysis/assets.json", path.join(analysisDir, "assets.json"));
+      fs.copyFileSync("projects/sample/03_analysis/segments.json", path.join(analysisDir, "segments.json"));
+
+      expect(inspectAnalysisCacheEligibility(projectDir)).toMatchObject({ eligible: true });
+
+      const segmentsPath = path.join(analysisDir, "segments.json");
+      const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+      segments.invalid_cached_shape = true;
+      fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+
+      const invalid = inspectAnalysisCacheEligibility(projectDir);
+      expect(invalid.eligible).toBe(false);
+      expect(invalid.violations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ artifact: "03_analysis/segments.json", rule: "schema" }),
+      ]));
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects schema-valid canonical segments that omit an asset", () => {
+    const projectDir = fs.mkdtempSync(path.resolve("test-fixtures-analysis-cache-completeness-"));
+    try {
+      const analysisDir = path.join(projectDir, "03_analysis");
+      fs.mkdirSync(analysisDir, { recursive: true });
+      fs.copyFileSync("projects/sample/03_analysis/assets.json", path.join(analysisDir, "assets.json"));
+      fs.copyFileSync("projects/sample/03_analysis/segments.json", path.join(analysisDir, "segments.json"));
+
+      const segmentsPath = path.join(analysisDir, "segments.json");
+      const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+        items: Array<{ asset_id: string }>;
+      };
+      segments.items = segments.items.filter((segment) => segment.asset_id !== "AST_001");
+      fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+
+      const invalid = inspectAnalysisCacheEligibility(projectDir);
+      expect(invalid.eligible).toBe(false);
+      expect(invalid.violations).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          artifact: "03_analysis/segments.json",
+          rule: "asset_segments_complete",
+        }),
+      ]));
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it("identifies cached assets and filters new ones", () => {
     // Simulate the ingest + cache check flow from runPipeline
     const allShards = [

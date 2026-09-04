@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "optional-vlm-policy.schema.json",
+  "title": "Issue 44 optional visual model close-readiness policy",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "profile_id",
+    "capability",
+    "generation",
+    "provider",
+    "outcome",
+    "deterministic_qa",
+    "human_approval",
+    "status",
+    "retry"
+  ],
+  "properties": {
+    "version": { "const": "optional-vlm-policy/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "capability": {
+      "type": "object",
+      "required": ["id", "requirement"],
+      "properties": {
+        "id": { "const": "visual_model" },
+        "requirement": { "enum": ["required", "optional"] }
+      },
+      "additionalProperties": false
+    },
+    "generation": {
+      "type": "object",
+      "required": ["generation_id", "video_sha256", "timeline_sha256"],
+      "properties": {
+        "generation_id": { "$ref": "#/$defs/hash" },
+        "video_sha256": { "$ref": "#/$defs/hash" },
+        "timeline_sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "provider": {
+      "type": "object",
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/identity" },
+        "model": { "$ref": "#/$defs/identity" }
+      },
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["classification", "error_code", "result_fingerprint"],
+      "properties": {
+        "classification": { "enum": ["available", "unavailable_optional", "execution_failed", "invalid_result", "qa_failed"] },
+        "error_code": {
+          "anyOf": [
+            { "type": "null" },
+            { "enum": ["HTTP_401", "HTTP_403", "GATED_REPOSITORY", "MODEL_CACHE_MISSING", "OPTIONAL_DEPENDENCY_MISSING", "OPTIONAL_UNAVAILABLE", "EXECUTION_TIMEOUT", "EXECUTION_CRASH", "EXECUTION_ERROR", "MALFORMED_RESPONSE", "MODEL_DETECTED_DEFECT"] }
+          ]
+        },
+        "result_fingerprint": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "deterministic_qa": {
+      "type": "object",
+      "required": ["status", "full_decode", "black", "freeze", "inset", "layout", "caption"],
+      "properties": {
+        "status": { "enum": ["passed", "pending", "failed"] },
+        "full_decode": { "$ref": "#/$defs/check" },
+        "black": { "$ref": "#/$defs/check" },
+        "freeze": { "$ref": "#/$defs/check" },
+        "inset": { "$ref": "#/$defs/check" },
+        "layout": { "$ref": "#/$defs/check" },
+        "caption": { "$ref": "#/$defs/check" }
+      },
+      "additionalProperties": false
+    },
+    "human_approval": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["approved", "pending", "rejected", "identity_mismatch"] },
+        "actor": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "generation_id": { "$ref": "#/$defs/hash" },
+        "video_sha256": { "$ref": "#/$defs/hash" },
+        "timeline_sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "approved" } }, "required": ["status"] },
+          "then": { "required": ["actor", "generation_id", "video_sha256", "timeline_sha256"] }
+        }
+      ]
+    },
+    "status": { "enum": ["blocked", "optional_unavailable", "deterministic_qa_pending", "human_approval_pending", "skipped_unavailable_optional", "available", "execution_failed", "invalid_result", "qa_failed"] },
+    "retry": {
+      "type": "object",
+      "required": ["same_unavailable_result", "action"],
+      "properties": {
+        "same_unavailable_result": { "type": "boolean" },
+        "action": { "enum": ["not_applicable", "not_retried", "new_result"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "identity": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+    "check": { "enum": ["pass", "pending", "fail"] }
+  }
+}

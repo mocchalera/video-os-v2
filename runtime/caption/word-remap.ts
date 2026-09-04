@@ -10,6 +10,11 @@
  * - Optional: final_audio_realign adapter (future)
  */
 
+import {
+  projectSourceRange,
+  type TimelineOffsetMap,
+} from "../compiler/timeline-offset-engine.js";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -41,14 +46,21 @@ export interface TimingRemapInput {
   clipSrcOutUs: number;
   clipTimelineInFrameBase: number;
   fps: number;
+  assetId?: string;
+  segmentId?: string;
+  offsetMap?: TimelineOffsetMap;
 }
 
 export interface TimingRemapResult {
   timelineInFrame: number;
   timelineDurationFrames: number;
-  timingSource: "word_remap" | "clip_item_remap";
+  timingSource: "word_remap" | "clip_item_remap" | "offset_map" | "offset_map_fallback";
   timingConfidence: number;
-  sourceWordRefs?: Array<{ word: string; start_us: number; end_us: number }>;
+  sourceWordRefs?: Array<{ word: string; start_us: number; end_us: number; confidence?: number }>;
+  clipMapRefs?: string[];
+  authority?: "A1" | "legacy-role" | "fallback";
+  offsetMapFingerprint?: string;
+  fallbackReason?: string;
 }
 
 interface NormalizedWordSpan {
@@ -216,10 +228,22 @@ export function remapWithWordTimestamps(
   const offsetStartUs = earliestUs - input.clipSrcInUs;
   const offsetEndUs = latestUs - input.clipSrcInUs;
 
-  const timelineInFrame = input.clipTimelineInFrameBase +
-    usToFrames(offsetStartUs, input.fps);
-  const timelineOutFrame = input.clipTimelineInFrameBase +
-    usToFrames(offsetEndUs, input.fps);
+  const projected = input.offsetMap && input.assetId
+    ? projectSourceRange(input.offsetMap, {
+        asset_id: input.assetId,
+        segment_id: input.segmentId,
+        source_start_us: earliestUs,
+        source_end_us: latestUs,
+        source_word_refs: sourceWordRefs,
+      })
+    : undefined;
+  const usableProjection = projected?.status === "exact" ? projected : undefined;
+  const timelineInFrame = usableProjection && usableProjection.segments.length > 0
+    ? usableProjection.timeline_in_frame
+    : input.clipTimelineInFrameBase + usToFrames(offsetStartUs, input.fps);
+  const timelineOutFrame = usableProjection && usableProjection.segments.length > 0
+    ? usableProjection.timeline_in_frame + usableProjection.timeline_duration_frames
+    : input.clipTimelineInFrameBase + usToFrames(offsetEndUs, input.fps);
   const durationFrames = Math.max(1, timelineOutFrame - timelineInFrame);
 
   // Confidence based on word-level coverage
@@ -230,9 +254,15 @@ export function remapWithWordTimestamps(
   return {
     timelineInFrame,
     timelineDurationFrames: durationFrames,
-    timingSource: "word_remap",
-    timingConfidence: Math.round(avgConfidence * 100) / 100,
+    timingSource: projected && projected.status !== "exact" ? "offset_map_fallback" : projected ? "offset_map" : "word_remap",
+    timingConfidence: projected?.confidence !== undefined
+      ? Math.min(Math.round(avgConfidence * projected.confidence * 100) / 100, 1)
+      : Math.round(avgConfidence * 100) / 100,
     sourceWordRefs,
+    clipMapRefs: projected?.clip_map_refs,
+    authority: projected?.authority,
+    offsetMapFingerprint: input.offsetMap?.fingerprint,
+    fallbackReason: projected?.fallback_reason,
   };
 }
 
@@ -256,6 +286,8 @@ export interface ClipContext {
   srcOutUs: number;
   timelineInFrame: number;
   timelineDurationFrames: number;
+  segmentId?: string;
+  trackId?: string;
 }
 
 /**
@@ -267,6 +299,7 @@ export function batchWordRemap(
   clips: ClipContext[],
   itemsWithWords: Map<string, TranscriptItemWithWords>,
   fps: number,
+  offsetMap?: TimelineOffsetMap,
 ): Map<string, TimingRemapResult> {
   const results = new Map<string, TimingRemapResult>();
 
@@ -299,6 +332,9 @@ export function batchWordRemap(
       clipSrcOutUs: clip.srcOutUs,
       clipTimelineInFrameBase: clip.timelineInFrame,
       fps,
+      assetId: clip.assetId,
+      segmentId: clip.segmentId,
+      offsetMap,
     };
 
     results.set(caption.captionId, remapWithWordTimestamps(input, itemsWithWords));

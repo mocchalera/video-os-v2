@@ -29,8 +29,14 @@ export interface MarlinRawFind {
   raw?: string;
 }
 
+/** Per-request bounds for caption generation (bounded inference). */
+export interface MarlinCaptionOptions {
+  /** Hard upper bound on generated tokens for this caption request. */
+  maxNewTokens?: number;
+}
+
 export interface MarlinFn {
-  caption(videoPath: string): Promise<MarlinRawCaption>;
+  caption(videoPath: string, options?: MarlinCaptionOptions): Promise<MarlinRawCaption>;
   find(videoPath: string, event: string): Promise<MarlinRawFind>;
   close?(): Promise<void>;
 }
@@ -55,6 +61,32 @@ export interface MarlinFindResult {
   raw?: string;
 }
 
+/** Which bounded operation failed for a chunk or asset. */
+export type MarlinFailureStage = "probe" | "proxy" | "caption" | "find";
+
+/** Shared failure classification (same classes as pipeline readiness reasons). */
+export type MarlinFailureReasonClass =
+  | "marlin_worker_timeout"
+  | "marlin_model_unavailable"
+  | "marlin_worker_unavailable"
+  | "marlin_worker_failure";
+
+/**
+ * Non-secret degraded metadata for a failed chunk operation. Successful
+ * events and find results are always preserved alongside these records.
+ * Raw error text and raw query strings are deliberately excluded: only the
+ * failure location (stage/chunk), a stable reason class, and a non-secret
+ * query ordinal are stored.
+ */
+export interface MarlinFailureRecord {
+  stage: MarlinFailureStage;
+  reason_class: MarlinFailureReasonClass;
+  /** Present when the failure is attributable to one chunk. */
+  chunk_index?: number;
+  /** Ordinal into the run's resolved find queries; never the query text. */
+  query_index?: number;
+}
+
 export interface MarlinAssetEvents {
   asset_id: string;
   source_path: string;
@@ -62,6 +94,19 @@ export interface MarlinAssetEvents {
   caption?: string;
   events: MarlinEvent[];
   find_results: MarlinFindResult[];
+  /** "degraded" when failures[] is non-empty; absent/complete otherwise. */
+  evaluation_status?: "complete" | "degraded";
+  failures?: MarlinFailureRecord[];
+  /**
+   * Chunk indices whose evaluation fully completed even when they produced
+   * zero events, so resume does not re-run them.
+   */
+  completed_chunks?: number[];
+  /**
+   * Binding of this checkpoint to its inputs (source identity, chunk
+   * plan/policy, model snapshot). Mismatched items are re-evaluated.
+   */
+  checkpoint_signature?: string;
 }
 
 export interface MarlinEventsArtifact {

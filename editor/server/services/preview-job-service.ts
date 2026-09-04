@@ -30,7 +30,7 @@ import {
   type TransitionSpec,
 } from "../../shared/filtergraph.js";
 import { buildAssDocument, parseSrtCues } from "../../shared/caption-style-tokens.js";
-import { INTERMEDIATE_X264, x264Args } from "../../shared/encode-profiles.js";
+import { INTERMEDIATE_X264, losslessX264Args, x264Args } from "../../shared/encode-profiles.js";
 import { dialogueCutFadeSec } from "../../shared/dialogue-cut-fade.js";
 import { canonicalLinearGainFilter } from "../../shared/audio-gain.js";
 import { resolvePreviewBundledFontsDir } from "./font-assets.js";
@@ -1127,8 +1127,9 @@ export class PreviewJobService {
           clipDurationsSec: gapAwareChain.clipDurationsSec,
           transitions: chainTransitionIndexes,
           includeAudio: true,
-          videoEncodeArgs: x264Args(INTERMEDIATE_X264),
+          videoEncodeArgs: losslessX264Args(),
           audioCodecArgs: ["-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2"],
+          graphContext: { width, height, fps, fpsRational },
           outputPath: concatPath,
         });
         chainArgs.splice(

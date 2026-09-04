@@ -1,5 +1,8 @@
 id: interview-pro-highlight
 default_policy: interview
+capabilities:
+  visual_model:
+    requirement: optional
 defaults:
   target_duration_sec: 90
   opening_cadence: "measured"

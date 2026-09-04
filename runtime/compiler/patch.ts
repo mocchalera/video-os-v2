@@ -19,6 +19,8 @@ import type {
 } from "./types.js";
 import { candidateSupportsVisual, inferAudioRole, isAudioOnlyCandidate } from "../artifacts/source-media-capabilities.js";
 import { assertStillImageTimelineTruthForTimeline } from "./still-image.js";
+import { assertHookPatchOperationAllowed, HookLockViolationError } from "./hook-lock.js";
+import type { ContentElementV1 } from "../content/types.js";
 
 // ── Patch document types ────────────────────────────────────────────
 
@@ -33,6 +35,9 @@ export type PatchOpType =
   | "change_audio_policy"
   | "change_visual_transform"
   | "change_audio_finish"
+  | "add_overlay"
+  | "update_overlay"
+  | "remove_overlay"
   | "add_marker"
   | "add_note";
 
@@ -66,10 +71,22 @@ export interface PatchOperation {
   role?: string;
   label?: string;
   with_candidate_ref?: string;
+  ripple?: boolean;
+  overlay?: {
+    clip_id: string;
+    timeline_in_frame: number;
+    timeline_duration_frames: number;
+    beat_id?: string;
+    track_id?: string;
+    content_element: ContentElementV1;
+  };
 }
 
 export interface ReviewPatch {
+  patch_version?: "review-patch/v2";
   timeline_version: string;
+  base_timeline_sha256?: string;
+  status?: "accepted" | "proposed" | "rejected";
   operations: PatchOperation[];
 }
 
@@ -88,31 +105,39 @@ export interface PatchResult {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+function allTracks(timeline: TimelineIR): TrackOutput[] {
+  return [
+    ...timeline.tracks.video,
+    ...timeline.tracks.audio,
+    ...(timeline.tracks.overlay ?? []),
+    ...(timeline.tracks.caption ?? []),
+  ];
+}
+
 function findClip(
   timeline: TimelineIR,
   clipId: string,
 ): { track: TrackOutput; clipIndex: number; clip: ClipOutput } | null {
-  for (const trackGroup of [timeline.tracks.video, timeline.tracks.audio]) {
-    for (const track of trackGroup) {
-      const idx = track.clips.findIndex((c) => c.clip_id === clipId);
-      if (idx !== -1) {
-        return { track, clipIndex: idx, clip: track.clips[idx] };
-      }
+  for (const track of allTracks(timeline)) {
+    const idx = track.clips.findIndex((c) => c.clip_id === clipId);
+    if (idx !== -1) {
+      return { track, clipIndex: idx, clip: track.clips[idx] };
     }
   }
   return null;
 }
 
 function findTrack(timeline: TimelineIR, trackId: string): TrackOutput | null {
-  for (const trackGroup of [timeline.tracks.video, timeline.tracks.audio]) {
-    const track = trackGroup.find((item) => item.track_id === trackId);
-    if (track) return track;
-  }
+  const track = allTracks(timeline).find((item) => item.track_id === trackId);
+  if (track) return track;
   return null;
 }
 
 function trackGroupForKind(timeline: TimelineIR, kind: TrackOutput["kind"]): TrackOutput[] {
-  return kind === "audio" ? timeline.tracks.audio : timeline.tracks.video;
+  if (kind === "audio") return timeline.tracks.audio;
+  if (kind === "overlay") return timeline.tracks.overlay ??= [];
+  if (kind === "caption") return timeline.tracks.caption ??= [];
+  return timeline.tracks.video;
 }
 
 function findOrCreateCompatibleTrack(
@@ -171,14 +196,12 @@ function removeTransitionsForClip(timeline: TimelineIR, clipId: string): void {
 
 function generateClipId(timeline: TimelineIR): string {
   let maxNum = 0;
-  for (const trackGroup of [timeline.tracks.video, timeline.tracks.audio]) {
-    for (const track of trackGroup) {
-      for (const clip of track.clips) {
-        const match = clip.clip_id.match(/^CLP_(\d+)$/);
-        if (match) {
-          const num = parseInt(match[1], 10);
-          if (num > maxNum) maxNum = num;
-        }
+  for (const track of allTracks(timeline)) {
+    for (const clip of track.clips) {
+      const match = clip.clip_id.match(/^CLP_(\d+)$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
       }
     }
   }
@@ -329,6 +352,15 @@ export function applyPatch(
 
   for (let i = 0; i < patch.operations.length; i++) {
     const op = patch.operations[i];
+    try {
+      assertHookPatchOperationAllowed(patched, op);
+    } catch (error) {
+      if (error instanceof HookLockViolationError) {
+        errors.push({ op_index: i, op: op.op, message: error.message });
+        continue;
+      }
+      throw error;
+    }
     const err = applyOp(patched, op, candidateMap, i, targetDurationFrames);
     if (err) {
       errors.push(err);
@@ -378,6 +410,12 @@ function applyOp(
       return opChangeVisualTransform(timeline, op, index);
     case "change_audio_finish":
       return opChangeAudioFinish(timeline, op, index);
+    case "add_overlay":
+      return opAddOverlay(timeline, op, index);
+    case "update_overlay":
+      return opUpdateOverlay(timeline, op, index);
+    case "remove_overlay":
+      return opRemoveOverlay(timeline, op, index);
     case "add_marker":
       return opAddMarker(timeline, op, index, "review");
     case "add_note":
@@ -849,14 +887,18 @@ function opInsertSegment(
     };
   }
 
+  const insertFrame = op.new_timeline_in_frame ?? 0;
+  const insertDuration = op.new_duration_frames ?? 24;
+  if (op.ripple) rippleInsert(timeline, insertFrame, insertDuration);
+
   const newClip: ClipOutput = {
     clip_id: generateClipId(timeline),
     segment_id: candidate.segment_id,
     asset_id: candidate.asset_id,
     src_in_us: sourceInUS,
     src_out_us: sourceOutUS,
-    timeline_in_frame: op.new_timeline_in_frame ?? 0,
-    timeline_duration_frames: op.new_duration_frames ?? 24,
+    timeline_in_frame: insertFrame,
+    timeline_duration_frames: insertDuration,
     role,
     motivation: `[patch:insert] ${op.reason}`,
     beat_id: op.beat_id ?? "",
@@ -892,8 +934,233 @@ function opRemoveSegment(
   if (!found) {
     return { op_index: index, op: op.op, message: `Clip not found: ${op.target_clip_id}` };
   }
+  const removedStart = found.clip.timeline_in_frame;
+  const removedDuration = found.clip.timeline_duration_frames;
   found.track.clips.splice(found.clipIndex, 1);
   removeTransitionsForClip(timeline, op.target_clip_id);
+  if (op.ripple) rippleRemove(timeline, removedStart, removedDuration);
+  return null;
+}
+
+function mapRemovedPoint(frame: number, start: number, end: number): number {
+  if (frame < start) return frame;
+  if (frame >= end) return frame - (end - start);
+  return start;
+}
+
+function sourceAtOffset(clip: ClipOutput, offsetFrames: number): number {
+  if (offsetFrames <= 0) return clip.src_in_us;
+  if (offsetFrames >= clip.timeline_duration_frames) return clip.src_out_us;
+  const sourceDuration = clip.src_out_us - clip.src_in_us;
+  return clip.src_in_us + Math.round(sourceDuration * offsetFrames / clip.timeline_duration_frames);
+}
+
+function allocateRippleClipId(usedIds: Set<string>, clipId: string, boundaryFrame: number): string {
+  const base = `${clipId}__ripple_${boundaryFrame}`;
+  let candidate = base;
+  let suffix = 2;
+  while (usedIds.has(candidate)) candidate = `${base}_${suffix++}`;
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function sliceClip(
+  clip: ClipOutput,
+  sourceTimelineStart: number,
+  sourceTimelineEnd: number,
+  targetTimelineStart: number,
+  clipId: string,
+  mapCaptionFrame: (frame: number) => number,
+): ClipOutput {
+  const clipStart = clip.timeline_in_frame;
+  const startOffset = sourceTimelineStart - clipStart;
+  const endOffset = sourceTimelineEnd - clipStart;
+  const sliced = structuredClone(clip);
+  sliced.clip_id = clipId;
+  sliced.src_in_us = sourceAtOffset(clip, startOffset);
+  sliced.src_out_us = sourceAtOffset(clip, endOffset);
+  sliced.timeline_in_frame = targetTimelineStart;
+  sliced.timeline_duration_frames = sourceTimelineEnd - sourceTimelineStart;
+  sliced.captions = clip.captions?.flatMap((caption) => {
+    const captionStart = Math.max(caption.in_frame, sourceTimelineStart);
+    const captionEnd = Math.min(caption.out_frame, sourceTimelineEnd);
+    return captionEnd > captionStart
+      ? [{ ...caption, in_frame: mapCaptionFrame(captionStart), out_frame: mapCaptionFrame(captionEnd) }]
+      : [];
+  });
+  if (sliced.captions?.length === 0) delete sliced.captions;
+  return sliced;
+}
+
+function rippleInsert(timeline: TimelineIR, frame: number, duration: number): void {
+  const usedIds = new Set(allTracks(timeline).flatMap((track) => track.clips.map((clip) => clip.clip_id)));
+  for (const track of allTracks(timeline)) {
+    const mapped: ClipOutput[] = [];
+    for (const clip of track.clips) {
+      const clipStart = clip.timeline_in_frame;
+      const clipEnd = clipStart + clip.timeline_duration_frames;
+      if (clipStart < frame && clipEnd > frame) {
+        mapped.push(sliceClip(clip, clipStart, frame, clipStart, clip.clip_id, (captionFrame) => captionFrame));
+        mapped.push(sliceClip(
+          clip,
+          frame,
+          clipEnd,
+          frame + duration,
+          allocateRippleClipId(usedIds, clip.clip_id, frame),
+          (captionFrame) => captionFrame + duration,
+        ));
+      } else if (clipStart >= frame) {
+        const shifted = structuredClone(clip);
+        shifted.timeline_in_frame += duration;
+        shifted.captions = shifted.captions?.map((caption) => ({
+          ...caption,
+          in_frame: caption.in_frame + duration,
+          out_frame: caption.out_frame + duration,
+        }));
+        mapped.push(shifted);
+      } else {
+        mapped.push(clip);
+      }
+    }
+    track.clips = mapped;
+    sortTrackClips(track);
+  }
+  for (const marker of timeline.markers) if (marker.frame >= frame) marker.frame += duration;
+}
+
+function rippleRemove(timeline: TimelineIR, start: number, duration: number): void {
+  const end = start + duration;
+  const usedIds = new Set(allTracks(timeline).flatMap((track) => track.clips.map((clip) => clip.clip_id)));
+  for (const track of allTracks(timeline)) {
+    const retained: ClipOutput[] = [];
+    for (const clip of track.clips) {
+      const clipStart = clip.timeline_in_frame;
+      const clipEnd = clipStart + clip.timeline_duration_frames;
+      if (clipEnd <= start) {
+        retained.push(clip);
+        continue;
+      }
+      if (clipStart >= end) {
+        const shifted = structuredClone(clip);
+        shifted.timeline_in_frame -= duration;
+        shifted.captions = shifted.captions?.map((caption) => ({
+          ...caption,
+          in_frame: caption.in_frame - duration,
+          out_frame: caption.out_frame - duration,
+        }));
+        retained.push(shifted);
+        continue;
+      }
+
+      const intervals: Array<{ sourceStart: number; sourceEnd: number; targetStart: number }> = [];
+      if (clipStart < start) intervals.push({ sourceStart: clipStart, sourceEnd: Math.min(clipEnd, start), targetStart: clipStart });
+      if (clipEnd > end) intervals.push({ sourceStart: Math.max(clipStart, end), sourceEnd: clipEnd, targetStart: Math.max(clipStart, end) - duration });
+      if (intervals.length === 0) {
+        removeTransitionsForClip(timeline, clip.clip_id);
+        continue;
+      }
+      intervals.forEach((interval, intervalIndex) => {
+        retained.push(sliceClip(
+          clip,
+          interval.sourceStart,
+          interval.sourceEnd,
+          interval.targetStart,
+          intervalIndex === 0 ? clip.clip_id : allocateRippleClipId(usedIds, clip.clip_id, start),
+          (captionFrame) => captionFrame >= end ? captionFrame - duration : captionFrame,
+        ));
+      });
+    }
+    track.clips = retained;
+    sortTrackClips(track);
+  }
+  timeline.markers = timeline.markers.map((marker) => ({ ...marker, frame: mapRemovedPoint(marker.frame, start, end) }));
+}
+
+function overlayTrack(timeline: TimelineIR, trackId = "O1"): TrackOutput {
+  const existing = findTrack(timeline, trackId);
+  if (existing) {
+    if (existing.kind !== "overlay") throw new Error(`Overlay track ${trackId} has incompatible kind ${existing.kind}`);
+    return existing;
+  }
+  return findOrCreateTrackByKind(timeline, "overlay", trackId);
+}
+
+function opAddOverlay(timeline: TimelineIR, op: PatchOperation, index: number): PatchError | null {
+  const overlay = op.overlay;
+  if (!overlay) return { op_index: index, op: op.op, message: "Missing overlay" };
+  if (findClip(timeline, overlay.clip_id)) return { op_index: index, op: op.op, message: `Overlay clip already exists: ${overlay.clip_id}` };
+  const track = overlayTrack(timeline, overlay.track_id);
+  track.clips.push({
+    clip_id: overlay.clip_id,
+    segment_id: `TXT_${overlay.content_element.element_id}`,
+    asset_id: "__overlay__",
+    src_in_us: 0,
+    src_out_us: Math.max(1, Math.round(overlay.timeline_duration_frames * 1_000_000 * timeline.sequence.fps_den / timeline.sequence.fps_num)),
+    timeline_in_frame: overlay.timeline_in_frame,
+    timeline_duration_frames: overlay.timeline_duration_frames,
+    role: "title",
+    motivation: `[patch:add_overlay] ${op.reason}`,
+    beat_id: overlay.beat_id ?? "",
+    fallback_segment_ids: [],
+    confidence: op.confidence ?? 1,
+    quality_flags: [],
+    metadata: { content_element: structuredClone(overlay.content_element) },
+  });
+  sortTrackClips(track);
+  return null;
+}
+
+function opUpdateOverlay(timeline: TimelineIR, op: PatchOperation, index: number): PatchError | null {
+  if (!op.target_clip_id) return { op_index: index, op: op.op, message: "Missing target_clip_id" };
+  const found = findClip(timeline, op.target_clip_id);
+  if (!found || found.track.kind !== "overlay") return { op_index: index, op: op.op, message: `Overlay clip not found: ${op.target_clip_id}` };
+  const overlay = op.overlay;
+  if (overlay?.beat_id !== undefined && op.beat_id !== undefined && overlay.beat_id !== op.beat_id) {
+    return { op_index: index, op: op.op, message: "Conflicting overlay beat_id fields" };
+  }
+  if (overlay && op.new_timeline_in_frame !== undefined && overlay.timeline_in_frame !== op.new_timeline_in_frame) {
+    return { op_index: index, op: op.op, message: "Conflicting overlay timeline_in_frame fields" };
+  }
+  if (overlay && op.new_duration_frames !== undefined && overlay.timeline_duration_frames !== op.new_duration_frames) {
+    return { op_index: index, op: op.op, message: "Conflicting overlay duration fields" };
+  }
+  const requestedTracks = [overlay?.track_id, op.target_track_id, op.track_id].filter((value): value is string => value !== undefined);
+  if (new Set(requestedTracks).size > 1) {
+    return { op_index: index, op: op.op, message: "Conflicting overlay track fields" };
+  }
+  const nextClipId = overlay?.clip_id ?? found.clip.clip_id;
+  const collision = findClip(timeline, nextClipId);
+  if (collision && collision.clip !== found.clip) {
+    return { op_index: index, op: op.op, message: `Overlay clip already exists: ${nextClipId}` };
+  }
+  const nextTimelineIn = overlay?.timeline_in_frame ?? op.new_timeline_in_frame ?? found.clip.timeline_in_frame;
+  const nextDuration = overlay?.timeline_duration_frames ?? op.new_duration_frames ?? found.clip.timeline_duration_frames;
+  const targetTrack = requestedTracks[0] ? overlayTrack(timeline, requestedTracks[0]) : found.track;
+  found.clip.clip_id = nextClipId;
+  found.clip.timeline_in_frame = nextTimelineIn;
+  found.clip.timeline_duration_frames = nextDuration;
+  found.clip.src_out_us = Math.max(1, Math.round(nextDuration * 1_000_000 * timeline.sequence.fps_den / timeline.sequence.fps_num));
+  if (overlay?.beat_id !== undefined || op.beat_id !== undefined) found.clip.beat_id = overlay?.beat_id ?? op.beat_id!;
+  if (op.role !== undefined) found.clip.role = op.role as ClipRole;
+  if (overlay?.content_element) {
+    found.clip.segment_id = `TXT_${overlay.content_element.element_id}`;
+    found.clip.metadata = { ...(found.clip.metadata ?? {}), content_element: structuredClone(overlay.content_element) };
+  }
+  found.clip.motivation = `[patch:update_overlay] ${op.reason}`;
+  if (targetTrack !== found.track) {
+    found.track.clips.splice(found.clipIndex, 1);
+    targetTrack.clips.push(found.clip);
+  }
+  sortTrackClips(found.track);
+  if (targetTrack !== found.track) sortTrackClips(targetTrack);
+  return null;
+}
+
+function opRemoveOverlay(timeline: TimelineIR, op: PatchOperation, index: number): PatchError | null {
+  if (!op.target_clip_id) return { op_index: index, op: op.op, message: "Missing target_clip_id" };
+  const found = findClip(timeline, op.target_clip_id);
+  if (!found || found.track.kind !== "overlay") return { op_index: index, op: op.op, message: `Overlay clip not found: ${op.target_clip_id}` };
+  found.track.clips.splice(found.clipIndex, 1);
   return null;
 }
 

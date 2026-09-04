@@ -9,6 +9,7 @@ import {
   verifyDerivedVideoProvenance,
 } from "../runtime/packaging/derived-video-provenance.js";
 import { buildNleFinishingManifest } from "../runtime/packaging/manifest.js";
+import { buildExternalRenderRouteReceipt } from "../runtime/render/route-resolver.js";
 import { createSourceInputAttestation } from "../runtime/render/source-input-attestation.js";
 import { sha256FileHex } from "../runtime/source-content-identity.js";
 
@@ -27,6 +28,35 @@ function sha(filePath: string): string {
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function writeNleRouteReceipt(
+  routePath: string,
+  timelinePath: string,
+  finalVideoPath: string,
+): void {
+  const handoffArtifact = { path: "handoff/nle-notes.md", sha256: `sha256:${"a".repeat(64)}` };
+  writeJson(routePath, buildExternalRenderRouteReceipt({
+    version: "external-route-metadata/v1",
+    project_id: "short-project",
+    route_kind: "supplied_final",
+    source_identity: {
+      timeline: { path: timelinePath, sha256: sha(timelinePath) },
+      source_inputs_hash: sha(timelinePath),
+      source_assets: [],
+    },
+    output: { path: finalVideoPath, sha256: sha(finalVideoPath) },
+    geometry: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 },
+    required_handoff_artifacts: [handoffArtifact],
+    handoff: {
+      status: "confirmed",
+      human_owner: "operator",
+      human_approval_status: "approved",
+      artifacts: [handoffArtifact],
+    },
+    agent_qa: { status: "passed" },
+    human_approval: { status: "approved", owner: "operator" },
+  }));
 }
 
 function makeProject(options: { renderedSource?: boolean; withAttestation?: boolean } = {}) {
@@ -219,6 +249,7 @@ describe("derived-video-provenance/v1", () => {
     }));
     const qaPath = path.join(fixture.projectDir, "07_package/qa-report.json");
     writeJson(qaPath, { passed: true });
+    writeNleRouteReceipt(fixture.routePath, fixture.timelinePath, fixture.finalPath);
     const manifest = buildNleFinishingManifest({
       projectId: "short-project",
       baseTimelineVersion: "1",
@@ -228,6 +259,7 @@ describe("derived-video-provenance/v1", () => {
       captionPolicy: { source: "none", delivery_mode: "sidecar" },
       finalVideoPath: fixture.finalPath,
       qaReportPath: qaPath,
+      routeReceiptPath: fixture.routePath,
       derivedVideoProvenancePath: provenancePath,
       createdAt: "2026-07-25T00:00:00.000Z",
     });

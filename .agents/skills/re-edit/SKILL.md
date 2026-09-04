@@ -37,6 +37,33 @@ metadata:
 
 ## やること（ステップ）
 
+### Step 0: 修正面を canonical router で確定する
+
+人間の指示を直接 `review_patch.json` や project-local script にしない。最初に次を実行する。
+
+```bash
+npm run caption-edit-route -- --project projects/<project> --instruction "<human instruction>" --reviewer "<reviewer>" --write-receipt
+```
+
+分岐は3つだけ:
+
+- `caption_review_patch`: 字幕本文・改行・表示timing。`caption-review.ts` の `init/edit/retime/apply/approve`へ進む。
+- `caption_visual_treatment`: style、size、rect、hierarchy、emphasis、animation。下記のvisual-only previewへ進む。
+- `timeline_review_patch`: shot order、trim、crop/reframe、audio。従来どおり `06_review/review_patch.json`へ進む。
+
+`status=hold`、`route=null`、または複数routeを含む指示では、routerが書く
+`06_review/caption-edit-route.json` だけをdegraded-route noteとして残して停止する。
+勝手に複数patchへ分解せず、project-local ASS/FFmpeg/render scriptを書かない。
+
+caption draft / approval が欠ける場合、routerの `project.initialize_commands` にあるcanonical commandを順に使う。
+代表経路は次のとおり。`approve` は全字幕の人間確認後だけ実行し、自動承認しない。
+
+```bash
+npx tsx scripts/caption-review.ts prepare --project projects/<project>
+npx tsx scripts/caption-review.ts init --project projects/<project> --reviewer "<reviewer>"
+npx tsx scripts/caption-review.ts approve --project projects/<project> --reviewer "<reviewer>"
+```
+
 ### Step 1: ユーザーの修正指示を patchable な意図に落とす
 
 - 何を短く / 削除 / 入れ替え / 調整したいのかを具体化する
@@ -109,12 +136,42 @@ npx tsx scripts/compile-timeline.ts projects/<project> --fps 30
 - ユーザーが final packaged video まで求めており、Gate 10 を満たしているなら `render-video` を実行する
 - rough cut の再編集だけなら `timeline.json` / preview manifest の更新で止める
 
+### Caption visual-only authoring + preview
+
+`caption_visual_treatment` の場合、production approvalを変更せず、1 commandでpatch authoringとpreapproval previewを作る。
+初回は `--expected-patch-hash absent`、2回目以降は直前結果の `patch_hash` を使う。
+`--expected-approval-hash` はrouter出力の `project.caption_approval_binding_hash` を使う。
+
+```bash
+npx tsx scripts/caption-review.ts visual-author-preview --project projects/<project> --reviewer "<reviewer>" --typography-policy projects/<project>/04_plan/typography_policy.json --visual-operation-json '<schema-valid operation JSON>' --expected-patch-hash <hash-or-absent> --expected-approval-hash <caption-approval-binding-hash>
+```
+
+出力は `patch_path/hash`、`input_path/hash`、`preview_output_path/hash`、preapproval
+`receipt_path/hash`、caption identity、before/after `text_timing_hash`、before/after approval hashを返す。
+両hashが不変で `production_approval_unchanged=true` の場合だけpreview候補として扱う。
+stale hash/receipt、unknown field、project外path、`blocked` / `human_hold` はfail closedで停止する。
+顔相対rectはsubject evidenceが無ければverifiedにせずdegradedで停止する。
+
+speech captionの本文・timing・描画ownerはcaption review/finalize + FFmpeg/libass。
+graphical hook/title/emphasisのownerはregistered content element + Remotion。
+同一文言・重複時間の二重ownerはpreflight rejectし、未登録templateを生成しない。
+
+canonical rendererが表現不能な場合だけ、承認者・15分以内のtimestamp・production approval hashへbindした
+`degraded-route-receipt/v1`を用意し、repo-owned writerでreview-only outputを発行する:
+`npm run project-output:degraded -- --project projects/<project> --source <review-file> --output projects/<project>/09_output/<versioned-review-file> --degraded-route-receipt projects/<project>/06_review/degraded-route-receipt.json`
+receiptなし、架空command/capability/tool、承認者不一致、stale/future timestampでは書込み前に停止する。
+
 ## 出力 artifact
 
 - `06_review/review_patch.json`
 - `05_timeline/timeline.json`
 - `05_timeline/preview-manifest.json`
 - 条件が揃っていて render まで進める場合は `07_package/*`
+- router: `06_review/caption-edit-route.json`
+- visual-only preview: `07_package/caption_visual_treatment_patch.json`、
+  `07_package/caption_visual_treatment_preapproval_input.json`、
+  `07_package/caption_visual_treatment_preapproval_receipt.json`、
+  `05_timeline/preview-baseline-fast-full.mp4`と同previewのcanonical `.receipt.json`
 
 ## 注意事項
 
@@ -125,4 +182,7 @@ npx tsx scripts/compile-timeline.ts projects/<project> --fps 30
 - 講演・インタビューを信頼感のある縦型SNSショートへ仕上げる場合は
   `finish-business-short` を併用し、重複発言の削除、冒頭主張、フル字幕、
   話者表記、登録済みCTA、retention QAを一体で扱う
+- クリエイター・挑戦・Vlog・共感創出系の縦型SNSショートへ仕上げる場合は
+  `finish-creator-short` を併用し、7-Beat構成、テンポ伸縮、パンチイン（zoom）、
+  要約キーワードテロップ、証拠素材インサート、SE同期、Platform BGM Handoffを一体で扱う
 - patch mode は `selects_candidates.yaml` や `edit_blueprint.yaml` を自動更新しない

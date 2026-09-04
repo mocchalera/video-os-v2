@@ -47,6 +47,7 @@ export async function confirmBriefDefaults(
   const repoRoot = options.repoRoot ?? findRepoRoot(projectDir);
   const defaultCaptionPolicy = resolveCaptionPolicy(brief, blueprint, repoRoot).mode;
   const defaultAudioPolicy = resolveAudioPolicyDefault(brief, blueprint, repoRoot);
+  const explicitMusicMaster = brief.audio_policy === "music_master";
   const needsWrite = options.force ||
     !brief.caption_policy ||
     !brief.audio_policy ||
@@ -79,7 +80,9 @@ export async function confirmBriefDefaults(
       output.write(captionQuestion);
       captionPolicy = parseCaptionAnswer(answers[0] ?? "", defaultCaptionPolicy);
       output.write(audioQuestion);
-      audioPolicy = parseAudioAnswer(answers[1] ?? "", defaultAudioPolicy);
+      audioPolicy = explicitMusicMaster
+        ? "music_master"
+        : parseAudioAnswer(answers[1] ?? "", defaultAudioPolicy);
     } else {
       const rl = readline.createInterface({ input, output });
       try {
@@ -87,10 +90,12 @@ export async function confirmBriefDefaults(
           await rl.question(captionQuestion),
           defaultCaptionPolicy,
         );
-        audioPolicy = parseAudioAnswer(
-          await rl.question(audioQuestion),
-          defaultAudioPolicy,
-        );
+        audioPolicy = explicitMusicMaster
+          ? "music_master"
+          : parseAudioAnswer(
+              await rl.question(audioQuestion),
+              defaultAudioPolicy,
+            );
       } finally {
         rl.close();
       }
@@ -142,6 +147,7 @@ function parseAudioAnswer(answer: string, fallback: BriefAudioPolicy): BriefAudi
   if (normalized === "yes" || normalized === "y" || normalized === "ducking" || normalized === "duck") return "ducking";
   if (normalized === "no" || normalized === "n" || normalized === "bgm" || normalized === "bgm_only") return "bgm_only";
   if (normalized === "original_only" || normalized === "original") return "original_only";
+  if (normalized === "music_master" || normalized === "preserve") return "music_master";
   return fallback;
 }
 

@@ -77,7 +77,30 @@ export function resolveBeatSyncConfig(defaults: CompilerDefaults): {
   return { mode, maxShiftFrames };
 }
 
-export function loadBeatSyncGridFromProject(projectPath: string, fpsNum: number): BeatSyncGrid | undefined {
+export function loadBeatSyncGridFromProject(
+  projectPath: string,
+  fpsNum: number,
+  /**
+   * Evidence-snapshot injection (Issue #35). When `snapshotResolved` is true,
+   * the caller has already bound the BGM artifact at compile entry: the path
+   * is NEVER re-opened here — `bgmFromSnapshot` is the only BGM data this
+   * phase may use (undefined when the snapshot was unbound/degraded, so
+   * rejected evidence cannot alter V1 geometry). Without the flag (legacy
+   * analysis-time callers) the loader falls back to reading the artifact.
+   */
+  options?: {
+    bgmFromSnapshot?: BgmAnalysis;
+    snapshotResolved?: boolean;
+    /**
+     * Issue #35 guarded route: do not let an unqualified legacy beat grid
+     * mutate V1 before the typed rhythm admission pass owns the boundary.
+     * Omitted for the explicit legacy compatibility path.
+     */
+    disableLegacyPreQuantization?: boolean;
+  },
+): BeatSyncGrid | undefined {
+  if (options?.disableLegacyPreQuantization) return undefined;
+
   const musicCuesPath = path.join(projectPath, "07_package", "music_cues.json");
   if (fs.existsSync(musicCuesPath)) {
     const doc = readJson<MusicCuesGridDoc>(musicCuesPath);
@@ -85,7 +108,9 @@ export function loadBeatSyncGridFromProject(projectPath: string, fpsNum: number)
     if (cueGrid && cueGrid.frames.length > 0) return cueGrid;
   }
 
-  const bgm = loadBgmAnalysisFromProject(projectPath);
+  const bgm = options?.snapshotResolved
+    ? options.bgmFromSnapshot
+    : (options?.bgmFromSnapshot ?? loadBgmAnalysisFromProject(projectPath));
   if (bgm && bgm.analysis_status === "ready") {
     const frames = secondsToFrames([...safeSeconds(bgm.beats_sec), ...safeSeconds(bgm.downbeats_sec)], fpsNum, 0);
     if (frames.length > 0) return { frames, source: "bgm_analysis" };
@@ -327,13 +352,20 @@ function canApplyBoundaryShift(
   return left.timeline_duration_frames + delta >= minFrames;
 }
 
-function applyBoundaryShift(
+/**
+ * Pair-preserving boundary shift: moves the cut between two adjacent clips by
+ * `delta` frames without changing total timeline length (Gap 0f / Overrun 0f).
+ * Shared with the Issue #35 rhythm-sync pass.
+ */
+export function applyBoundaryShift(
   left: TimelineClip,
   right: TimelineClip,
   delta: number,
   fpsNum: number,
+  fpsDen = 1,
 ): void {
-  const usPerFrame = 1_000_000 / fpsNum;
+  // Rational conversion: fps = fpsNum/fpsDen (e.g. 30000/1001 for 29.97).
+  const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const deltaUs = Math.round(delta * usPerFrame);
 
   left.timeline_duration_frames += delta;

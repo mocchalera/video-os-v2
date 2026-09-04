@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as readline from "node:readline";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { MarlinFn, MarlinRawCaption, MarlinRawFind } from "./marlin-types.js";
+import type { MarlinCaptionOptions, MarlinFn, MarlinRawCaption, MarlinRawFind } from "./marlin-types.js";
 
 interface WorkerResponse<T> {
   id: number | null;
@@ -19,6 +19,8 @@ export interface MarlinWorkerClientOptions {
   mock?: boolean;
   cwd?: string;
   requestTimeoutMs?: number;
+  /** Policy ceiling clamping every caption token bound in the worker. */
+  captionMaxNewTokensMax?: number;
 }
 
 export class MarlinWorkerClient implements MarlinFn {
@@ -35,8 +37,13 @@ export class MarlinWorkerClient implements MarlinFn {
 
   constructor(private readonly options: MarlinWorkerClientOptions = {}) {}
 
-  async caption(videoPath: string): Promise<MarlinRawCaption> {
-    return this.request<MarlinRawCaption>("caption", { video_path: videoPath });
+  async caption(videoPath: string, options?: MarlinCaptionOptions): Promise<MarlinRawCaption> {
+    const params: Record<string, unknown> = { video_path: videoPath };
+    const maxNewTokens = options?.maxNewTokens;
+    if (Number.isInteger(maxNewTokens) && (maxNewTokens ?? 0) > 0) {
+      params.max_new_tokens = maxNewTokens;
+    }
+    return this.request<MarlinRawCaption>("caption", params);
   }
 
   async find(videoPath: string, event: string): Promise<MarlinRawFind> {
@@ -83,6 +90,12 @@ export class MarlinWorkerClient implements MarlinFn {
     }
     if (this.options.device) {
       args.push("--device", this.options.device);
+    }
+    if (
+      Number.isInteger(this.options.captionMaxNewTokensMax) &&
+      (this.options.captionMaxNewTokensMax ?? 0) > 0
+    ) {
+      args.push("--caption-max-new-tokens-max", String(this.options.captionMaxNewTokensMax));
     }
 
     this.process = spawn(python, args, {

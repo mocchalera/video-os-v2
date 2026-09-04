@@ -100,6 +100,29 @@ describe("ensureCandidateIds", () => {
     ensureCandidateIds("proj-1", [c]);
     expect(c.candidate_id).toBe("cand_existing");
   });
+
+  it("repairs a provider-supplied ID collision without changing the first candidate", () => {
+    const first = makeCandidate({ candidate_id: "cand_collision", role: "hero" });
+    const second = makeCandidate({ candidate_id: "cand_collision", role: "support" });
+
+    ensureCandidateIds("proj-1", [first, second]);
+
+    expect(first.candidate_id).toBe("cand_collision");
+    expect(second.candidate_id).toBe(generateCandidateId("proj-1", second));
+    expect(second.candidate_id).not.toBe(first.candidate_id);
+  });
+
+  it("moves a squatting provider ID when it is another candidate's canonical ID", () => {
+    const first = makeCandidate({ role: "reject" });
+    const second = makeCandidate({ role: "support" });
+    first.candidate_id = generateCandidateId("proj-1", second);
+    second.candidate_id = first.candidate_id;
+
+    ensureCandidateIds("proj-1", [first, second]);
+
+    expect(first.candidate_id).toBe(generateCandidateId("proj-1", first));
+    expect(second.candidate_id).toBe(generateCandidateId("proj-1", second));
+  });
 });
 
 describe("backward compatibility", () => {

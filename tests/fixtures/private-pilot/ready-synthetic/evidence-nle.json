@@ -1,0 +1,5 @@
+{
+  "gate": "nle_handoff",
+  "fixture": true,
+  "note": "explicit NLE not-required metadata; no external handoff occurred"
+}

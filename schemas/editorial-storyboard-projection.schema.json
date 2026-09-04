@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "editorial-storyboard-projection.schema.json",
+  "type": "object",
+  "required": ["version", "projection_id", "generated_at", "source_mode", "project_id", "project_title", "delivery", "inputs", "artifact_hashes", "approval_identity", "review_diff_summary", "canvas", "fps", "policy_summaries", "caption_policy_language", "beat_count", "total_frames", "total_frames_basis", "compiled_span_frames", "timeline_end_frame", "representative_frames", "warnings", "invalid", "outputs", "regenerate_command", "generator"],
+  "properties": {
+    "version": { "const": "editorial-storyboard-projection/v1" },
+    "projection_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "source_mode": { "enum": ["blueprint", "timeline", "compare"] },
+    "project_id": { "type": "string", "minLength": 1 },
+    "project_title": { "type": ["string", "null"] },
+    "delivery": {
+      "type": "object",
+      "required": ["mode", "ids", "profiles"],
+      "properties": {
+        "mode": { "enum": ["single", "all"] },
+        "ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "profiles": { "type": "array", "items": { "$ref": "#/$defs/profile" } }
+      },
+      "additionalProperties": false
+    },
+    "inputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/input" } },
+    "artifact_hashes": { "$ref": "#/$defs/hashMap" },
+    "approval_identity": {
+      "type": "object",
+      "required": ["artifact_hashes", "delivery_hash", "beat_count", "total_frames"],
+      "properties": {
+        "artifact_hashes": { "$ref": "#/$defs/hashMap" },
+        "delivery_hash": { "type": "string", "minLength": 1 },
+        "beat_count": { "type": "integer", "minimum": 0 },
+        "total_frames": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "review_diff_summary": {
+      "type": "object",
+      "required": ["trims", "crops"],
+      "properties": {
+        "trims": { "type": "array", "items": { "type": "string" } },
+        "crops": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "canvas": {
+      "type": "object",
+      "required": ["aspect_ratio_label", "aspect", "width", "height", "fps_num", "fps_den", "basis"],
+      "properties": {
+        "aspect_ratio_label": { "type": "string" },
+        "aspect": { "type": ["number", "null"] },
+        "width": { "type": ["integer", "null"] },
+        "height": { "type": ["integer", "null"] },
+        "fps_num": { "type": ["integer", "null"] },
+        "fps_den": { "type": ["integer", "null"] },
+        "basis": { "enum": ["delivery_profile", "timeline_sequence", "unspecified"] }
+      },
+      "additionalProperties": false
+    },
+    "fps": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "object", "required": ["num", "den"], "properties": { "num": { "type": "integer" }, "den": { "type": "integer" } }, "additionalProperties": false }
+      ]
+    },
+    "policy_summaries": {
+      "type": "object",
+      "required": ["music", "dialogue", "caption"],
+      "properties": { "music": { "type": "string" }, "dialogue": { "type": "string" }, "caption": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "caption_policy_language": { "type": ["string", "null"] },
+    "beat_count": { "type": "integer", "minimum": 0 },
+    "total_frames": { "type": "integer", "minimum": 0 },
+    "total_frames_basis": { "enum": ["blueprint_target_frames", "timeline_span_frames"] },
+    "compiled_span_frames": { "type": ["integer", "null"], "minimum": 0 },
+    "timeline_end_frame": { "type": ["integer", "null"], "minimum": 0 },
+    "representative_frames": { "type": "array", "items": { "$ref": "#/$defs/frame" } },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "invalid": { "type": "array", "items": { "type": "string" } },
+    "outputs": { "type": "array", "items": { "type": "string" } },
+    "regenerate_command": { "type": "string" },
+    "generator": { "const": "render-editorial-storyboard" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "hashMap": { "type": "object", "additionalProperties": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] } },
+    "input": {
+      "type": "object",
+      "required": ["role", "path", "hash", "required"],
+      "properties": {
+        "role": { "enum": ["brief", "selects", "blueprint", "uncertainty", "timeline", "source_map", "policy"] },
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object",
+      "required": ["profile_id", "profile_name", "platform", "path", "hash", "aspect_ratio", "resolution_width", "resolution_height", "fps_mode", "caption_mode"],
+      "properties": {
+        "profile_id": { "type": "string", "minLength": 1 },
+        "profile_name": { "type": "string" },
+        "platform": { "type": "string" },
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "$ref": "#/$defs/hash" },
+        "aspect_ratio": { "type": ["string", "null"] },
+        "resolution_width": { "type": ["integer", "null"] },
+        "resolution_height": { "type": ["integer", "null"] },
+        "fps_mode": { "type": ["string", "null"] },
+        "caption_mode": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "frame": {
+      "type": "object",
+      "required": ["beat_id", "binding_ref", "timestamp_us", "basis", "asset_id", "asset_hash", "frame_file"],
+      "properties": {
+        "beat_id": { "type": "string" },
+        "binding_ref": { "type": ["string", "null"] },
+        "timestamp_us": { "type": ["integer", "null"] },
+        "basis": { "enum": ["authored_freeze_frame", "still_image", "trim_hint_center", "selected_peak", "candidate_midpoint", "segment_midpoint", "unavailable"] },
+        "asset_id": { "type": ["string", "null"] },
+        "asset_hash": { "type": ["string", "null"] },
+        "frame_file": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "version": "typography-policy/v1",
+  "profile_id": "fixture-typography-mixed-script-v1",
+  "caption_mode": "full_transcript",
+  "baseline_style_ref": "sns-vertical-outline",
+  "font_contract_ref": "existing-caption-font-contract/v1",
+  "measurement": {
+    "method": "unicode-display-units/v1",
+    "full_width_unit": 1,
+    "latin_unit": 0.5,
+    "max_line_units": 12,
+    "max_lines": 2,
+    "max_cps": 16
+  },
+  "wrapping": {
+    "break_priorities": ["punctuation", "word_or_phrase", "lexical_boundary", "balanced_midpoint"],
+    "protected_terms": ["RoughCut Agent", "タイムライン"],
+    "line_start_punctuation": ["。、！？"],
+    "line_end_punctuation": ["はがをにでとものへや"],
+    "orphan_tokens": ["は", "が", "を", "に", "で", "と", "も", "の", "へ", "や", "か", "って", "ます", "です"],
+    "orphan_policy": "human_review",
+    "manual_override": { "source": "caption-review-patch/v1", "allowed": true }
+  },
+  "reference_scale": {
+    "output_width": 1080,
+    "output_height": 1920,
+    "font_scale_relation": "resolve through the registered baseline style at output scale",
+    "line_height_relation": "resolve through the registered baseline style"
+  },
+  "visual": {
+    "tracking": 0,
+    "outline": { "enabled": true, "style_ref": "baseline-outline" },
+    "shadow": { "enabled": false, "style_ref": "baseline-shadow" },
+    "panel": { "enabled": false, "style_ref": "baseline-panel" },
+    "contrast": { "fill_rgba": "FFFFFFFF", "background_rgba": "080808FF", "minimum_ratio": 4.5 }
+  },
+  "hierarchy": {
+    "speech": "caption.speech",
+    "keyword": "caption.keyword",
+    "annotation": "caption.annotation",
+    "speaker": "caption.speaker",
+    "cta": "caption.cta"
+  },
+  "fallback": {
+    "registered_emphasis": ["emphasis-word"],
+    "registered_animation": ["semantic-reveal"],
+    "registered_effect": ["outline"],
+    "unsupported_renderer": "nle_handoff"
+  },
+  "accessibility": {
+    "reduced_motion": "static",
+    "high_contrast": "registered_fallback",
+    "audio_off": "retain_text",
+    "small_screen": "scale_profile"
+  }
+}

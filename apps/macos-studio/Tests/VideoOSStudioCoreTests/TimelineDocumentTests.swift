@@ -76,6 +76,37 @@ final class TimelineDocumentTests: XCTestCase {
         XCTAssertEqual(document.markers.first?.kind, nil)
     }
 
+    func testTimelineClipDecodesCanonicalVisualMetadataIntoExistingReviewTransform() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-timeline-visual-metadata-\(UUID().uuidString)")
+        let timelineDir = root.appendingPathComponent("05_timeline")
+        try FileManager.default.createDirectory(at: timelineDir, withIntermediateDirectories: true)
+        let visualTimeline = fixtureTimeline.replacingOccurrences(
+            of: "\"candidate_ref\": \"legacy:SEG_001:0:3000000\"",
+            with: """
+            "candidate_ref": "legacy:SEG_001:0:3000000",
+            "metadata": {
+              "zoom": 1.25,
+              "position": { "x": -12, "y": 8 },
+              "visual_framing": { "policy": "registered-visual-intents/v1" }
+            }
+            """
+        )
+        try visualTimeline.write(
+            to: timelineDir.appendingPathComponent("timeline.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let document = try TimelineDocument.load(projectURL: root)
+        let clip = try XCTUnwrap(document.clipSelection(for: "CLP_001")?.clip)
+        XCTAssertEqual(clip.metadata["visual_framing"], .object(["policy": .string("registered-visual-intents/v1")]))
+        XCTAssertEqual(clip.visualTransform, ReviewVisualTransform(
+            zoom: 1.25,
+            position: .init(x: -12, y: 8)
+        ))
+    }
+
     func testLoadTimelineDocumentBuildsDisplayCaptionTrackFromClipCaptions() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-timeline-captions-\(UUID().uuidString)")

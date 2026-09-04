@@ -14,7 +14,10 @@ import {
 import { determineImportStatus, detectLossyItems, evaluateGate9 } from "./loss-classifier.js";
 import { mapClips } from "./mapping.js";
 import { normalizeOneToMany, type OneToManyResult } from "./normalization.js";
-import { normalizeOtioViaBridge } from "./parser.js";
+import {
+  normalizeOtioViaBridge,
+  type NormalizedOtioDocument,
+} from "./parser.js";
 import { buildImportReport } from "./report.js";
 import { isP3ContinuityPreferenceEnabled } from "../../artifacts/p3-continuity-graph.js";
 import {
@@ -144,6 +147,12 @@ export interface HandoffImportResult {
   reportPath: string;
   reviewRequired: boolean;
   bridgeFingerprint: BridgeFingerprint;
+  /** Typed normalized data and mapping decisions for the diff composition seam. */
+  normalizedImport: NormalizedOtioDocument;
+  normalizedExport?: NormalizedOtioDocument;
+  mappedClips: ClipMapping[];
+  oneToMany: OneToManyResult;
+  unmappedClips: NormalizedClip[];
 }
 
 export interface ImportError {
@@ -320,6 +329,7 @@ export function executeHandoffImport(
   }
 
   let exportedClips: NormalizedClip[] = [];
+  let normalizedExport: NormalizedOtioDocument | undefined;
   if (input.exportedOtioPath && fs.existsSync(input.exportedOtioPath)) {
     const exportedNormPath = path.join(normalizedDir, "exported_otio.json");
     const exportResult = normalizeOtioViaBridge(
@@ -338,7 +348,8 @@ export function executeHandoffImport(
         },
       };
     }
-    exportedClips = exportResult.document.clips;
+    normalizedExport = exportResult.document;
+    exportedClips = normalizedExport.clips;
   }
 
   const fingerprintSeverity = evaluateFingerprintMismatch(
@@ -416,6 +427,11 @@ export function executeHandoffImport(
     reportPath,
     reviewRequired,
     bridgeFingerprint: importResult.fingerprint,
+    normalizedImport: importResult.document,
+    normalizedExport,
+    mappedClips: mapped,
+    oneToMany,
+    unmappedClips: unmapped,
   };
 }
 
@@ -537,6 +553,12 @@ export function executeOfflineImport(opts: {
 
 export type { Gate9EvidenceCounts } from "./loss-classifier.js";
 export type { OneToManyResult } from "./normalization.js";
+export type {
+  NormalizeOtioFailure,
+  NormalizeOtioResult,
+  NormalizeOtioSuccess,
+  NormalizedOtioDocument,
+} from "./parser.js";
 export {
   buildImportReport,
   classifyOneToMany,

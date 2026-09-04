@@ -5,6 +5,13 @@
 import type { AssembledTimeline, Candidate, DurationPolicy, Track } from "./types.js";
 import { computeFrameBounds, isWithinWindow } from "./duration-helpers.js";
 import { primaryContentClips } from "./primary-content.js";
+import {
+  findPrimaryAudioGaps,
+  findPrimaryVideoGaps,
+  primaryVideoEndFrame,
+  type PrimaryAudioGap,
+  type PrimaryVideoGap,
+} from "./coverage.js";
 
 export type DurationStatus = "pass" | "short" | "over";
 
@@ -13,6 +20,14 @@ export interface BeatFillDiagnostic {
   target: number;
   actual: number;
   fill_ratio: number;
+}
+
+export interface ResolveOptions {
+  /**
+   * True when an explicit mix policy (or bgm_only) authorizes a primary audio
+   * lane that is not wall-to-wall; audio gap diagnostics are then omitted.
+   */
+  primaryAudioCoverageWaived?: boolean;
 }
 
 export interface ResolutionReport {
@@ -34,10 +49,34 @@ export interface ResolutionReport {
   content_fill_ratio: number;
   gap_frames: number;
   gap_count: number;
+  gap_details?: PrimaryVideoGap[];
+  audio_gap_frames?: number;
+  audio_gap_count?: number;
+  audio_gap_details?: PrimaryAudioGap[];
   beat_fill: BeatFillDiagnostic[];
 }
 
 const DEFAULT_CONTENT_FILL_THRESHOLD = 0.9;
+
+/**
+ * Resolve the end frame used by primary V1/A1 coverage checks.
+ *
+ * A guide target is advisory, so a shorter authored V1 program must not gain a
+ * synthetic tail gap merely because its report target is longer. The actual V1
+ * end still bounds the scan, which keeps leading and internal holes visible and
+ * gives A1 the same program horizon. Strict and legacy calls retain the target
+ * horizon so their hard-target behavior is unchanged.
+ */
+export function resolveCoverageHorizon(
+  timeline: AssembledTimeline,
+  targetEndFrame: number,
+  durationPolicy?: DurationPolicy,
+): number {
+  if (durationPolicy?.mode !== "guide") return targetEndFrame;
+
+  const actualProgramEndFrame = primaryVideoEndFrame(timeline);
+  return actualProgramEndFrame > 0 ? actualProgramEndFrame : targetEndFrame;
+}
 
 export function resolve(
   timeline: AssembledTimeline,
@@ -46,6 +85,7 @@ export function resolve(
   durationPolicy?: DurationPolicy,
   fpsNum?: number,
   fpsDen?: number,
+  options?: ResolveOptions,
 ): ResolutionReport {
   // Build candidate lookup by segment_id for fallback replacement
   const candidateMap = new Map<string, Candidate>();
@@ -238,7 +278,9 @@ export function resolve(
   const content_fill_ratio = resolved_target_frames > 0
     ? content_frames / resolved_target_frames
     : 1;
-  const gapSummary = computeGapSummary(timeline, resolved_target_frames);
+  const coverageEndFrame = resolveCoverageHorizon(timeline, resolved_target_frames, durationPolicy);
+  const gapSummary = computeGapSummary(timeline, coverageEndFrame);
+  const audioGapSummary = computeAudioGapSummary(timeline, coverageEndFrame, options);
   const beat_fill = computeBeatFill(timeline, resolved_target_frames);
 
   if (durationPolicy && fpsNum && fpsDen) {
@@ -286,6 +328,12 @@ export function resolve(
     content_fill_ratio,
     gap_frames: gapSummary.gap_frames,
     gap_count: gapSummary.gap_count,
+    ...(gapSummary.gap_details ? { gap_details: gapSummary.gap_details } : {}),
+    ...(audioGapSummary ? {
+      audio_gap_frames: audioGapSummary.audio_gap_frames,
+      audio_gap_count: audioGapSummary.audio_gap_count,
+      ...(audioGapSummary.audio_gap_details ? { audio_gap_details: audioGapSummary.audio_gap_details } : {}),
+    } : {}),
     beat_fill,
   };
 }
@@ -300,8 +348,16 @@ function sumPrimaryContentFrames(timeline: AssembledTimeline): number {
 function computeGapSummary(
   timeline: AssembledTimeline,
   targetFrames: number,
-): { gap_frames: number; gap_count: number } {
+): { gap_frames: number; gap_count: number; gap_details?: PrimaryVideoGap[] } {
   if (targetFrames <= 0) return { gap_frames: 0, gap_count: 0 };
+  if (timeline.tracks.video.some((track) => track.clips.length > 0)) {
+    const gaps = findPrimaryVideoGaps(timeline, targetFrames);
+    return {
+      gap_frames: gaps.reduce((sum, gap) => sum + gap.duration_frames, 0),
+      gap_count: gaps.length,
+      gap_details: gaps,
+    };
+  }
   const intervals = primaryContentClips(timeline)
     .map((clip) => ({
       start: Math.max(0, Math.min(targetFrames, clip.timeline_in_frame)),
@@ -326,6 +382,28 @@ function computeGapSummary(
   }
 
   return { gap_frames: gapFrames, gap_count: gapCount };
+}
+
+/**
+ * Unintended silent intervals on the primary audio program. Omitted entirely
+ * when an explicit mix policy waives primary-audio continuity.
+ */
+function computeAudioGapSummary(
+  timeline: AssembledTimeline,
+  targetFrames: number,
+  options?: ResolveOptions,
+): { audio_gap_frames: number; audio_gap_count: number; audio_gap_details?: PrimaryAudioGap[] } | undefined {
+  if (options?.primaryAudioCoverageWaived) return undefined;
+  if (targetFrames <= 0) return undefined;
+  const hasAudioProgram = timeline.tracks.video.some((track) => track.clips.length > 0) ||
+    timeline.tracks.audio.some((track) => track.clips.length > 0);
+  if (!hasAudioProgram) return undefined;
+  const gaps = findPrimaryAudioGaps(timeline, targetFrames);
+  return {
+    audio_gap_frames: gaps.reduce((sum, gap) => sum + gap.duration_frames, 0),
+    audio_gap_count: gaps.length,
+    audio_gap_details: gaps,
+  };
 }
 
 function computeBeatFill(

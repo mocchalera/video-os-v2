@@ -8,14 +8,25 @@
  */
 
 import { execFile } from "node:child_process";
+import { registerRenderChild } from "./render-cleanup-registry.js";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { materializeFileSync } from "../filesystem/materialize-file.js";
 import { assertTimelineRenderSupported } from "./media-kind-guard.js";
-import { resolveCanonicalRenderInputs } from "./canonical-render-input.js";
-import { assessRenderArtifactFreshness } from "./source-input-attestation.js";
+import { validateArtifact } from "../artifacts/loaders.js";
+import {
+  resolveAndVerifyCanonicalCaptionVisualTreatmentInput,
+  resolveCanonicalRenderInputs,
+  shouldPreflightCanonicalCaptionVisualTreatment,
+} from "./canonical-render-input.js";
+import { captionVisualTreatmentReceiptSummary } from "../caption/visual-treatment.js";
+import {
+  assessRenderArtifactFreshness,
+  createSourceInputAttestation,
+  type SourceInputAttestation,
+} from "./source-input-attestation.js";
 
 // FATAL-1 (Phase 5 review R1): both preview and final must serialize the
 // video filter graph through the same shared builder so the byte-identical
@@ -34,6 +45,7 @@ import {
   resolveCaptionStylePreset,
   type AssCaptionCue,
 } from "../../editor/shared/caption-style-tokens.js";
+import type { CaptionVisualTreatmentInput } from "../caption/visual-treatment.js";
 import {
   produceAssembly,
   resolveAssemblyEngine,
@@ -44,12 +56,23 @@ import { assessMusicAssetEligibility } from "../music/asset-eligibility.js";
 import { applyMusicMixProfile, type MusicCuesDoc } from "../audio/music-cues.js";
 import { timelineEmbeddedMusicAssetIds } from "../audio/timeline-music.js";
 import { shouldPreserveOriginalAudioLevel } from "../audio/preservation.js";
-import { DEFAULT_MASTERING, measureAudioLoudness } from "../audio/mastering.js";
+import {
+  DEFAULT_MASTERING,
+  measureAudioLoudness,
+  measureEncodedAudioResult,
+  type EncodedAudioMeasurement,
+  type LoudnormMeasurement,
+} from "../audio/mastering.js";
 import {
   assertAudioRenderPlanFresh,
   executeAudioRenderPlan,
 } from "../audio/render-executor.js";
-import type { AudioRenderPlan } from "../audio/render-plan.js";
+import {
+  assertAudioRenderPlanMatchesCanonical,
+  hashFile,
+  type AudioRenderPlan,
+} from "../audio/render-plan.js";
+import { MUSIC_MASTER_MVP_POLICY } from "../audio/music-master-mvp.js";
 import { resolveSharedAudioRenderPlan } from "../audio/render-route.js";
 import { renderHyperFramesContentLayer } from "../content/hyperframes-renderer.js";
 import { renderRemotionContentLayer } from "./remotion/render-remotion.js";
@@ -64,6 +87,7 @@ import {
   type DeliveryVideoOperation,
   type RenderRouteDecision,
 } from "./route-resolver.js";
+import type { StillCameraMotionReceipt } from "./camera-motion.js";
 import { assertNoLegacyClipCaptionsForPackage } from "./legacy-caption-guard.js";
 import {
   assertCaptionFontContractReady,
@@ -87,10 +111,30 @@ export interface RenderPipelineOptions {
   projectDir: string;
   timelinePath: string;
   captionApprovalPath?: string;
+  /**
+   * Canonical lyric ASS (Issue 36) from the active delivery generation;
+   * burned in the same encode as speech captions via the compositor.
+   */
+  lyricsAssPath?: string;
+  /** Versioned RFA-020 typography profile and optional approved treatment patch. */
+  typographyPolicyPath?: string;
+  visualTreatmentPatchPath?: string;
   musicCuesPath?: string;
   sfxCuesPath?: string;
+  /** Explicit repository-common SFX authority root. */
+  repoSfxRoot?: string;
+  /** Exact registered RFA-023 audio profile selection. */
+  audioDeliveryProfilePath?: string;
+  audioDeliveryProfileId?: string;
+  audioDeliveryPlatform?: string;
+  audioDeliverySurface?: string;
+  audioDeliveryReleaseScope?: "organic" | "ads" | "internal";
+  audioDeliveryVariant?: string;
+  audioDeliveryProfileRootDir?: string;
   /** Preflighted shared audio plan supplied by /package. */
   audioRenderPlan?: AudioRenderPlan;
+  /** Optional persisted shared audio-plan artifact for route provenance. */
+  audioRenderPlanPath?: string;
   assemblyPath?: string; // Pre-built assembly.mp4 (skip Remotion step)
   /** Alternate engine if assemblyPath is not pre-built */
   assemblyEngine?: AssemblyEngine;
@@ -102,6 +146,10 @@ export interface RenderPipelineOptions {
   bundleCacheDir?: string;
   /** Pre-resolved capability route from the package entrypoint. */
   renderRouteDecision?: RenderRouteDecision;
+  /** Pre-resolved RFA-020 input shared by preview/final/package callers. */
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput;
+  /** Review-only preview seam; never set by final/package production callers. */
+  captionVisualTreatmentReviewOnlyPreapproval?: boolean;
   captionPolicy: {
     language: string;
     delivery_mode: "burn_in" | "sidecar" | "both";
@@ -131,11 +179,14 @@ export interface RenderPipelineResult {
   rawVideoPath: string;
   rawDialoguePath: string;
   finalMixPath: string;
+  masteredMp3Path?: string;
   finalVideoPath: string;
   sidecarPaths: string[];
   logs: Record<string, string>;
   audioMixReportPath: string;
   renderRouteReceiptPath: string;
+  captionVisualTreatmentInputPath?: string;
+  renderReportPath?: string;
 }
 
 export const FINAL_AUDIO_SAMPLE_RATE_HZ = 48_000;
@@ -147,11 +198,84 @@ function execFilePromise(
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 100 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile(cmd, args, { maxBuffer: 100 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(err);
       resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
     });
+    registerRenderChild(child, `${cmd}:render-pipeline`);
   });
+}
+
+/** Hash decoded audio samples from a muxed deliverable, independent of its
+ * container bytes. This is ephemeral evidence and is never exposed as a
+ * project path. */
+async function hashDecodedAudioStream(inputPath: string): Promise<string> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-audio-stream-"));
+  const rawPath = path.join(tempDir, "audio.pcm");
+  try {
+    await execFilePromise("ffmpeg", [
+      "-v", "error",
+      "-y",
+      "-i", inputPath,
+      "-map", "0:a:0",
+      "-f", "s16le",
+      "-ar", String(FINAL_AUDIO_SAMPLE_RATE_HZ),
+      "-ac", "2",
+      rawPath,
+    ]);
+    return hashFile(rawPath);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function buildMusicMasterFinalMuxMeasurements(
+  source: LoudnormMeasurement | null,
+  encoded: EncodedAudioMeasurement,
+  tolerance: {
+    integrated_lufs_db: number;
+    lra_lu: number;
+    true_peak_dbtp: number;
+  },
+): {
+  status: "measured" | "degraded" | "hold";
+  delta: {
+    integrated_lufs_db: number | null;
+    lra_lu: number | null;
+    true_peak_dbtp: number | null;
+  };
+  tolerance: typeof tolerance;
+  reason: string;
+} {
+  const input = source
+    ? [Number(source.input_i), Number(source.input_lra), Number(source.input_tp)]
+    : [];
+  const output = [
+    encoded.loudness.integrated_lufs,
+    encoded.loudness.lra_lu,
+    encoded.loudness.true_peak_dbtp,
+  ];
+  if (encoded.loudness.status !== "measured"
+    || input.length !== 3
+    || input.some((value) => !Number.isFinite(value))
+    || output.some((value) => value === null || !Number.isFinite(value))) {
+    return {
+      status: "degraded",
+      delta: { integrated_lufs_db: null, lra_lu: null, true_peak_dbtp: null },
+      tolerance,
+      reason: "optional encoded loudness analyzer was unavailable; no mux tolerance claim was made",
+    };
+  }
+  return {
+    status: "measured",
+    delta: {
+      integrated_lufs_db: output[0]! - input[0]!,
+      lra_lu: output[1]! - input[1]!,
+      true_peak_dbtp: output[2]! - input[2]!,
+    },
+    tolerance,
+    reason: "encoded final mux measured against the music_master source measurement",
+  };
 }
 
 function ensureDir(dirPath: string): void {
@@ -162,6 +286,77 @@ function writeLog(logsDir: string, name: string, content: string): string {
   const logPath = path.join(logsDir, `${name}.log`);
   fs.writeFileSync(logPath, content, "utf-8");
   return logPath;
+}
+
+function writeRenderReport(input: {
+  outputDir: string;
+  projectDir: string;
+  timelinePath: string;
+  captionApprovalPath?: string;
+  typographyPolicyPath?: string;
+  visualTreatmentPatchPath?: string;
+  captionVisualTreatmentInputPath?: string;
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput;
+  routeDecision: RenderRouteDecision;
+  renderRouteReceiptPath: string;
+  finalVideoPath: string;
+  sequence: TimelineSequenceConfig;
+  durationFrames: number | undefined;
+  stillCameraMotion?: StillCameraMotionReceipt[];
+}): string {
+  const ref = (filePath: string) => ({
+    path: path.resolve(filePath),
+    sha256: `sha256:${createHash("sha256").update(fs.readFileSync(filePath)).digest("hex")}`,
+  });
+  const reportPath = path.join(input.outputDir, "logs", "render-report.json");
+  const routeReceipt = JSON.parse(fs.readFileSync(input.renderRouteReceiptPath, "utf8")) as {
+    renderer_versions?: unknown;
+    route_evidence?: unknown;
+  };
+  const report = {
+    version: "render-report/v1",
+    project_id: path.basename(path.resolve(input.projectDir)),
+    created_at: new Date().toISOString(),
+    route_receipt: ref(input.renderRouteReceiptPath),
+    renderer_versions: routeReceipt.renderer_versions,
+    ...(routeReceipt.route_evidence ? { route_evidence: routeReceipt.route_evidence } : {}),
+    ...(input.stillCameraMotion && input.stillCameraMotion.length > 0
+      ? { still_camera_motion: input.stillCameraMotion }
+      : {}),
+    inputs: {
+      timeline: ref(input.timelinePath),
+      ...(input.captionApprovalPath && fs.existsSync(input.captionApprovalPath) ? { caption_approval: ref(input.captionApprovalPath) } : {}),
+      ...(input.typographyPolicyPath && fs.existsSync(input.typographyPolicyPath) ? { typography_policy: ref(input.typographyPolicyPath) } : {}),
+      ...(input.visualTreatmentPatchPath && fs.existsSync(input.visualTreatmentPatchPath) ? { visual_treatment_patch: ref(input.visualTreatmentPatchPath) } : {}),
+      ...(input.captionVisualTreatmentInputPath && fs.existsSync(input.captionVisualTreatmentInputPath) ? { caption_visual_treatment_input: ref(input.captionVisualTreatmentInputPath) } : {}),
+    },
+    geometry: {
+      width: input.sequence.width,
+      height: input.sequence.height,
+      fps_num: input.sequence.fpsNum,
+      fps_den: input.sequence.fpsDen,
+      duration_frames: input.durationFrames ?? null,
+    },
+    caption_timing_hash: input.captionVisualTreatmentInput?.text_timing_hash ?? null,
+    caption_visual_treatment: input.captionVisualTreatmentInput ? (() => {
+      const summary = captionVisualTreatmentReceiptSummary(input.captionVisualTreatmentInput);
+      return {
+        ...summary,
+        resolved_input_hash: summary.input_hash,
+        input_hash: undefined,
+      };
+    })() : null,
+    output: { final_video: ref(input.finalVideoPath) },
+    delivery: {
+      compositor: input.routeDecision.delivery.compositor,
+      video_encoder: input.routeDecision.delivery.video_encoder,
+      lossy_video_encode_passes: input.routeDecision.delivery.lossy_video_encode_passes,
+      caption_engine: input.routeDecision.caption_layer.engine,
+      one_final_composite: true,
+    },
+  };
+  fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  return reportPath;
 }
 
 interface TimelineSequenceConfig {
@@ -524,6 +719,10 @@ export function prepareCaptionBurnAsset(
 }
 
 interface ApprovedCaptionForBurn {
+  caption_id?: string;
+  root_id?: string;
+  parent_ids?: string[];
+  lineage_hash?: string;
   timeline_in_frame: number;
   timeline_duration_frames: number;
   text: string;
@@ -541,6 +740,7 @@ interface ApprovedCaptionForBurn {
 export function buildApprovedCaptionAssCues(
   captions: ApprovedCaptionForBurn[],
   frameRate: FrameRateInput,
+  visualTreatmentInput?: CaptionVisualTreatmentInput,
 ): AssCaptionCue[] {
   return captions.map((caption) => {
     const body = caption.text.includes("｜")
@@ -551,6 +751,8 @@ export function buildApprovedCaptionAssCues(
         caption.reveal_timing?.role ?? "",
       );
     return {
+      ...(caption.caption_id ? { captionId: caption.caption_id } : {}),
+      ...(caption.root_id ? { stableRootId: caption.root_id } : {}),
       startSec: framesToSeconds(caption.timeline_in_frame, frameRate),
       endSec: framesToSeconds(
         caption.timeline_in_frame + caption.timeline_duration_frames,
@@ -562,6 +764,12 @@ export function buildApprovedCaptionAssCues(
         : /[?？][」』）】]?$/u.test(body)
           ? { semanticRole: "question" as const }
           : {}),
+      ...(caption.caption_id && visualTreatmentInput
+        ? (() => {
+            const identity = visualTreatmentInput.caption_identity.find((entry) => entry.caption_id === caption.caption_id);
+            return identity?.treatment ? { visualTreatment: identity.treatment } : {};
+          })()
+        : {}),
     };
   });
 }
@@ -702,6 +910,7 @@ export function buildFinalMuxArgs(
     "-c:a", "aac",
     "-b:a", "192k",
     "-ar", String(FINAL_AUDIO_SAMPLE_RATE_HZ),
+    "-ac", "2",
   );
   if (durationSec === undefined && durationFrames === undefined) {
     args.push("-shortest");
@@ -774,17 +983,44 @@ export async function runRenderPipeline(
   opts: RenderPipelineOptions,
 ): Promise<RenderPipelineResult> {
   const { outputDir, captionPolicy } = opts;
-  const sharedAudioPlan = opts.audioRenderPlan ?? resolveSharedAudioRenderPlan({
+  const audioPlanResolutionOptions = {
     projectDir: opts.projectDir,
     timelinePath: opts.timelinePath,
     musicCuesPath: opts.musicCuesPath,
     sfxCuesPath: opts.sfxCuesPath,
+    ...(opts.repoSfxRoot ? { repoSfxRoot: opts.repoSfxRoot } : {}),
     sourceOverrides: opts.sourceMap,
-  });
+    audioProfilePath: opts.audioDeliveryProfilePath,
+    audioProfileId: opts.audioDeliveryProfileId,
+    audioProfilePlatform: opts.audioDeliveryPlatform,
+    audioProfileSurface: opts.audioDeliverySurface,
+    audioProfileReleaseScope: opts.audioDeliveryReleaseScope,
+    audioProfileVariant: opts.audioDeliveryVariant,
+    audioProfileRootDir: opts.audioDeliveryProfileRootDir,
+  };
+  const canonicalAudioPlan = resolveSharedAudioRenderPlan(audioPlanResolutionOptions);
+  if (opts.audioRenderPlan && !canonicalAudioPlan && opts.audioRenderPlan.strategy === "music_master") {
+    throw new Error("supplied music_master plan has no matching canonical timeline audio declaration");
+  }
+  if (opts.audioRenderPlan && canonicalAudioPlan) {
+    assertAudioRenderPlanMatchesCanonical(opts.audioRenderPlan, canonicalAudioPlan);
+  }
+  const sharedAudioPlan = opts.audioRenderPlan ?? canonicalAudioPlan;
   if (sharedAudioPlan) {
     (opts.assertAudioRenderPlanFreshImpl ?? assertAudioRenderPlanFresh)(
       sharedAudioPlan,
     );
+  }
+  let routeSourceInputs: SourceInputAttestation | undefined;
+  try {
+    routeSourceInputs = createSourceInputAttestation(opts.projectDir, {
+      timelinePath: opts.timelinePath,
+      sourceOverrides: opts.sourceMap,
+      includeAudio: !sharedAudioPlan,
+    });
+  } catch {
+    // Direct pipeline callers may intentionally use a metadata-only fixture.
+    // Package preflight remains the canonical source-attestation gate.
   }
   let hasCanonicalDerivedMedia = false;
   let hasCanonicalStill = false;
@@ -806,6 +1042,41 @@ export async function runRenderPipeline(
     });
     hasCanonicalStill = canonicalInputs.imageAssetIds.size > 0;
     hasCanonicalDerivedMedia = hasCanonicalStill || canonicalInputs.sequenceAssetIds.size > 0;
+  }
+  const approvalDoc = opts.captionApprovalPath && fs.existsSync(opts.captionApprovalPath)
+    ? JSON.parse(fs.readFileSync(opts.captionApprovalPath, "utf8")) as {
+        approval?: {
+          typography_policy_hash?: string;
+          caption_visual_treatment_patch_hash?: string;
+          visual_treatment_input_hash?: string;
+        };
+      }
+    : undefined;
+  const visualTreatmentArtifactsPresent = shouldPreflightCanonicalCaptionVisualTreatment(opts.projectDir, {
+    typographyPolicyPath: opts.typographyPolicyPath,
+    visualTreatmentPatchPath: opts.visualTreatmentPatchPath,
+    approval: approvalDoc?.approval,
+  }) || Boolean(opts.captionVisualTreatmentInput);
+  let resolvedCaptionVisualTreatmentInput: CaptionVisualTreatmentInput | undefined;
+  if (visualTreatmentArtifactsPresent) {
+    resolvedCaptionVisualTreatmentInput = resolveAndVerifyCanonicalCaptionVisualTreatmentInput(opts.projectDir, {
+      approvalPath: opts.captionApprovalPath,
+      typographyPolicyPath: opts.typographyPolicyPath ?? "04_plan/typography_policy.json",
+      visualTreatmentPatchPath: opts.visualTreatmentPatchPath,
+      providedInput: opts.captionVisualTreatmentInput,
+      platformSafeZoneProfileHash: opts.captionVisualTreatmentInput?.platform_safe_zone_profile_hash,
+      platformSafeZoneProfileId: opts.captionVisualTreatmentInput?.platform_safe_zone_profile_id,
+      platformSafeZoneProfilePath: opts.captionVisualTreatmentInput?.platform_safe_zone_profile_path,
+      accessibility: opts.captionVisualTreatmentInput?.accessibility,
+      requireApprovalBinding: !opts.captionVisualTreatmentReviewOnlyPreapproval,
+    });
+  }
+  if (resolvedCaptionVisualTreatmentInput) {
+    if (resolvedCaptionVisualTreatmentInput.status === "blocked" || resolvedCaptionVisualTreatmentInput.status === "human_hold") {
+      throw new Error(
+        `Canonical caption visual-treatment input is not renderable: ${resolvedCaptionVisualTreatmentInput.status}`,
+      );
+    }
   }
   if (captionPolicy.source !== "none") {
     captionFontContract = captionFontContractForReceipt(captionPolicy.styling_class);
@@ -884,6 +1155,16 @@ export async function runRenderPipeline(
 
   const logs: Record<string, string> = {};
   const sidecarPaths: string[] = [];
+  let captionVisualTreatmentInputPath: string | undefined;
+  const resolvedTypographyPolicyPath = opts.typographyPolicyPath
+    ?? (fs.existsSync(path.join(opts.projectDir, "04_plan/typography_policy.json")) ? "04_plan/typography_policy.json" : undefined);
+  const resolvedVisualTreatmentPatchPath = opts.visualTreatmentPatchPath
+    ?? (fs.existsSync(path.join(opts.projectDir, "07_package/caption_visual_treatment_patch.json")) ? "07_package/caption_visual_treatment_patch.json" : undefined);
+  if (resolvedCaptionVisualTreatmentInput) {
+    captionVisualTreatmentInputPath = path.join(logsDir, "caption-visual-treatment-input.json");
+    fs.writeFileSync(captionVisualTreatmentInputPath, `${JSON.stringify(resolvedCaptionVisualTreatmentInput, null, 2)}\n`, "utf8");
+    logs.caption_visual_treatment_input = captionVisualTreatmentInputPath;
+  }
   let fontReceiptPath: string | undefined;
   if (captionFontContract) {
     fontReceiptPath = path.join(logsDir, "caption-font-receipt.json");
@@ -908,6 +1189,7 @@ export async function runRenderPipeline(
 
   // 2. Verify or produce assembly path
   let assemblyPath: string;
+  let stillCameraMotion: StillCameraMotionReceipt[] = [];
   if (opts.assemblyPath) {
     assemblyPath = opts.assemblyPath;
   } else {
@@ -918,8 +1200,10 @@ export async function runRenderPipeline(
       engine: resolvedEngine!,
       bundleCacheDir: opts.bundleCacheDir,
       includeAudio: !sharedAudioPlan,
+      assertMediaWriteReadyImpl: opts.assertMediaWriteReadyImpl,
     });
     assemblyPath = produced.assemblyPath;
+    stillCameraMotion = produced.still_camera_motion ?? [];
   }
 
   // Preserve the established assembly-input error order above. Route
@@ -1049,7 +1333,10 @@ export async function runRenderPipeline(
   let rawVideoPath: string;
   const timelineForMix = JSON.parse(fs.readFileSync(opts.timelinePath, "utf-8"));
   const hasTimelineAudio = (timelineForMix.tracks?.audio ?? []).some((track: { clips?: unknown[] }) => (track.clips?.length ?? 0) > 0) ||
-    typeof timelineForMix.audio_mix?.bgm_asset_id === "string";
+    typeof timelineForMix.audio_mix?.bgm_asset_id === "string"
+    // A still-only picture timeline can still carry an independent full-song
+    // source. The resolved plan is the audio presence signal in that case.
+    || Boolean(sharedAudioPlan);
   let rawDialoguePath: string | undefined;
   try {
     const demuxResult = await demux(
@@ -1163,7 +1450,7 @@ export async function runRenderPipeline(
         srtForBurn,
         { width: sequenceConfig.width, height: sequenceConfig.height, fps },
         captionPolicy.styling_class,
-        buildApprovedCaptionAssCues(approvedCaptions, frameRate),
+        buildApprovedCaptionAssCues(approvedCaptions, frameRate, resolvedCaptionVisualTreatmentInput),
       );
     } catch (err) {
       const logPath = writeLog(
@@ -1176,7 +1463,7 @@ export async function runRenderPipeline(
     }
   }
 
-  if (finalVisualLayers.length > 0 || captionAssPath) {
+  if (finalVisualLayers.length > 0 || captionAssPath || opts.lyricsAssPath) {
     const compositedVideoPath = path.join(videoDir, "composited_video.mp4");
     const timelineDurationSec = readTimelineDurationSeconds(opts.timelinePath);
     const timelineDurationFrames = timelineDurationSec === undefined
@@ -1187,7 +1474,8 @@ export async function runRenderPipeline(
         baseVideoPath: rawVideoPath,
         layers: finalVisualLayers,
         assPath: captionAssPath,
-        fontsDir: captionAssPath
+        extraAssPath: opts.lyricsAssPath,
+        fontsDir: captionAssPath || opts.lyricsAssPath
           ? opts.captionFontsDir ?? resolveBundledFontPaths().fontsDir
           : undefined,
         outputPath: compositedVideoPath,
@@ -1227,7 +1515,7 @@ export async function runRenderPipeline(
     }
   }
 
-  const finalizeRenderRouteReceipt = (finalVideoPath: string): string => {
+  const finalizeRenderRouteReceipt = (finalVideoPath: string, audioMixReportPath?: string): string => {
     const renderRouteReceiptPath = writeRenderRouteReceipt(outputDir, routeDecision, {
       baseAssemblyPath,
       effectiveAssemblyPath: currentVideoPath,
@@ -1239,6 +1527,19 @@ export async function runRenderPipeline(
       finalVideoPath,
       fontReceiptPath,
       operations: deliveryOperations,
+      sourceInputs: routeSourceInputs,
+      ...(stillCameraMotion.length > 0 ? { stillCameraMotion } : {}),
+      audioRenderPlan: sharedAudioPlan,
+      ...(opts.audioRenderPlanPath ? { audioRenderPlanPath: opts.audioRenderPlanPath } : {}),
+      ...(audioMixReportPath ? { audioMixReportPath } : {}),
+      ...(resolvedCaptionVisualTreatmentInput && captionVisualTreatmentInputPath ? {
+        captionVisualTreatment: {
+          inputPath: captionVisualTreatmentInputPath,
+          input: resolvedCaptionVisualTreatmentInput,
+          ...(resolvedTypographyPolicyPath ? { typographyPolicyPath: path.resolve(opts.projectDir, resolvedTypographyPolicyPath) } : {}),
+          ...(resolvedVisualTreatmentPatchPath ? { visualTreatmentPatchPath: path.resolve(opts.projectDir, resolvedVisualTreatmentPatchPath) } : {}),
+        },
+      } : {}),
       rendererVersions: {
         ...(routeDecision.visual_layers.some((layer) => layer.renderer === "hyperframes")
           ? { hyperframes: HYPERFRAMES_RENDERER_VERSION }
@@ -1256,6 +1557,7 @@ export async function runRenderPipeline(
   // 6. Audio mix (dialogue + optional BGM -> final_mix.wav). Both paths use
   // the same mastering contract and emit machine-readable evidence for QA.
   const finalMixPath = path.join(audioDir, "final_mix.wav");
+  let masteredMp3Path: string | undefined;
   const audioMixReportPath = path.join(logsDir, "audio-mix-report.json");
   const embeddedBgmAssetIds = timelineEmbeddedMusicAssetIds(timelineForMix);
   const preserveOriginalAudioLevel = shouldPreserveOriginalAudioLevel(timelineForMix) &&
@@ -1268,6 +1570,23 @@ export async function runRenderPipeline(
     materializeFileSync(currentVideoPath, finalVideoPath);
     deliveryOperations.push({ id: "final_video_materialize", kind: "stream_copy", codec: "h264" });
     const renderRouteReceiptPath = finalizeRenderRouteReceipt(finalVideoPath);
+    const renderReportPath = writeRenderReport({
+      outputDir,
+      projectDir: opts.projectDir,
+      timelinePath: opts.timelinePath,
+      captionApprovalPath: opts.captionApprovalPath,
+      typographyPolicyPath: resolvedTypographyPolicyPath ? path.resolve(opts.projectDir, resolvedTypographyPolicyPath) : undefined,
+      visualTreatmentPatchPath: resolvedVisualTreatmentPatchPath ? path.resolve(opts.projectDir, resolvedVisualTreatmentPatchPath) : undefined,
+      captionVisualTreatmentInputPath,
+      captionVisualTreatmentInput: resolvedCaptionVisualTreatmentInput,
+      routeDecision,
+      renderRouteReceiptPath,
+      finalVideoPath,
+      sequence: sequenceConfig,
+      durationFrames: secondsToFrames(readTimelineDurationSeconds(opts.timelinePath) ?? 0, frameRate),
+      ...(stillCameraMotion.length > 0 ? { stillCameraMotion } : {}),
+    });
+    logs.render_report = renderReportPath;
     logs["audio_mix"] = writeLog(logsDir, "audio_mix", "not_applicable: timeline has no audio or BGM; no audio stream fabricated");
     logs["final_mux"] = writeLog(logsDir, "final_mux", "Video-only final copied without fabricated audio");
     return {
@@ -1281,6 +1600,8 @@ export async function runRenderPipeline(
       logs,
       audioMixReportPath: "",
       renderRouteReceiptPath,
+      ...(captionVisualTreatmentInputPath ? { captionVisualTreatmentInputPath } : {}),
+      renderReportPath,
     };
   }
   if (!rawDialoguePath && !sharedAudioPlan) {
@@ -1295,12 +1616,17 @@ export async function runRenderPipeline(
       outputPaths: {
         rawDialoguePath: path.join(audioDir, "raw_dialogue.wav"),
         finalMixPath,
+        ...(sharedAudioPlan.strategy === "music_master"
+          && sharedAudioPlan.music_master?.audio_decision === "mastering"
+          ? { masteredMp3Path: path.join(audioDir, "music_master_320.mp3") }
+          : {}),
         reportPath: audioMixReportPath,
       },
       replaceExisting: true,
       workDirRoot: opts.bundleCacheDir,
     });
     rawDialoguePath = executed.rawDialoguePath;
+    masteredMp3Path = executed.masteredMp3Path;
     logs["audio_mix_report"] = executed.reportPath;
     logs["audio_mix"] = writeLog(
       logsDir,
@@ -1480,7 +1806,138 @@ export async function runRenderPipeline(
     logs["final_mux"] = logPath;
     throw new Error(`Final mux failed: ${String(err)}`);
   }
-  const renderRouteReceiptPath = finalizeRenderRouteReceipt(finalVideoPath);
+  // RFA-012 measures the encoded deliverable after muxing. This is machine
+  // evidence only; voice quality and mobile audition remain human fields.
+  try {
+    const timelineDurationSec = readTimelineDurationSeconds(opts.timelinePath);
+    const encodedResult = await measureEncodedAudioResult({
+      path: finalVideoPath,
+      ...(timelineDurationSec !== undefined
+        ? { expectedTimelineDurationSec: timelineDurationSec }
+        : {}),
+      humanAuditionRequired: sharedAudioPlan?.audio_measurement_requirements?.human_audition.required ?? true,
+      mastering: sharedAudioPlan
+        ? {
+            owner: sharedAudioPlan.final_mastering.owner ?? "shared_audio_render_plan",
+            stage: sharedAudioPlan.final_mastering.stage,
+            pass_count: sharedAudioPlan.final_mastering.count,
+            applied_processing: [
+              ...(sharedAudioPlan.dialogue.finish_scope === "a1_only"
+                ? ["existing_dialogue_finishing:a1_only"]
+                : []),
+              ...(sharedAudioPlan.final_mastering.count === 1
+                ? ["loudnorm:single_final_mastering"]
+                : []),
+            ],
+          }
+        : { owner: "legacy_mixer", stage: "legacy_route", pass_count: 1, applied_processing: [] },
+    });
+    if (audioMixReportPath && fs.existsSync(audioMixReportPath)) {
+      const report = JSON.parse(fs.readFileSync(audioMixReportPath, "utf8")) as import("../audio/mixer.js").AudioMixReport;
+      report.encoded_result = encodedResult;
+      if (sharedAudioPlan?.audio_delivery_profile) {
+        report.audio_delivery_profile = sharedAudioPlan.audio_delivery_profile;
+      }
+      if (sharedAudioPlan?.scene_audio_policy) {
+        report.scene_audio_policy = sharedAudioPlan.scene_audio_policy;
+      }
+      if (sharedAudioPlan?.audio_measurement_requirements) {
+        report.audio_measurement_requirements = sharedAudioPlan.audio_measurement_requirements;
+      }
+      if (sharedAudioPlan?.strategy === "music_master") {
+        if (!report.music_master) {
+          throw new Error("music_master final mux cannot be recorded without the executor receipt");
+        }
+        const finalMuxMeasurements = buildMusicMasterFinalMuxMeasurements(
+          report.music_master.measurements.input,
+          encodedResult,
+          report.music_master.measurements.tolerance,
+        );
+        const finalMuxToleranceValues: Array<[number | null, number]> = [
+          [
+            finalMuxMeasurements.delta.integrated_lufs_db,
+            finalMuxMeasurements.tolerance.integrated_lufs_db,
+          ],
+          [
+            finalMuxMeasurements.delta.lra_lu,
+            finalMuxMeasurements.tolerance.lra_lu,
+          ],
+          [
+            finalMuxMeasurements.delta.true_peak_dbtp,
+            finalMuxMeasurements.tolerance.true_peak_dbtp,
+          ],
+        ];
+        const isMastering = report.music_master.audio_decision === "mastering";
+        const exceedsTolerance = !isMastering && finalMuxMeasurements.status === "measured"
+          && finalMuxToleranceValues.some(([delta, tolerance]) =>
+            delta === null || !Number.isFinite(delta) || Math.abs(delta) > tolerance,
+          );
+        if (exceedsTolerance) {
+          throw new Error("music_master final mux exceeded the declared loudness/LRA/true-peak tolerance");
+        }
+        if (isMastering) {
+          if (finalMuxMeasurements.status !== "measured") {
+            throw new Error("music_master mastering final mux measurement is unavailable");
+          }
+          const finalIntegrated = encodedResult.loudness.integrated_lufs;
+          const finalTruePeak = encodedResult.loudness.true_peak_dbtp;
+          if (finalIntegrated === null || finalTruePeak === null
+            || Math.abs(finalIntegrated - MUSIC_MASTER_MVP_POLICY.loudnorm.target_lufs)
+              > MUSIC_MASTER_MVP_POLICY.loudnorm.loudness_tolerance_lufs
+            || finalTruePeak > MUSIC_MASTER_MVP_POLICY.loudnorm.acceptance_true_peak_dbtp) {
+            throw new Error("music_master mastering final mux is outside the fixed Issue #38 loudness acceptance target");
+          }
+        }
+        report.music_master = {
+          ...report.music_master,
+          final_mux: {
+            // buildFinalMuxArgs intentionally uses AAC for the video container;
+            // preserve is still truthful because source bytes remain preserved
+            // in final_mix and the unavoidable mux reencode is recorded here.
+            operation: "reencode",
+            codec: encodedResult.audio_stream.codec_name,
+            output_audio_hash: await hashDecodedAudioStream(finalVideoPath),
+            output_container_hash: hashFile(finalVideoPath),
+            measurements: finalMuxMeasurements,
+          },
+        };
+      }
+      validateArtifact(report, "audio-mix-report.schema.json");
+      fs.writeFileSync(audioMixReportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    }
+    logs["audio_encoded_qa"] = writeLog(
+      logsDir,
+      "audio_encoded_qa",
+      `Encoded audio QA status=${encodedResult.status} codec=${encodedResult.audio_stream.codec_name ?? "unknown"} integrated_lufs=${encodedResult.loudness.integrated_lufs ?? "unknown"} true_peak_dbtp=${encodedResult.loudness.true_peak_dbtp ?? "unknown"}`,
+    );
+  } catch (error) {
+    logs["audio_encoded_qa"] = writeLog(
+      logsDir,
+      "audio_encoded_qa",
+      `Encoded audio QA unavailable; no automated quality claim was made: ${String(error)}`,
+    );
+    if (sharedAudioPlan?.strategy === "music_master") {
+      throw new Error(`music_master final mux receipt failed closed: ${String(error)}`);
+    }
+  }
+  const renderRouteReceiptPath = finalizeRenderRouteReceipt(finalVideoPath, audioMixReportPath);
+  const renderReportPath = writeRenderReport({
+    outputDir,
+    projectDir: opts.projectDir,
+    timelinePath: opts.timelinePath,
+    captionApprovalPath: opts.captionApprovalPath,
+    typographyPolicyPath: resolvedTypographyPolicyPath ? path.resolve(opts.projectDir, resolvedTypographyPolicyPath) : undefined,
+    visualTreatmentPatchPath: resolvedVisualTreatmentPatchPath ? path.resolve(opts.projectDir, resolvedVisualTreatmentPatchPath) : undefined,
+    captionVisualTreatmentInputPath,
+    captionVisualTreatmentInput: resolvedCaptionVisualTreatmentInput,
+    routeDecision,
+    renderRouteReceiptPath,
+    finalVideoPath,
+    sequence: sequenceConfig,
+    durationFrames: secondsToFrames(readTimelineDurationSeconds(opts.timelinePath) ?? 0, frameRate),
+    ...(stillCameraMotion.length > 0 ? { stillCameraMotion } : {}),
+  });
+  logs.render_report = renderReportPath;
 
   return {
     baseAssemblyPath,
@@ -1488,10 +1945,13 @@ export async function runRenderPipeline(
     rawVideoPath,
     rawDialoguePath: rawDialoguePath ?? "",
     finalMixPath,
+    ...(masteredMp3Path ? { masteredMp3Path } : {}),
     finalVideoPath,
     sidecarPaths,
     logs,
     audioMixReportPath,
     renderRouteReceiptPath,
+    ...(captionVisualTreatmentInputPath ? { captionVisualTreatmentInputPath } : {}),
+    renderReportPath,
   };
 }

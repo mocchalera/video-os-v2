@@ -18,6 +18,10 @@ emotion_curve:
   - insight
   - close
 
+# Optional creator-short arc selector: personal_challenge | day_log.
+# Leave unset for the legacy path and for credibility-first interview/testimonial work.
+# narrative_mode: personal_challenge
+
 must_have:
   - one source-grounded hook
   - one evidence-backed insight

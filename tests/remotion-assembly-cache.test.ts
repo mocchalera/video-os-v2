@@ -1,16 +1,35 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
+vi.mock("@remotion/bundler", () => ({
+  bundle: vi.fn(async () => {
+    throw new Error("remotion-cache-miss-render-path");
+  }),
+}));
 import {
   createRemotionAssemblyFingerprint,
   readValidRemotionAssemblyCache,
   readValidRemotionLayerCache,
+  renderRemotionAssembly,
   stageSourceMapForRemotion,
 } from "../runtime/render/remotion/render-remotion.js";
+
+function sealLayerReceipt<T extends Record<string, unknown>>(receipt: T): T & { receipt_payload_sha256: string } {
+  return {
+    ...receipt,
+    receipt_payload_sha256: createHash("sha256").update(JSON.stringify(receipt)).digest("hex"),
+  };
+}
 import { materializeVerifiedStillSnapshots } from "../runtime/render/canonical-render-input.js";
+import {
+  REMOTION_OVERLAY_CAPABILITY_VERSION,
+  remotionCapabilityIdentityHash,
+} from "../runtime/render/remotion/overlay-capability.js";
 import type { TimelineIR } from "../runtime/compiler/types.js";
+
+const CAPABILITY_SHA = remotionCapabilityIdentityHash();
 
 function timeline(): TimelineIR {
   return {
@@ -122,9 +141,19 @@ describe("Remotion base assembly fingerprint", () => {
       assemblyCacheHit: false,
       font: { mode: "bundled", format: "woff2", sha256: "a", sourceSha256: "b", sizeBytes: 1, characterCount: 1, cacheHit: false },
     } as const;
-    const writeReceipt = (version: string, contentSha256: string, sizeBytes: number) => {
+    const writeReceipt = (
+      version: string,
+      contentSha256: string,
+      sizeBytes: number,
+      capability: { capability_version?: string; capability_sha256?: string } = {
+        capability_version: "remotion-overlay-capability/v1",
+        capability_sha256: CAPABILITY_SHA,
+      },
+      resolvedLayout: unknown[] = [],
+    ) => {
       fs.writeFileSync(receiptPath, JSON.stringify({
-        version, fingerprint, output: { contentSha256, sizeBytes }, result,
+        version, fingerprint, ...capability, resolved_layout: resolvedLayout,
+        output: { contentSha256, sizeBytes }, result,
       }));
     };
     const hash = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
@@ -132,6 +161,30 @@ describe("Remotion base assembly fingerprint", () => {
     fs.writeFileSync(output, "ORIGINAL");
     writeReceipt("remotion-assembly-cache/v2", hash("ORIGINAL"), 8);
     expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toMatchObject(result);
+    writeReceipt("remotion-assembly-cache/v2", hash("ORIGINAL"), 8, undefined, [
+      { element_id: "TITLE", clip_id: "TITLE", layout: { anchor: "center" } },
+    ]);
+    expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toMatchObject(result);
+
+    // Receipts predating the Issue #15 capability identity must not be
+    // accepted as cache hits.
+    fs.writeFileSync(receiptPath, JSON.stringify({
+      version: "remotion-assembly-cache/v2", fingerprint,
+      output: { contentSha256: hash("ORIGINAL"), sizeBytes: 8 }, result,
+    }));
+    expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toBeUndefined();
+    fs.writeFileSync(receiptPath, JSON.stringify({
+      version: "remotion-assembly-cache/v2", fingerprint,
+      capability_version: REMOTION_OVERLAY_CAPABILITY_VERSION,
+      capability_sha256: CAPABILITY_SHA,
+      output: { contentSha256: hash("ORIGINAL"), sizeBytes: 8 }, result,
+    }));
+    expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toBeUndefined();
+    writeReceipt("remotion-assembly-cache/v2", hash("ORIGINAL"), 8, {
+      capability_version: REMOTION_OVERLAY_CAPABILITY_VERSION,
+      capability_sha256: "0".repeat(64),
+    });
+    expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toBeUndefined();
 
     fs.writeFileSync(output, "FORGED!!");
     expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toBeUndefined();
@@ -144,6 +197,42 @@ describe("Remotion base assembly fingerprint", () => {
     fs.writeFileSync(output, "ORIGINAL");
     writeReceipt("remotion-assembly-cache/v1", hash("ORIGINAL"), 8);
     expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toBeUndefined();
+  });
+
+  it("rejects a capability-complete legacy receipt without resolved layout at the actual entrypoint", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-remotion-entrypoint-cache-"));
+    dirs.push(dir);
+    const timelinePath = path.join(dir, "05_timeline", "timeline.json");
+    const output = path.join(dir, "assembly.mp4");
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    const actualTimeline = timeline();
+    actualTimeline.tracks.video[0].clips = [];
+    actualTimeline.tracks.audio[0].clips = [];
+    fs.writeFileSync(timelinePath, JSON.stringify(actualTimeline));
+    const fingerprint = createRemotionAssemblyFingerprint(actualTimeline, {}, timelinePath);
+    const result = {
+      assemblyPath: output, durationInFrames: 0, fps: 24, fpsNum: 24, fpsDen: 1, width: 64, height: 64,
+      assemblyCacheHit: false,
+      font: { mode: "bundled", format: "woff2", sha256: "a", sourceSha256: "b", sizeBytes: 1, characterCount: 1, cacheHit: false },
+    } as const;
+    fs.writeFileSync(output, "ORIGINAL");
+    fs.writeFileSync(`${output}.remotion-cache.json`, JSON.stringify({
+      version: "remotion-assembly-cache/v2",
+      fingerprint,
+      capability_version: REMOTION_OVERLAY_CAPABILITY_VERSION,
+      capability_sha256: CAPABILITY_SHA,
+      output: {
+        contentSha256: createHash("sha256").update("ORIGINAL").digest("hex"),
+        sizeBytes: 8,
+      },
+      result,
+    }));
+
+    await expect(renderRemotionAssembly({
+      timelinePath,
+      sourceMap: {},
+      outputPath: output,
+    })).rejects.toThrow("remotion-cache-miss-render-path");
   });
 
   it("rejects Remotion alpha-layer reuse when the live media contract drifts", async () => {
@@ -188,15 +277,17 @@ describe("Remotion base assembly fingerprint", () => {
         cacheHit: false,
       },
     } as const;
-    fs.writeFileSync(receiptPath, JSON.stringify({
-      version: "remotion-layer-receipt/v2",
+    fs.writeFileSync(receiptPath, JSON.stringify(sealLayerReceipt({
+      version: "remotion-layer-receipt/v3",
+      state: "complete",
+      complete: true,
       renderer: "remotion",
       renderer_version: "4.0.452",
       fingerprint,
       overlay_sha256: createHash("sha256").update("overlay").digest("hex"),
       media,
       result,
-    }));
+    })));
     const input = {
       overlayPath,
       receiptPath,
@@ -216,6 +307,111 @@ describe("Remotion base assembly fingerprint", () => {
     await expect(readValidRemotionLayerCache({
       ...input,
       probeAlphaLayerImpl: async () => ({ ...media, has_alpha: false }),
+    })).resolves.toBeUndefined();
+  });
+
+  it("fails closed for partial, stale, tampered, wrong-generation, missing, zero-byte, and escaped layer cache", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-remotion-layer-fail-closed-"));
+    dirs.push(dir);
+    const cacheRoot = path.join(dir, "cache");
+    fs.mkdirSync(cacheRoot);
+    const overlayPath = path.join(cacheRoot, "element.webm");
+    const receiptPath = path.join(cacheRoot, "element.json");
+    const fingerprint = "f".repeat(64);
+    const generationId = `sha256:${"1".repeat(64)}`;
+    const bundleIdentity = "b".repeat(64);
+    const capabilitySha256 = "c".repeat(64);
+    const media = {
+      version: "alpha-layer-media/v1" as const,
+      codec_name: "vp9",
+      pixel_format: "yuva420p",
+      alpha_mode: "1",
+      has_alpha: true,
+      width: 640,
+      height: 360,
+      fps_num: 30,
+      fps_den: 1,
+      duration_frames: 30,
+      time_base: "1/1000",
+      audio_stream_count: 0,
+    };
+    const result = {
+      overlayPath, receiptPath, durationInFrames: 30, fps: 30, fpsNum: 30, fpsDen: 1,
+      width: 640, height: 360, elementCount: 1, layerCacheHit: false,
+      font: { mode: "bundled", format: "woff2", sha256: "a", sourceSha256: "b", sizeBytes: 1, characterCount: 1, cacheHit: false },
+    } as const;
+    const validReceipt = () => ({
+      version: "remotion-layer-receipt/v3",
+      state: "complete",
+      complete: true,
+      renderer: "remotion",
+      renderer_version: "4.0.452",
+      capability_sha256: capabilitySha256,
+      bundle_identity: bundleIdentity,
+      generation_id: generationId,
+      fingerprint,
+      overlay_sha256: createHash("sha256").update("overlay").digest("hex"),
+      media,
+      result,
+    });
+    const restore = () => {
+      fs.writeFileSync(overlayPath, "overlay");
+      fs.writeFileSync(receiptPath, JSON.stringify(sealLayerReceipt(validReceipt())));
+    };
+    restore();
+    const input = {
+      overlayPath,
+      receiptPath,
+      fingerprint,
+      cacheRoot,
+      expectedGenerationId: generationId,
+      expectedBundleIdentity: bundleIdentity,
+      expectedCapabilitySha256: capabilitySha256,
+      expected: { width: 640, height: 360, fpsNum: 30, fpsDen: 1, durationFrames: 30 },
+      probeAlphaLayerImpl: async () => media,
+    };
+    await expect(readValidRemotionLayerCache(input)).resolves.toMatchObject(result);
+
+    for (const mutate of [
+      (receipt: ReturnType<typeof validReceipt>) => { receipt.state = "partial"; },
+      (receipt: ReturnType<typeof validReceipt>) => { receipt.complete = false; },
+      (receipt: ReturnType<typeof validReceipt>) => { receipt.renderer_version = "4.0.453"; },
+      (receipt: ReturnType<typeof validReceipt>) => { receipt.generation_id = `sha256:${"2".repeat(64)}`; },
+      (receipt: ReturnType<typeof validReceipt>) => { receipt.capability_sha256 = "d".repeat(64); },
+      (receipt: ReturnType<typeof validReceipt>) => { receipt.bundle_identity = "e".repeat(64); },
+    ]) {
+      const receipt = validReceipt();
+      mutate(receipt);
+      fs.writeFileSync(receiptPath, JSON.stringify(sealLayerReceipt(receipt)));
+      await expect(readValidRemotionLayerCache(input)).resolves.toBeUndefined();
+    }
+
+    restore();
+    fs.appendFileSync(receiptPath, "x");
+    await expect(readValidRemotionLayerCache(input)).resolves.toBeUndefined();
+    restore();
+    const oneByteReceiptTamper = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+    oneByteReceiptTamper.result.elementCount = 2;
+    fs.writeFileSync(receiptPath, JSON.stringify(oneByteReceiptTamper));
+    await expect(readValidRemotionLayerCache(input)).resolves.toBeUndefined();
+    restore();
+    fs.writeFileSync(overlayPath, "overlaz");
+    await expect(readValidRemotionLayerCache(input)).resolves.toBeUndefined();
+    restore();
+    fs.writeFileSync(overlayPath, "");
+    await expect(readValidRemotionLayerCache(input)).resolves.toBeUndefined();
+    restore();
+    fs.rmSync(overlayPath);
+    await expect(readValidRemotionLayerCache(input)).resolves.toBeUndefined();
+
+    const outsidePath = path.join(dir, "outside.webm");
+    const outsideReceipt = path.join(dir, "outside.json");
+    fs.writeFileSync(outsidePath, "overlay");
+    fs.writeFileSync(outsideReceipt, JSON.stringify(sealLayerReceipt(validReceipt())));
+    await expect(readValidRemotionLayerCache({
+      ...input,
+      overlayPath: outsidePath,
+      receiptPath: outsideReceipt,
     })).resolves.toBeUndefined();
   });
 

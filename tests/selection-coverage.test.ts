@@ -4,6 +4,7 @@ import {
   CLUSTER_MIN_SELECTED_RATIO,
   DENSITY_MIN,
   analyzeSelectionCoverage,
+  productionDirectiveTarget,
 } from "../runtime/eval/selection-coverage.js";
 import type { SelectionCoverageSegment } from "../runtime/eval/selection-coverage.js";
 
@@ -182,5 +183,39 @@ describe("analyzeSelectionCoverage", () => {
     expect(report.must_have_coverage.every((c) => c.selectable === false)).toBe(true);
     expect(report.gaps.some((g) => g.startsWith("must_have uncertain:"))).toBe(false);
   });
-});
 
+  it.each([
+    ["撮影日テロップ（YYYY.MM形式）", "edit_blueprint.caption_policy"],
+    ["BGM「名前のない坂」全編使用", "edit_blueprint.music_policy"],
+    ["動画の声・環境音のミックス", "timeline.audio_policy"],
+    ["フェードアウトで終わる", "edit_blueprint.ending_policy"],
+  ] as const)("maps a pure production directive to its downstream policy: %s", (directive, target) => {
+    expect(productionDirectiveTarget(directive)).toBe(target);
+  });
+
+  it.each([
+    "全編でStrava UIが映るスマホ画面を使う",
+    "現地の環境音が入った素材を選ぶ",
+    "音楽を演奏する人物が画面に映る",
+    "既存の本人発話またはユーザー承認済みテロップ",
+  ])("keeps source-dependent and mixed must-haves selectable: %s", (mustHave) => {
+    const report = analyzeSelectionCoverage(selects([]), brief(10, [mustHave]), []);
+
+    expect(report.must_have_coverage).toEqual([{
+      item: mustHave,
+      matched: false,
+      selectable: true,
+      note: "low-confidence (cross-language)",
+    }]);
+    expect(report.gaps).toContain(`must_have uncertain: ${mustHave}`);
+  });
+
+  it("keeps an unknown general production sentence as hard selection coverage", () => {
+    const mustHave = "作品全体のテンポを気持ちよく整える";
+    const report = analyzeSelectionCoverage(selects([]), brief(10, [mustHave]), []);
+
+    expect(productionDirectiveTarget(mustHave)).toBeUndefined();
+    expect(report.must_have_coverage[0]).toMatchObject({ selectable: true, matched: false });
+    expect(report.gaps).toContain(`must_have uncertain: ${mustHave}`);
+  });
+});

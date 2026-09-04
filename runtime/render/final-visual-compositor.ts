@@ -25,6 +25,11 @@ export interface FinalVisualCompositorOptions {
   baseVideoPath: string;
   layers: FinalVisualLayer[];
   assPath?: string;
+  /**
+   * Optional second ASS (e.g. lyric telops) burned in the SAME encode via a
+   * chained subtitles filter — never a second lossy pass.
+   */
+  extraAssPath?: string;
   fontsDir?: string;
   outputPath: string;
   width: number;
@@ -93,6 +98,9 @@ export function buildFinalVisualCompositorArgs(
   if (options.assPath && !options.fontsDir) {
     throw new Error("Final visual compositor requires fontsDir when assPath is present");
   }
+  if (options.extraAssPath && !options.fontsDir) {
+    throw new Error("Final visual compositor requires fontsDir when extraAssPath is present");
+  }
 
   const layers = sortedLayers(options.layers);
   const args = ["-y", "-i", options.baseVideoPath];
@@ -146,6 +154,12 @@ export function buildFinalVisualCompositorArgs(
       `[${current}]subtitles=filename='${escapeFilterValue(options.assPath)}':fontsdir='${escapeFilterValue(options.fontsDir!)}'[captioned]`,
     );
     current = "captioned";
+  }
+  if (options.extraAssPath) {
+    filters.push(
+      `[${current}]subtitles=filename='${escapeFilterValue(options.extraAssPath)}':fontsdir='${escapeFilterValue(options.fontsDir!)}'[lyriced]`,
+    );
+    current = "lyriced";
   }
 
   for (const [index, layer] of layers.entries()) {

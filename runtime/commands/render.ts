@@ -1,10 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  packageCommand,
+  packageRenderCommand,
   type PackageCommandOptions,
   type PackageCommandResult,
 } from "./package.js";
+import { resolveDeliveryArtifactPathsStrict } from "../packaging/active-delivery.js";
 import { ProgressTracker } from "../progress.js";
 
 export interface RenderCommandResult extends PackageCommandResult {
@@ -15,14 +16,20 @@ export async function runRender(
   projectDir: string,
   options?: PackageCommandOptions,
 ): Promise<RenderCommandResult> {
+  // Authority FIRST: resolve the strict current pointer/identity before any
+  // progress file, then install the signal coordinator before the async
+  // package/render route can create assembler children.
+  const resolvedDelivery = resolveDeliveryArtifactPathsStrict(path.resolve(projectDir));
+  void resolvedDelivery;
   const pt = new ProgressTracker(projectDir, "render", 2);
-  const result = await packageCommand(projectDir, {
-    ...options,
-    commandName: "/render",
-    actorName: "render-video",
-    allowedStates: ["approved", "packaged"],
-    requireFinalRenderApproval: true,
-  });
+  let result: PackageCommandResult;
+  try {
+    result = await packageRenderCommand(projectDir, options);
+  } catch (error) {
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+    pt.fail("render", message);
+    throw error;
+  }
 
   if (!result.success) {
     if (result.error) {

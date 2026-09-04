@@ -72,9 +72,178 @@ describe("selection hard coverage", () => {
     ]);
     expect(report.unmet.some((item) => item.type === "must_have")).toBe(true);
   });
+
+  it("does not ground must_have coverage in a candidate for a missing canonical segment", () => {
+    const mustHave = "one source-grounded hook";
+    const stale = candidate("SEG_STALE", "cluster_a", { role: "hero", why: "hook opening source" });
+    stale.story_role = "hook";
+    stale.eligible_beats = ["b01_hook"];
+    stale.evidence = ["brief.must_have"];
+    const canonical = candidate("SEG_A1", "cluster_a", { role: "hero", why: "hook opening source" });
+    canonical.story_role = "hook";
+    canonical.eligible_beats = ["b01_hook"];
+    canonical.evidence = ["brief.must_have"];
+    const segments = [segment("SEG_A1", "cluster_a", { summary: "hook opening source" })];
+
+    const staleReport = evaluateSelectionCoverage(
+      { version: "1", project_id: "coverage-test", candidates: [stale] },
+      brief([mustHave]),
+      segments,
+    );
+    const canonicalReport = evaluateSelectionCoverage(
+      { version: "1", project_id: "coverage-test", candidates: [canonical] },
+      brief([mustHave]),
+      segments,
+    );
+
+    expect(staleReport.must_have).toEqual([
+      { item: mustHave, status: "unmet", matched_segment_ids: [] },
+    ]);
+    expect(canonicalReport.must_have).toEqual([
+      { item: mustHave, status: "met", matched_segment_ids: ["SEG_A1"] },
+    ]);
+  });
+
+  it("keeps duplicate, rejected, and stale candidates out of cluster counts", () => {
+    const report = evaluateSelectionCoverage(
+      {
+        version: "1",
+        project_id: "coverage-test",
+        candidates: [
+          candidate("SEG_A1", "outdoor_landscape"),
+          candidate("SEG_A1", "outdoor_landscape"),
+          rejectedCandidate("SEG_A2", "outdoor_landscape"),
+          candidate("SEG_STALE", "outdoor_landscape"),
+        ],
+      },
+      brief([]),
+      [
+        segment("SEG_A1", "outdoor_landscape"),
+        segment("SEG_A2", "outdoor_landscape"),
+        segment("SEG_A3", "outdoor_landscape"),
+      ],
+      {
+        config: {
+          min_candidates_per_cluster: 3,
+          cluster_sampling_scale: "none",
+          max_candidates_per_cluster: 3,
+        },
+      },
+    );
+
+    expect(report.status).toBe("failed");
+    expect(report.clusters[0]).toMatchObject({
+      selected_count: 1,
+      selected_segment_ids: ["SEG_A1"],
+      quality_rejected_segment_ids: ["SEG_A2"],
+    });
+    expect(report.unmet[0]).toMatchObject({
+      type: "cluster_minimum",
+      unused_segment_ids: ["SEG_A3"],
+    });
+  });
+
+  it.each([
+    "全編でStrava UIが映るスマホ画面を使う",
+    "現地の環境音が入った素材を選ぶ",
+    "音楽を演奏する人物が画面に映る",
+    "既存の本人発話またはユーザー承認済みテロップ",
+  ])("keeps source-dependent and mixed requirements in hard coverage: %s", (mustHave) => {
+    const report = evaluateSelectionCoverage(
+      { version: "1", project_id: "coverage-test", candidates: [] },
+      brief([mustHave]),
+      [],
+    );
+
+    expect(report.status).toBe("failed");
+    expect(report.must_have).toEqual([
+      { item: mustHave, status: "unmet", matched_segment_ids: [] },
+    ]);
+    expect(report.unmet).toContainEqual(expect.objectContaining({
+      type: "must_have",
+      must_have: mustHave,
+    }));
+  });
+
+  it("defers production directives instead of treating them as clip-selection gaps", () => {
+    const report = evaluateSelectionCoverage(
+      {
+        version: "1",
+        project_id: "coverage-test",
+        candidates: [candidate("SEG_A1", "cluster_a")],
+      },
+      brief([
+        "走行中に短いテロップを入れる",
+        "BGMを焼き込まない",
+        "動画の声・環境音のミックス",
+        "フェードアウトで終わる",
+      ]),
+      [segment("SEG_A1", "cluster_a")],
+    );
+
+    expect(report.status).toBe("met");
+    expect(report.must_have.every((item) => item.status === "met")).toBe(true);
+    expect(report.must_have.every((item) => item.matched_segment_ids.length === 0)).toBe(true);
+    expect(report.notes).toContain(
+      "4 production directive must_have items deferred to blueprint/timeline validation",
+    );
+  });
 });
 
 describe("triage hard coverage integration", () => {
+  it("supplements two deterministic non-rejected unused segments to a minimum of two", async () => {
+    const projectDir = createCoverageProject("deterministic-supplement", [], 2);
+    const calls: TriageAgentContext[] = [];
+    const agent = {
+      async run(ctx: TriageAgentContext) {
+        calls.push(copyContext(ctx));
+        return {
+          confirmed: true,
+          selects: selects([], "no initial selection"),
+        };
+      },
+    };
+
+    const result = await runTriage(projectDir, agent);
+    expect(result.success, JSON.stringify(result.error)).toBe(true);
+    const artifact = readSelects(projectDir);
+    expect(calls).toHaveLength(2);
+    expect(artifact.coverage?.status).toBe("met");
+    expect(artifact.candidates).toHaveLength(2);
+    expect(artifact.candidates.map((item) => item.segment_id)).toEqual(["SEG_0001", "SEG_0002"]);
+    expect(new Set(artifact.candidates.map((item) => item.candidate_id)).size).toBe(2);
+  });
+
+  it("keeps a cluster shortage blocked when every unused segment is rejected", async () => {
+    const projectDir = createCoverageProject("rejected-shortage", [], 2);
+    const allSegmentIds = analysisSegmentIds(projectDir);
+    const agent = {
+      async run() {
+        return {
+          confirmed: true,
+          selects: {
+            version: "1",
+            project_id: TRIAGE_PROJECT_ID,
+            candidates: allSegmentIds.map((segmentId, index) => index === 0
+              ? candidate(segmentId, "outdoor_landscape")
+              : rejectedCandidate(segmentId, "outdoor_landscape")),
+          },
+        };
+      },
+    };
+
+    const result = await runTriage(projectDir, agent);
+    const artifact = readSelects(projectDir);
+
+    expect(result.success).toBe(false);
+    expect(artifact.coverage?.status).toBe("failed");
+    expect(artifact.coverage?.unmet).toContainEqual(expect.objectContaining({
+      type: "cluster_minimum",
+      unused_segment_ids: [],
+    }));
+    expect(result.error?.code).toBe("GATE_CHECK_FAILED");
+  });
+
   it("feeds unmet clusters back once and accepts the repaired selection", async () => {
     const projectDir = createCoverageProject("retry-met");
     const calls: TriageAgentContext[] = [];
@@ -118,19 +287,19 @@ describe("triage hard coverage integration", () => {
     expect(result.error?.code).toBe("GATE_CHECK_FAILED");
     expect(result.promoted?.some((item) => item.endsWith("04_plan/selects_candidates.yaml"))).toBe(true);
     expect(artifact.coverage?.status).toBe("failed");
-    expect(artifact.coverage?.unmet.some((item) => item.type === "cluster_minimum")).toBe(true);
+    expect(artifact.coverage?.unmet.some((item) => item.type === "cluster_minimum")).toBe(false);
     expect(artifact.coverage?.unmet.some((item) => item.type === "must_have")).toBe(true);
   });
 });
 
-function createCoverageProject(name: string): string {
+function createCoverageProject(name: string, mustHaves = ["hero sunrise"], clusterMinimum?: number): string {
   const projectDir = fs.mkdtempSync(path.resolve(`test-selection-coverage-${name}-`));
   tempDirs.push(projectDir);
   fs.mkdirSync(path.join(projectDir, "01_intent"), { recursive: true });
   copyDirSync(path.resolve(SAMPLE_PROJECT, "03_analysis"), path.join(projectDir, "03_analysis"));
   fs.writeFileSync(
     path.join(projectDir, "01_intent/creative_brief.yaml"),
-    stringifyYaml(brief(["hero sunrise"])),
+    stringifyYaml(brief(mustHaves)),
     "utf-8",
   );
   fs.writeFileSync(
@@ -139,6 +308,19 @@ function createCoverageProject(name: string): string {
     "utf-8",
   );
   rewriteSampleSegmentsAsOneDenseCluster(projectDir);
+  if (clusterMinimum !== undefined) {
+    fs.writeFileSync(
+      path.join(projectDir, "analysis_policy.yaml"),
+      stringifyYaml({
+        selection: {
+          min_candidates_per_cluster: clusterMinimum,
+          cluster_sampling_scale: "none",
+          max_candidates_per_cluster: clusterMinimum,
+        },
+      }),
+      "utf-8",
+    );
+  }
   writeProjectState(projectDir, {
     version: 1,
     project_id: TRIAGE_PROJECT_ID,
@@ -175,17 +357,29 @@ function rewriteSampleSegmentsAsOneDenseCluster(projectDir: string): void {
 }
 
 function readSelects(projectDir: string): {
+  candidates: Array<{ segment_id: string; candidate_id?: string }>;
   coverage?: {
     status: string;
-    unmet: Array<{ type: string }>;
+    unmet: Array<{ type: string; unused_segment_ids?: string[] }>;
   };
 } {
   return parseYaml(fs.readFileSync(path.join(projectDir, "04_plan/selects_candidates.yaml"), "utf-8")) as {
+    candidates: Array<{ segment_id: string; candidate_id?: string }>;
     coverage?: {
       status: string;
-      unmet: Array<{ type: string }>;
+      unmet: Array<{ type: string; unused_segment_ids?: string[] }>;
     };
   };
+}
+
+function analysisSegmentIds(projectDir: string): string[] {
+  const parsed = JSON.parse(
+    fs.readFileSync(path.join(projectDir, "03_analysis/segments.json"), "utf-8"),
+  ) as { items?: Array<{ segment_id?: string }> };
+  return (parsed.items ?? [])
+    .map((item) => item.segment_id)
+    .filter((item): item is string => typeof item === "string" && item.length > 0)
+    .sort();
 }
 
 function brief(mustHave: string[]): CreativeBrief {

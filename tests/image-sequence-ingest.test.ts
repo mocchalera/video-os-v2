@@ -397,6 +397,51 @@ describe("EYE-070D1 image-sequence ingest and analysis", () => {
     expect(result.sourceLedger?.items.filter((item) => item.media_kind === "image")).toHaveLength(1);
   }, 30_000);
 
+  it("ingests dimension-incompatible auto-detected IMG stills independently", async () => {
+    const sourceDir = tempDir("numbered-stills-source");
+    const projectDir = tempDir("numbered-stills-project");
+    const fixtures = [
+      { filename: "IMG_9630.png", size: "601x1067", color: "red" },
+      { filename: "IMG_9631.png", size: "1080x1920", color: "green" },
+      { filename: "IMG_9632.png", size: "1080x1920", color: "blue" },
+    ];
+    for (const fixture of fixtures) {
+      execFileSync("ffmpeg", [
+        "-v", "error", "-y", "-f", "lavfi", "-i", `color=c=${fixture.color}:s=${fixture.size}`,
+        "-frames:v", "1", path.join(sourceDir, fixture.filename),
+      ]);
+    }
+
+    const result = await runPipeline({
+      sourceFiles: [sourceDir], projectDir, repoRoot: REPO_ROOT,
+      skipStt: true, skipVlm: true, skipPeak: true, skipMarlin: true, skipAppraiser: true,
+      skipBgmAnalysis: true,
+    });
+
+    expect(result.assetsJson.items).toHaveLength(3);
+    expect(result.assetsJson.items.every((asset) =>
+      asset.media_kind === "image" && asset.still_image !== undefined && asset.image_sequence === undefined
+    )).toBe(true);
+    expect(result.sourceLedger?.summary).toEqual({ requested: 3, ready: 3, unsupported: 0, failed: 0 });
+    expect(result.sourceLedger?.items.map((item) => item.requested_locator)).toEqual(
+      fixtures.map((fixture) => `external://${fixture.filename}`),
+    );
+    expect(result.sourceLedger?.items.map((item) => item.content_hash)).toEqual(
+      fixtures.map((fixture) => `sha256:${sha256FileHex(path.join(sourceDir, fixture.filename))}`),
+    );
+    expect(result.sourceMediaManifest?.items.every((item) =>
+      item.media_kind === "image" && item.ingest_status === "ready" && item.reason === null
+    )).toBe(true);
+    expect(result.analysisCoverageReport?.lanes.find((lane) => lane.lane_id === "source_manifest")).toMatchObject({
+      status: "ready",
+      consumer_impact: "none",
+    });
+    validateSchema("assets.schema.json", result.assetsJson);
+    validateSchema("source-ledger.schema.json", result.sourceLedger);
+    validateSchema("source-media-manifest.schema.json", result.sourceMediaManifest);
+    validateSchema("analysis-coverage-report.schema.json", result.analysisCoverageReport);
+  }, 30_000);
+
   it("fails a corrupt numbered frame as a sequence ingest error and removes the staged proxy", async () => {
     const sourceDir = tempDir("corrupt-source");
     const projectDir = tempDir("corrupt-project");
@@ -416,7 +461,7 @@ describe("EYE-070D1 image-sequence ingest and analysis", () => {
     expect(!fs.existsSync(sequenceRoot) || fs.readdirSync(sequenceRoot).length === 0).toBe(true);
   }, 30_000);
 
-  it("fails the logical sequence when one decodable frame has different dimensions", async () => {
+  it("falls back a dimension-incompatible auto-detected sequence to independent stills", async () => {
     const sourceDir = tempDir("dimensions-source");
     const projectDir = tempDir("dimensions-project");
     makePngSequence(sourceDir);
@@ -425,14 +470,20 @@ describe("EYE-070D1 image-sequence ingest and analysis", () => {
       "-frames:v", "1", path.join(sourceDir, "shot_0007.png"),
     ]);
 
-    await expect(runPipeline({
+    const result = await runPipeline({
       sourceFiles: [sourceDir], projectDir, repoRoot: REPO_ROOT,
       skipStt: true, skipVlm: true, skipPeak: true, skipMarlin: true, skipAppraiser: true,
-    })).rejects.toBeInstanceOf(SourceReadinessError);
-    const ledger = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/source_ledger.json"), "utf-8")) as {
-      items: Array<{ media_kind: string; reason: string | null }>;
-    };
-    expect(ledger.items.every((item) => item.media_kind === "sequence")).toBe(true);
-    expect(ledger.items[0].reason).toBe("image_sequence_frame_dimensions_mismatch:7");
+      skipBgmAnalysis: true,
+    });
+    expect(result.assetsJson.items).toHaveLength(12);
+    expect(result.assetsJson.items.every((item) =>
+      item.media_kind === "image" && item.still_image !== undefined && item.image_sequence === undefined
+    )).toBe(true);
+    expect(result.sourceLedger?.summary).toEqual({ requested: 12, ready: 12, unsupported: 0, failed: 0 });
+    expect(result.sourceLedger?.items.every((item) => item.media_kind === "image" && item.reason === null)).toBe(true);
+    expect(result.analysisCoverageReport?.lanes.find((lane) => lane.lane_id === "source_manifest")).toMatchObject({
+      status: "ready",
+      consumer_impact: "none",
+    });
   }, 30_000);
 });

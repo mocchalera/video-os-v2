@@ -105,6 +105,7 @@ describe("deterministic full-output QA", () => {
     });
 
     expect(result.status).toBe("verified");
+    expect(result.scans?.black).toEqual({ status: "complete", detections: [] });
     expect(ffmpegArgs).toEqual(expect.arrayContaining([
       "-xerror",
       "0:v:0",

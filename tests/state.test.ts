@@ -5,6 +5,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createRequire } from "node:module";
 import {
   reconcile,
+  reconcileCompiledTimelineState,
   snapshotArtifacts,
   reconstructState,
   detectInvalidation,
@@ -445,6 +446,25 @@ describe("additive schema updates", () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe("state reconcile", () => {
+  it("persists timeline_drafted at the verified compile boundary", () => {
+    const tmpDir = createTempProject("compile-boundary");
+    writeProjectState(tmpDir, {
+      version: 1,
+      project_id: "sample-mountain-reset",
+      current_state: "approved",
+      history: [],
+    });
+
+    const result = reconcileCompiledTimelineState(tmpDir, "compile-timeline", "/compile");
+    expect(result.reconciled_state).toBe("timeline_drafted");
+    expect(readProjectState(tmpDir)?.current_state).toBe("timeline_drafted");
+    expect(readProjectState(tmpDir)?.history?.at(-1)).toMatchObject({
+      from_state: "critique_ready",
+      to_state: "timeline_drafted",
+      trigger: "/compile",
+    });
+  });
+
   describe("snapshotArtifacts", () => {
     it("detects all artifacts in sample project", () => {
       const snapshot = snapshotArtifacts(path.resolve(SAMPLE_PROJECT));
@@ -1084,7 +1104,7 @@ describe("gate computation via reconcile", () => {
     expect(result.reconciled_state).toBe("media_analyzed");
   });
 
-  it("allows active analysis_override when manually edited analysis fails validation", () => {
+  it("does not allow analysis_override to bypass canonical schema validation", () => {
     const tmpDir = createTempProject("analysis-override-invalid-analysis");
     fs.rmSync(path.join(tmpDir, "04_plan"), { recursive: true });
     fs.rmSync(path.join(tmpDir, "05_timeline"), { recursive: true });
@@ -1108,8 +1128,8 @@ describe("gate computation via reconcile", () => {
     });
 
     const result = reconcile(tmpDir);
-    expect(result.gates.analysis_gate).toBe("partial_override");
-    expect(result.reconciled_state).toBe("media_analyzed");
+    expect(result.gates.analysis_gate).toBe("blocked");
+    expect(result.reconciled_state).toBe("intent_locked");
   });
 
   it("blocks manually edited invalid analysis without analysis_override", () => {
@@ -1132,6 +1152,56 @@ describe("gate computation via reconcile", () => {
     const result = reconcile(tmpDir);
     expect(result.gates.analysis_gate).toBe("blocked");
     expect(result.reconciled_state).toBe("intent_locked");
+  });
+
+  it("does not let ready coverage override an invalid canonical segments artifact", () => {
+    const coverage = JSON.parse(fs.readFileSync(
+      path.resolve("tests/fixtures/analysis_coverage_report/valid_ready_all_lanes.json"),
+      "utf-8",
+    ));
+    const tmpDir = createTempProject("analysis-invalid-ready-coverage", {
+      "03_analysis/analysis_coverage_report.json": coverage,
+    });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+    segments.invalid_cached_shape = true;
+    fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+
+    const previous = process.env.ENABLE_P1_MANIFEST_COVERAGE;
+    process.env.ENABLE_P1_MANIFEST_COVERAGE = "1";
+    try {
+      const result = reconcile(tmpDir);
+      expect(result.gates.analysis_gate).toBe("blocked");
+    } finally {
+      if (previous === undefined) delete process.env.ENABLE_P1_MANIFEST_COVERAGE;
+      else process.env.ENABLE_P1_MANIFEST_COVERAGE = previous;
+    }
+  });
+
+  it("keeps Gate 1 blocked when ready coverage is stale against the source manifest", () => {
+    const manifest = JSON.parse(fs.readFileSync(
+      path.resolve("tests/fixtures/source_media_manifest/valid_minimal.json"),
+      "utf-8",
+    ));
+    const coverage = JSON.parse(fs.readFileSync(
+      path.resolve("tests/fixtures/analysis_coverage_report/valid_ready_all_lanes.json"),
+      "utf-8",
+    ));
+    coverage.source_media_manifest_hash = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    const tmpDir = createTempProject("analysis-stale-ready-coverage", {
+      "02_media/source_media_manifest.json": manifest,
+      "03_analysis/analysis_coverage_report.json": coverage,
+    });
+
+    const previous = process.env.ENABLE_P1_MANIFEST_COVERAGE;
+    process.env.ENABLE_P1_MANIFEST_COVERAGE = "1";
+    try {
+      const result = reconcile(tmpDir);
+      expect(result.gates.analysis_gate).toBe("blocked");
+    } finally {
+      if (previous === undefined) delete process.env.ENABLE_P1_MANIFEST_COVERAGE;
+      else process.env.ENABLE_P1_MANIFEST_COVERAGE = previous;
+    }
   });
 
   it("computes review_gate from review_report", () => {

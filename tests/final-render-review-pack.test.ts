@@ -233,7 +233,7 @@ describe("final render review pack", () => {
       fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
       fs.writeFileSync(overlayPath, remotionBytes);
       writeJson(receiptPath, {
-        version: "remotion-layer-receipt/v2",
+        version: "remotion-layer-receipt/v3",
         renderer: "remotion",
         composite_stage: options.compositeStage,
         overlay_sha256: sha256(remotionBytes),

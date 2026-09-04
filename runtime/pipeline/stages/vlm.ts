@@ -8,7 +8,7 @@
  * vlmReduce                — merge VLM shards into segments/assets.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AssetItem } from "../../connectors/ffprobe.js";
@@ -17,9 +17,11 @@ import {
   type SamplingPolicy,
   type SegmentType,
   type VlmEnrichmentResult,
+  type VlmFinishReason,
   type VlmFrameGrounding,
   type VlmFn,
   type VlmPolicy,
+  type VlmRetryReason,
   type VlmVisualQuality,
   PROMPT_TEMPLATE_ID,
   VLM_CONNECTOR_VERSION,
@@ -27,6 +29,7 @@ import {
   computeFrameCount,
   computePromptHash,
   computeSampleTimestamps,
+  VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX,
   computeVlmRequestHash,
   enrichSegment,
   getAdaptiveSampleFps,
@@ -42,6 +45,7 @@ import {
   type FrameExecFileLike,
 } from "./grounded-frames.js";
 import { sha256FileHex, SourceContentIdentityCache } from "../../source-content-identity.js";
+import { hasTemporalVideo } from "../../artifacts/source-media-capabilities.js";
 import type { AssetsJson, SegmentsJson } from "../pipeline-types.js";
 import {
   reduceEditorialObservation,
@@ -53,8 +57,12 @@ import {
 // ── Constants ──────────────────────────────────────────────────────
 
 export const DEFAULT_VLM_CONCURRENCY = 3;
+export const VLM_M2_MAX_PROVIDER_REQUESTS = 2;
 export const VLM_CACHE_IDENTITY_VERSION = "grounded-vlm-cache-identity-v1";
-export const VLM_PROVENANCE_SCHEMA_VERSION = "vlm-provenance-v2";
+export const VLM_PROVENANCE_SCHEMA_VERSION = "vlm-provenance-v3";
+export const VLM_PARSE_FAILURE_DIAGNOSTICS_FILENAME = "vlm-parse-failure-diagnostics.json";
+export const VLM_PARSE_DIAGNOSTIC_WRITE_FAILED = "vlm_parse_diagnostic_write_failed";
+export const VLM_PARSE_DIAGNOSTIC_CLEANUP_FAILED = "vlm_parse_diagnostic_cleanup_failed";
 
 export function computeVlmCachePolicyHash(
   vlmPolicy: VlmPolicy,
@@ -80,6 +88,31 @@ const VLM_QUALITY_FLAGS = new Set([
   "interlaced",
   "letterboxed",
   "pillarboxed",
+]);
+
+const VLM_PROVENANCE_FINISH_REASONS: ReadonlySet<VlmFinishReason> = new Set([
+  "STOP",
+  "MAX_TOKENS",
+  "SAFETY",
+  "RECITATION",
+  "LANGUAGE",
+  "OTHER",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII",
+  "MALFORMED_FUNCTION_CALL",
+  "EOF",
+  "unrecognized",
+]);
+const VLM_PROVENANCE_RETRY_REASONS: ReadonlySet<VlmRetryReason> = new Set([
+  "truncated_json",
+  "no_candidate",
+  "no_text",
+  "no_json_span",
+  "json_syntax_error",
+  "schema_invalid",
+  "schema_empty",
+  "call_failure",
 ]);
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -149,6 +182,7 @@ export interface RunParallelVlmAnalysisOptions {
   policyHash?: string;
   sourceIdentityCache?: SourceContentIdentityCache;
   cacheDecisions?: ReadonlyMap<string, VlmCacheDecision>;
+  deadlineAtMs?: number;
 }
 
 export interface HydrateCachedVlmSegmentsOptions {
@@ -170,6 +204,46 @@ export interface VlmCacheDecision {
   status: "accepted" | "miss";
   reasons: string[];
 }
+
+export interface VlmParseFailureReceipt {
+  artifact_version: "vlm-parse-diagnostics-v1";
+  project_id: string;
+  entries: Array<{
+    asset_id: string;
+    segment_id: string;
+    media_kind: AssetItem["media_kind"] | null;
+    connector_version: string;
+    model_alias: string;
+    model_snapshot: string;
+    prompt_hash: string;
+    attempt_outcome: import("../../connectors/gemini-vlm.js").VlmParseDiagnostic["attempt_outcome"];
+    error_code: string;
+    attempt_index: number;
+    parse_stage?: import("../../connectors/gemini-vlm.js").VlmParseStage;
+    response_scope?: import("../../connectors/gemini-vlm.js").VlmParseDiagnostic["response_scope"];
+    json_error_offset?: number;
+    present_top_level_keys?: string[];
+    frame_count: number;
+    frame_set_content_sha256: string | null;
+    source_content_sha256: string | null;
+    cache_identity: string | null;
+    cache_decision: VlmFrameGrounding["cache_decision"] | null;
+    requested_output_tokens: number | null;
+    finish_reason: VlmFinishReason | null;
+    attempt_count: number | null;
+    retry_reason: VlmRetryReason | null;
+    response?: import("../../connectors/gemini-vlm.js").VlmResponseDiagnostic;
+  }>;
+}
+
+export type VlmDiagnosticPersistence =
+  | { status: "written" | "removed" | "absent" }
+  | {
+    status: "write_failed" | "cleanup_failed";
+    warning_code:
+      | typeof VLM_PARSE_DIAGNOSTIC_WRITE_FAILED
+      | typeof VLM_PARSE_DIAGNOSTIC_CLEANUP_FAILED;
+  };
 
 interface VlmAssetPlan {
   asset: AssetItem;
@@ -403,7 +477,7 @@ export async function runParallelVlmAnalysis(
   };
 
   for (const asset of options.assets) {
-    if (asset.audio_stream && !asset.video_stream) {
+    if (asset.media_kind !== "image" && asset.media_kind !== "sequence" && !hasTemporalVideo(asset)) {
       summary.skippedAssets += 1;
       emitProgress(asset, "skipped");
       continue;
@@ -437,18 +511,25 @@ export async function runParallelVlmAnalysis(
     livePlans.push({ asset, liveSegments });
   }
 
-  summary.analyzedAssets = livePlans.length;
-
-  const liveResults = await mapWithConcurrency(
-    livePlans,
+  // Finish fail-closed still grounding before starting deadline-bounded videos.
+  // filter() keeps the caller's order stable within both media classes.
+  const stillPlans = livePlans.filter((plan) => plan.asset.media_kind === "image");
+  const otherPlans = livePlans.filter((plan) => plan.asset.media_kind !== "image");
+  const runPlans = (plans: VlmAssetPlan[]) => mapVlmPlansUntilDeadline(
+    plans,
     options.concurrency ?? DEFAULT_VLM_CONCURRENCY,
+    options.deadlineAtMs,
     async (plan) => {
+      if (deadlineReached(options.deadlineAtMs)) {
+        return { shards: [], failure: undefined };
+      }
       emitProgress(plan.asset, "analyzing");
 
       const shards: VlmShard[] = [];
       const segmentErrors: string[] = [];
 
       for (const segment of plan.liveSegments) {
+        if (deadlineReached(options.deadlineAtMs)) break;
         try {
           const result = await analyzeSegmentWithRetry(segment, options);
           shards.push({ segment_id: segment.segment_id, media_kind: plan.asset.media_kind, result });
@@ -483,6 +564,10 @@ export async function runParallelVlmAnalysis(
       return { shards, failure };
     },
   );
+  const stillResults = await runPlans(stillPlans);
+  const otherResults = await runPlans(otherPlans);
+  const liveResults = [...stillResults, ...otherResults];
+  summary.analyzedAssets = liveResults.length;
 
   const shards: VlmShard[] = [];
   for (const result of liveResults) {
@@ -496,6 +581,55 @@ export async function runParallelVlmAnalysis(
   return { shards, summary };
 }
 
+type VlmPlanRunResult = {
+  shards: VlmShard[];
+  failure: VlmAssetFailure | undefined;
+};
+
+async function mapVlmPlansUntilDeadline(
+  plans: VlmAssetPlan[],
+  concurrency: number,
+  deadlineAtMs: number | undefined,
+  worker: (plan: VlmAssetPlan) => Promise<VlmPlanRunResult>,
+): Promise<VlmPlanRunResult[]> {
+  if (deadlineAtMs === undefined) return mapWithConcurrency(plans, concurrency, worker);
+  if (Date.now() >= deadlineAtMs) return [];
+  const deadline = deadlineAtMs;
+
+  const results = new Array<VlmPlanRunResult | undefined>(plans.length);
+  const limit = normalizeConcurrency(concurrency);
+  let nextIndex = 0;
+  let timedOut = false;
+  async function runWorker(): Promise<void> {
+    while (!timedOut && Date.now() < deadline) {
+      const index = nextIndex++;
+      if (index >= plans.length) return;
+      const result = await worker(plans[index]);
+      if (!timedOut && Date.now() <= deadline) results[index] = result;
+    }
+  }
+
+  const completion = Promise.all(
+    Array.from({ length: Math.min(limit, plans.length) }, () => runWorker()),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    completion,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        resolve();
+      }, Math.max(0, deadline - Date.now()));
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return results.filter((result): result is VlmPlanRunResult => result !== undefined);
+}
+
+function deadlineReached(deadlineAtMs: number | undefined): boolean {
+  return deadlineAtMs !== undefined && Date.now() >= deadlineAtMs;
+}
+
 // ── VLM Reduce ─────────────────────────────────────────────────────
 
 export function vlmReduce(
@@ -507,7 +641,11 @@ export function vlmReduce(
   segmentsOutputPath: string,
   assetsOutputPath: string,
   persistOutputs = true,
-): { segments: SegmentsJson; assets: AssetsJson } {
+): {
+  segments: SegmentsJson;
+  assets: AssetsJson;
+  diagnostic_persistence?: VlmDiagnosticPersistence;
+} {
   // Build lookup by segment_id
   const shardMap = new Map<string, VlmShard>();
   for (const shard of vlmShards) {
@@ -576,6 +714,12 @@ export function vlmReduce(
     if (!seg.provenance) {
       seg.provenance = {} as SegmentItem["provenance"];
     }
+    const requestedOutputTokens = safeVlmRequestedOutputTokens(
+      shard.result.requested_output_tokens,
+    );
+    const finishReason = safeVlmFinishReason(shard.result.finish_reason);
+    const attemptCount = safeVlmAttemptCount(shard.result.attempt_count);
+    const retryReason = safeVlmRetryReason(shard.result.retry_reason);
     const vlmProvenance = {
       stage: "vlm",
       method: "gemini_frame_bundle",
@@ -588,6 +732,9 @@ export function vlmReduce(
         frame_count: shard.result.frame_grounding?.frame_count ?? 0,
         sample_timestamps_us: shard.result.frame_grounding?.sample_timestamps_us ?? [],
         frame_cache_version: shard.result.frame_grounding?.frame_cache_version,
+        ...(requestedOutputTokens !== undefined
+          ? { requested_output_tokens: requestedOutputTokens }
+          : {}),
       }),
       model_alias: shard.result.model_alias,
       model_snapshot: shard.result.model_snapshot,
@@ -595,6 +742,12 @@ export function vlmReduce(
       prompt_hash: shard.result.prompt_hash,
       response_format: responseFormat,
       provenance_schema_version: VLM_PROVENANCE_SCHEMA_VERSION,
+      ...(requestedOutputTokens !== undefined
+        ? { requested_output_tokens: requestedOutputTokens }
+        : {}),
+      ...(finishReason !== undefined ? { finish_reason: finishReason } : {}),
+      ...(attemptCount !== undefined ? { attempt_count: attemptCount } : {}),
+      ...(retryReason !== undefined ? { retry_reason: retryReason } : {}),
       frame_count: shard.result.frame_grounding?.frame_count ?? 0,
       sample_timestamps_us: shard.result.frame_grounding?.sample_timestamps_us ?? [],
       requested_sample_timestamps_us:
@@ -651,12 +804,128 @@ export function vlmReduce(
     );
   }
 
+  let diagnosticPersistence: VlmDiagnosticPersistence | undefined;
   if (persistOutputs) {
     atomicWriteJson(segmentsOutputPath, segmentsJson);
     atomicWriteJson(assetsOutputPath, assetsJson);
+    diagnosticPersistence = persistVlmParseFailureReceipt(
+      vlmShards,
+      segmentsJson,
+      segmentsOutputPath,
+    );
   }
 
-  return { segments: segmentsJson, assets: assetsJson };
+  return {
+    segments: segmentsJson,
+    assets: assetsJson,
+    ...(diagnosticPersistence ? { diagnostic_persistence: diagnosticPersistence } : {}),
+  };
+}
+
+export function buildVlmParseFailureReceipt(
+  vlmShards: VlmShard[],
+  segmentsJson: SegmentsJson,
+): VlmParseFailureReceipt | undefined {
+  const segmentById = new Map(segmentsJson.items.map((segment) => [segment.segment_id, segment]));
+  const entries: VlmParseFailureReceipt["entries"] = [];
+  for (const shard of vlmShards) {
+    if (!shard.result.parse_diagnostics?.length) continue;
+    const segment = segmentById.get(shard.segment_id);
+    if (!segment) continue;
+    const grounding = shard.result.frame_grounding;
+    const frameHashes = grounding?.frame_content_sha256 ?? [];
+    const frameSetContentSha256 = frameHashes.length > 0
+      ? createHash("sha256").update(frameHashes.join("\n")).digest("hex")
+      : null;
+    for (const diagnostic of shard.result.parse_diagnostics) {
+      entries.push({
+        asset_id: segment.asset_id,
+        segment_id: segment.segment_id,
+        media_kind: shard.media_kind ?? null,
+        connector_version: VLM_CONNECTOR_VERSION,
+        model_alias: shard.result.model_alias,
+        model_snapshot: shard.result.model_snapshot,
+        prompt_hash: shard.result.prompt_hash,
+        attempt_outcome: diagnostic.attempt_outcome,
+        error_code: diagnostic.error_code,
+        attempt_index: diagnostic.attempt_index,
+        ...(diagnostic.parse_stage ? { parse_stage: diagnostic.parse_stage } : {}),
+        ...(diagnostic.response_scope ? { response_scope: diagnostic.response_scope } : {}),
+        ...(diagnostic.json_error_offset !== undefined
+          ? { json_error_offset: diagnostic.json_error_offset }
+          : {}),
+        ...(diagnostic.present_top_level_keys
+          ? { present_top_level_keys: [...diagnostic.present_top_level_keys].sort() }
+          : {}),
+        frame_count: grounding?.frame_count ?? 0,
+        frame_set_content_sha256: frameSetContentSha256,
+        source_content_sha256: grounding?.source_content_sha256 ??
+          grounding?.asset_source_content_sha256 ?? null,
+        cache_identity: grounding?.cache_identity ?? null,
+        cache_decision: grounding?.cache_decision ?? null,
+        requested_output_tokens: safeVlmRequestedOutputTokens(shard.result.requested_output_tokens) ??
+          safeVlmRequestedOutputTokens(diagnostic.response?.output_token_cap) ?? null,
+        finish_reason: diagnostic.response
+          ? safeVlmFinishReason(diagnostic.response.finish_reason) ?? null
+          : safeVlmFinishReason(shard.result.finish_reason) ?? null,
+        attempt_count: safeVlmAttemptCount(shard.result.attempt_count) ?? null,
+        retry_reason: safeVlmRetryReason(shard.result.retry_reason) ?? null,
+        ...(diagnostic.response ? { response: structuredClone(diagnostic.response) } : {}),
+      });
+    }
+  }
+  entries.sort((left, right) =>
+    left.asset_id.localeCompare(right.asset_id) ||
+    left.segment_id.localeCompare(right.segment_id) ||
+    left.attempt_index - right.attempt_index
+  );
+  return entries.length > 0
+    ? { artifact_version: "vlm-parse-diagnostics-v1", project_id: segmentsJson.project_id, entries }
+    : undefined;
+}
+
+function persistVlmParseFailureReceipt(
+  vlmShards: VlmShard[],
+  segmentsJson: SegmentsJson,
+  segmentsOutputPath: string,
+): VlmDiagnosticPersistence {
+  const receipt = buildVlmParseFailureReceipt(vlmShards, segmentsJson);
+  const receiptPath = path.join(
+    path.dirname(segmentsOutputPath),
+    VLM_PARSE_FAILURE_DIAGNOSTICS_FILENAME,
+  );
+  if (!receipt) {
+    if (!fs.existsSync(receiptPath)) return { status: "absent" };
+    try {
+      fs.unlinkSync(receiptPath);
+      return { status: "removed" };
+    } catch {
+      console.warn(`[vlm] ${VLM_PARSE_DIAGNOSTIC_CLEANUP_FAILED}`);
+      return {
+        status: "cleanup_failed",
+        warning_code: VLM_PARSE_DIAGNOSTIC_CLEANUP_FAILED,
+      };
+    }
+  }
+
+  const tempPath = `${receiptPath}.tmp.${process.pid}.${randomUUID()}`;
+  try {
+    fs.writeFileSync(tempPath, JSON.stringify(receipt, null, 2));
+    fs.renameSync(tempPath, receiptPath);
+    return { status: "written" };
+  } catch {
+    try {
+      fs.unlinkSync(tempPath);
+    } catch {
+      // The exact task-created temp either never existed or could not be
+      // removed. Never inspect or delete any broader path here.
+    }
+    console.warn(`[vlm] ${VLM_PARSE_DIAGNOSTIC_WRITE_FAILED}`);
+    return {
+      status: "write_failed",
+      warning_code: VLM_PARSE_DIAGNOSTIC_WRITE_FAILED,
+    };
+  }
 }
 
 function groundedVlmObservation(shard: VlmShard, segment: SegmentItem): ObservationContribution {
@@ -806,6 +1075,9 @@ async function analyzeSegmentWithRetry(
       sourceIdentityCache: options.sourceIdentityCache,
       execFileImpl: options.frameExecFileImpl,
     });
+  if (deadlineReached(options.deadlineAtMs)) {
+    return makeFailedResult(options.vlmPolicy, "visual_stage_deadline_exceeded");
+  }
   const frameGrounding: VlmFrameGrounding = {
     frame_count: frames.framePaths.length,
     verified_frame_paths: frames.framePaths.map((framePath) => path.resolve(framePath)),
@@ -854,10 +1126,21 @@ async function analyzeSegmentWithRetry(
     );
   }
   const transcriptContext = segment.transcript_excerpt || undefined;
+  let providerRequestCount = 0;
   const retryingVlmFn: VlmFn = (retryFramePaths, prompt, callOptions) =>
     withRateLimitRetry(
-      () => options.vlmFn(retryFramePaths, prompt, callOptions),
-      options.retryPolicy,
+      () => {
+        if (deadlineReached(options.deadlineAtMs)) {
+          throw new Error("visual_stage_deadline_exceeded");
+        }
+        providerRequestCount += 1;
+        return options.vlmFn(retryFramePaths, prompt, callOptions);
+      },
+      // M2 reserves the second request for the existing one-shot schema/parse
+      // repair. Keep withRateLimitRetry's general 429 behavior unchanged for
+      // other callers, while preventing per-call 429 retries from multiplying
+      // the M2 provider-request contract.
+      { ...options.retryPolicy, maxRetries: 0 },
       options.sleepFn,
     );
 
@@ -872,6 +1155,7 @@ async function analyzeSegmentWithRetry(
   );
   return {
     ...result,
+    attempt_count: providerRequestCount,
     ...(!result.success && frameGrounding.cache_decision_reasons?.length
       ? {
         error: `${result.error ?? "vlm_failed"};cache_invalidated:${frameGrounding.cache_decision_reasons.join(",")}`,
@@ -1033,13 +1317,40 @@ function resolveExpectedVlmCacheIdentity(
 }
 
 function markAcceptedProvenance(
-  provenance: Record<string, string | number | string[] | number[]>,
-): Record<string, string | number | string[] | number[]> {
+  provenance: Record<string, string | number | string[] | number[] | null>,
+): Record<string, string | number | string[] | number[] | null> {
   return {
     ...provenance,
     cache_decision: "accepted",
     cache_decision_reasons: ["cache_identity_match", "verified_frame_cache_match"],
   };
+}
+
+function safeVlmRequestedOutputTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 &&
+      value <= VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX
+    ? value
+    : undefined;
+}
+
+function safeVlmAttemptCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 2
+    ? value
+    : undefined;
+}
+
+function safeVlmFinishReason(value: unknown): VlmFinishReason | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" && VLM_PROVENANCE_FINISH_REASONS.has(value as VlmFinishReason)
+    ? value as VlmFinishReason
+    : undefined;
+}
+
+function safeVlmRetryReason(value: unknown): VlmRetryReason | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" && VLM_PROVENANCE_RETRY_REASONS.has(value as VlmRetryReason)
+    ? value as VlmRetryReason
+    : undefined;
 }
 
 function uniqueStrings(values: string[]): string[] {

@@ -202,7 +202,6 @@ npx tsx scripts/analyze.ts ./footage/*.mp4 \
 ## 出力 artifact
 
 - `.env.local` ただし local-only。**絶対に commit しない**
-- `node_modules/`
 - `projects/demo/05_timeline/timeline.json` ただし `npm run demo` 実行時
 - `projects/<project>/03_analysis/*` ただし初回 analyze 実行時
 

@@ -1,0 +1,45 @@
+{
+  "version": "framing-policy/v1",
+  "policy_id": "anonymous-framing-policy-v1",
+  "checks": {
+    "person": { "min_confidence": 0.45 },
+    "head": { "min_confidence": 0.45, "eye_y_ratio": 0.68 },
+    "hand": {
+      "min_confidence": 0.35,
+      "max_zoom": 1.15,
+      "safe_rect": { "left": 0.05, "top": 0.06, "right": 0.95, "bottom": 0.94 }
+    },
+    "look_room": {
+      "yaw_threshold_radians": 0.12,
+      "minimum_zoom_when_looking": 1.06,
+      "positive_yaw_target_x": 0.42,
+      "negative_yaw_target_x": 0.58,
+      "neutral_target_x": 0.5,
+      "minimum_margin": 0.08
+    },
+    "headroom": {
+      "minimum_top_margin": 0.04,
+      "target_eye_y": 0.64
+    }
+  },
+  "modes": {
+    "wide": { "max_zoom": 1.0, "target_head_height": 0.2 },
+    "punch": { "max_zoom": 1.3, "target_head_height": 0.34 },
+    "hold": { "max_zoom": 1.15, "target_head_height": 0.28 }
+  },
+  "transform": { "max_pan_fraction": 0.96 },
+  "confidence": {
+    "coverage_weight": 0.5,
+    "observation_weight": 0.3,
+    "stability_weight": 0.2,
+    "stability_reference_span": 0.2,
+    "safe_degrade_multiplier": 0.75
+  },
+  "degrade": {
+    "missing_evidence": "manual_fallback",
+    "failed_check": "safe_degrade",
+    "fallback_mode": "wide",
+    "identity_zoom": 1,
+    "zoom_step": 0.02
+  }
+}

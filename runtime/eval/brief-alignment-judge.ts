@@ -11,6 +11,7 @@ import {
 import { clamp01 } from "./matching.js";
 import {
   BRIEF_ALIGNMENT_AXES,
+  UNSUPPORTED_CONFIDENCE_CEILING,
   type AxisScore,
   type BriefAlignmentAxis,
 } from "./brief-alignment-types.js";
@@ -89,12 +90,24 @@ function toStringArray(value: unknown): string[] {
 
 function parseAxis(value: unknown): AxisScore {
   const raw = (value ?? {}) as Record<string, unknown>;
+  const evidence = toStringArray(raw.evidence);
+  let confidence = Math.round(clamp01(toNumber(raw.confidence, 0.5)) * 1000) / 1000;
+  let confidence_basis: AxisScore["confidence_basis"];
+  if (evidence.length === 0) {
+    // An axis without evidence cannot carry a high-confidence claim: cap it and
+    // record the basis as unmeasured so downstream consumers can tell.
+    confidence = Math.min(confidence, UNSUPPORTED_CONFIDENCE_CEILING);
+    confidence_basis = "unmeasured";
+  } else {
+    confidence_basis = "measured";
+  }
   return {
     score: Math.round(clamp01(toNumber(raw.score)) * 1000) / 1000,
-    confidence: Math.round(clamp01(toNumber(raw.confidence, 0.5)) * 1000) / 1000,
+    confidence,
     judge_source: "llm_artifact",
-    evidence: toStringArray(raw.evidence),
+    evidence,
     gaps: toStringArray(raw.gaps),
+    confidence_basis,
   };
 }
 

@@ -18,6 +18,7 @@ import * as crypto from "node:crypto";
 import * as child_process from "node:child_process";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { TimelineIR, ClipOutput, TrackOutput } from "../compiler/types.js";
+import type { HumanCorrectionApprovalBinding } from "../state/reconcile.js";
 import {
   BRIDGE_VERSION,
   BRIDGE_TIMEOUT_MS,
@@ -42,12 +43,23 @@ export interface HandoffExportInput {
     status: "clean" | "creative_override";
     approved_by: string;
     approved_at: string;
-    artifact_versions?: Record<string, string>;
+    artifact_versions?: HandoffArtifactVersions;
   };
   profilePath: string;
   sourceMap: SourceMapEntry[];
   pythonPath?: string;
   reviewBundleRef?: { export_manifest_path: string };
+}
+
+export interface HandoffArtifactVersions {
+  timeline_version?: string;
+  review_report_version?: string;
+  review_patch_hash?: string;
+  human_notes_hash?: string;
+  style_hash?: string;
+  base_timeline_version?: string;
+  editorial_timeline_hash?: string;
+  human_correction_approval?: HumanCorrectionApprovalBinding;
 }
 
 export interface SourceMapEntry {
@@ -87,7 +99,7 @@ export interface HandoffManifest {
     status: "clean" | "creative_override";
     approved_by: string;
     approved_at: string;
-    artifact_versions?: Record<string, string>;
+    artifact_versions?: HandoffArtifactVersions;
   };
   review_bundle_ref?: { export_manifest_path: string };
   capability_profile: {

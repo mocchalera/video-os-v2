@@ -24,6 +24,19 @@ export interface DeterministicOutputQAResult {
   height?: number;
   issues: DeterministicOutputQAIssue[];
   reason?: string;
+  scans?: DeterministicOutputQAScans;
+}
+
+export interface DeterministicOutputQAScanDetection {
+  start_sec: number;
+  end_sec: number;
+}
+
+export interface DeterministicOutputQAScans {
+  decode: { status: "complete" | "incomplete" };
+  black: { status: "complete" | "incomplete"; detections: DeterministicOutputQAScanDetection[] };
+  freeze: { status: "complete" | "incomplete"; detections: DeterministicOutputQAScanDetection[] };
+  layout_inset: { status: "complete" | "incomplete"; detections: DeterministicOutputQAScanDetection[] };
 }
 
 export interface DeterministicOutputQAAllowedRange {
@@ -414,6 +427,7 @@ export function runDeterministicOutputQA(
       width: metadata.width,
       height: metadata.height,
       issues,
+      scans: incompleteScans(),
     };
   }
 
@@ -433,6 +447,7 @@ export function runDeterministicOutputQA(
           detail: "ffmpeg reported a decode error during the full-output scan",
         },
       ],
+      scans: incompleteScans(),
     };
   }
   const scanProgress = parseScanProgress(scan.stdout);
@@ -454,11 +469,19 @@ export function runDeterministicOutputQA(
       width: metadata.width,
       height: metadata.height,
       issues,
+      scans: incompleteScans(),
     };
   }
 
   const allowedRanges = options.allowedRanges ?? [];
-  for (const region of parseBlackRegions(scanLog)) {
+  const blackRegions = parseBlackRegions(scanLog);
+  const freezeRegions = parseFreezeRegions(scanLog, metadata.durationSec);
+  const insetRegions = detectFourSidedInsets(
+    parseCropSamples(scanLog),
+    metadata.width,
+    metadata.height,
+  );
+  for (const region of blackRegions) {
     if (
       region.endSec - region.startSec >= MIN_BLACK_DURATION_SEC &&
       !isAllowed("black", region, allowedRanges)
@@ -466,7 +489,7 @@ export function runDeterministicOutputQA(
       issues.push(timedIssue("black", region, "black output region"));
     }
   }
-  for (const region of parseFreezeRegions(scanLog, metadata.durationSec)) {
+  for (const region of freezeRegions) {
     if (
       region.endSec - region.startSec >= MIN_FREEZE_DURATION_SEC &&
       !isAllowed("freeze", region, allowedRanges)
@@ -474,13 +497,7 @@ export function runDeterministicOutputQA(
       issues.push(timedIssue("freeze", region, "frozen output region"));
     }
   }
-  for (
-    const region of detectFourSidedInsets(
-      parseCropSamples(scanLog),
-      metadata.width,
-      metadata.height,
-    )
-  ) {
+  for (const region of insetRegions) {
     if (!isAllowed("inset", region, allowedRanges)) {
       issues.push(timedIssue(
         "inset",
@@ -497,6 +514,25 @@ export function runDeterministicOutputQA(
     width: metadata.width,
     height: metadata.height,
     issues,
+    scans: {
+      decode: { status: "complete" },
+      black: { status: "complete", detections: scanDetections(blackRegions) },
+      freeze: { status: "complete", detections: scanDetections(freezeRegions) },
+      layout_inset: { status: "complete", detections: scanDetections(insetRegions) },
+    },
+  };
+}
+
+function scanDetections(regions: TimedRegion[]): DeterministicOutputQAScanDetection[] {
+  return regions.map((region) => ({ start_sec: region.startSec, end_sec: region.endSec }));
+}
+
+function incompleteScans(): DeterministicOutputQAScans {
+  return {
+    decode: { status: "incomplete" },
+    black: { status: "incomplete", detections: [] },
+    freeze: { status: "incomplete", detections: [] },
+    layout_inset: { status: "incomplete", detections: [] },
   };
 }
 
@@ -651,7 +687,7 @@ function parseRate(value: unknown): number | null {
 }
 
 function incompleteResult(reason: string): DeterministicOutputQAResult {
-  return { status: "incomplete", reason, issues: [] };
+  return { status: "incomplete", reason, issues: [], scans: incompleteScans() };
 }
 
 function commandFailureDetail(

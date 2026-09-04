@@ -1,0 +1,11 @@
+# Issue 33 still-camera-motion/v1 worker — optional, pinned requirements.
+# Provision a venv to enable true subpixel still camera motion rendering
+# (NumPy Float64 Lanczos; cv2 is used for image decode/color conversion).
+# Without these, requesting a camera
+# motion preset is an explicit capability failure — never an integer-pixel
+# fallback.
+#
+#   python3 -m venv python/.venv-still-camera
+#   python/.venv-still-camera/bin/pip install -r python/requirements-still-camera.txt
+opencv-python-headless==5.0.0.93
+numpy==2.0.2

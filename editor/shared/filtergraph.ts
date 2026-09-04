@@ -246,6 +246,13 @@ export interface TransitionVideoSpec {
   fadeOutDurationSec?: number;
   /** fade-in duration on incoming clip in seconds (for fade_to_black). */
   fadeInDurationSec?: number;
+  /**
+   * Issue #34 preset styling applied on top of the xfade window:
+   * - film_crossfade: standard linear dissolve (no extra styling)
+   * - light_leak_flash: additive amber/cyan radial flare over the window
+   * - dreamy_focus_blur: gaussian blur dissolve over the window
+   */
+  preset?: "film_crossfade" | "light_leak_flash" | "dreamy_focus_blur";
 }
 
 /** Audio component of a transition. */
@@ -278,6 +285,51 @@ export function buildTransitionSpec(
   const durSec = transition.durationFrames / fps;
 
   switch (transition.type) {
+    // Issue #34 presets share the crossfade join mechanics (xfade=fade over
+    // the physically overlapped A-tail/B-head window) and differ only in the
+    // styling applied on top of that window.
+    case "film_crossfade":
+      return {
+        video: {
+          method: "xfade",
+          xfadeDurationSec: durSec,
+          xfadeTransition: "fade",
+          preset: "film_crossfade",
+        },
+        audio: {
+          method: "acrossfade",
+          crossfadeDurationSec: durSec,
+        },
+      };
+
+    case "light_leak_flash":
+      return {
+        video: {
+          method: "xfade",
+          xfadeDurationSec: durSec,
+          xfadeTransition: "fade",
+          preset: "light_leak_flash",
+        },
+        audio: {
+          method: "acrossfade",
+          crossfadeDurationSec: durSec,
+        },
+      };
+
+    case "dreamy_focus_blur":
+      return {
+        video: {
+          method: "xfade",
+          xfadeDurationSec: durSec,
+          xfadeTransition: "fade",
+          preset: "dreamy_focus_blur",
+        },
+        audio: {
+          method: "acrossfade",
+          crossfadeDurationSec: durSec,
+        },
+      };
+
     case "crossfade":
       return {
         video: {
@@ -333,17 +385,122 @@ export function buildTransitionSpec(
   }
 }
 
+// ── Issue #34 preset styling (flash / blur windows) ─────────────────
+
+/** Geometry context needed to style preset transition windows. */
+export interface TransitionGraphContext {
+  width: number;
+  height: number;
+  /** Exact fps as a number (fpsNum / fpsDen). */
+  fps: number;
+  /** Rational fps string (e.g. "30000/1001"); preferred for lavfi sources. */
+  fpsRational?: string;
+}
+
+/** A styled transition window in output-timeline frame coordinates. */
+interface StyledWindow {
+  preset: "light_leak_flash" | "dreamy_focus_blur";
+  startFrame: number;
+  endFrame: number;
+  durationSec: number;
+}
+
+/**
+ * Frame-exact amber/cyan radial light-leak flare with a triangle envelope.
+ *
+ * Generated procedurally (geq on a black color source) and screen-blended
+ * additively over an extended window. The envelope ramps up across the A/B
+ * blend window, PEAKS exactly on the seam frame (the chorus head — the first
+ * frame of the incoming clip's original content), and decays to zero one
+ * window-length later, so the emission coincides with the musical hit and
+ * neither boundary pops: intensity is 0 at window start and at window end +
+ * decay. Implemented with two chained fades (in over the blend, out over the
+ * tail), which are frame-exact.
+ */
+function buildFlashFlareWindowParts(
+  window: StyledWindow,
+  windowIndex: number,
+  inputLabel: string,
+  context: TransitionGraphContext,
+): string[] {
+  const { width, height } = context;
+  const fpsR = context.fpsRational ?? String(context.fps);
+  const a = `f${windowIndex}`;
+  const blendFrames = window.endFrame - window.startFrame;
+  const tailFrames = blendFrames;
+  const flashEndFrame = window.endFrame + tailFrames;
+  const blendSec = window.durationSec;
+  // Normalized radial distance: 0 at frame center, 1 at ~0.35·diagonal.
+  const dist = `hypot(X-W/2\\,Y-H/2)/(0.35*hypot(W\\,H))`;
+  const core = `exp(-4*pow(${dist}\\,2))`;
+  const rim = `exp(-10*pow(${dist}-1\\,2))`;
+  const geq =
+    `geq=r='240*${core}+30*${rim}':g='165*${core}+95*${rim}':b='55*${core}+130*${rim}'`;
+  return [
+    `${inputLabel}split=3[${a}0][${a}1][${a}2]`,
+    `[${a}0]trim=end_frame=${window.startFrame},setpts=PTS-STARTPTS[${a}a]`,
+    `[${a}1]trim=start_frame=${window.startFrame}:end_frame=${flashEndFrame},setpts=PTS-STARTPTS,format=rgb24[${a}b]`,
+    `[${a}2]trim=start_frame=${flashEndFrame},setpts=PTS-STARTPTS[${a}c]`,
+    `color=c=black:s=${width}x${height}:r=${fpsR}:d=${(blendSec * 2).toFixed(6)},format=rgb24,${geq},fade=t=in:st=0:d=${blendSec.toFixed(6)},fade=t=out:st=${blendSec.toFixed(6)}:d=${blendSec.toFixed(6)}[${a}f]`,
+    `[${a}b][${a}f]blend=all_mode=screen:shortest=1,format=yuv420p[${a}w]`,
+    `[${a}a][${a}w][${a}c]concat=n=3:v=1:a=0[vout${windowIndex + 1}]`,
+  ];
+}
+
+/**
+ * Frame-exact gaussian blur window with a smooth triangle envelope.
+ *
+ * The blended A/B melt goes sharp→soft→sharp: blur strength is 0 on the
+ * first and last window frames (no boundary pops against the surrounding
+ * shots) and peaks mid-window. Implemented by blending the sharp window with
+ * a blurred copy using the animated mix factor 1-|2N/(D-1)-1| (N = window
+ * frame index), which is exactly linear in and out.
+ */
+function buildBlurWindowParts(
+  window: StyledWindow,
+  windowIndex: number,
+  inputLabel: string,
+  context: TransitionGraphContext,
+): string[] {
+  const sigma = Math.max(2, Math.round((8 * context.height) / 1080 * 1000) / 1000);
+  const a = `b${windowIndex}`;
+  const blendFrames = window.endFrame - window.startFrame;
+  // Triangle mix over the window frames: 0 at the first window frame, 1 at
+  // mid-window, 0 at the last. ffmpeg's blend N variable starts at 1 (not
+  // 0), so the index is offset by one: with N in [1, D], 2*(N-1)/(D-1)-1
+  // spans [-1, 1] and the mix is exactly linear in and out. D is always
+  // >= 2 (the caller rejects degenerate windows), so the divisor is >= 1.
+  const triangle = `(1-abs(2*(N-1)/${blendFrames - 1}-1))`;
+  return [
+    `${inputLabel}split=3[${a}0][${a}1][${a}2]`,
+    `[${a}0]trim=end_frame=${window.startFrame},setpts=PTS-STARTPTS[${a}a]`,
+    `[${a}1]trim=start_frame=${window.startFrame}:end_frame=${window.endFrame},setpts=PTS-STARTPTS[${a}s]`,
+    `[${a}2]trim=start_frame=${window.endFrame},setpts=PTS-STARTPTS[${a}c]`,
+    `[${a}s]split=2[${a}k][${a}ks]`,
+    `[${a}ks]gblur=sigma=${sigma.toFixed(3)}[${a}b]`,
+    `[${a}k][${a}b]blend=all_expr='A*(1-${triangle})+B*${triangle}'[${a}w]`,
+    `[${a}a][${a}w][${a}c]concat=n=3:v=1:a=0[vout${windowIndex + 1}]`,
+  ];
+}
+
 /**
  * Build the video portion of a filter_complex for a sequence of clips
  * with transitions.
  *
  * Input labels: [v0], [v1], ... for each clip's video stream.
  * Returns the filter chain string and the final output label.
+ *
+ * When `context` is provided, Issue #34 preset windows (light_leak_flash /
+ * dreamy_focus_blur) receive frame-exact styling passes appended after the
+ * main transition chain. Context is REQUIRED when any transition declares
+ * such a preset — the builder fails closed instead of silently dropping the
+ * styling.
  */
 export function buildVideoTransitionGraph(
   clipCount: number,
   clipDurationsSec: number[],
   transitions: Array<{ spec: TransitionSpec; fromIndex: number; toIndex: number }>,
+  context?: TransitionGraphContext,
 ): { filterChain: string; outputLabel: string } {
   if (clipCount <= 1) {
     return { filterChain: "", outputLabel: "[v0]" };
@@ -356,6 +513,7 @@ export function buildVideoTransitionGraph(
   }
 
   const parts: string[] = [];
+  const styledWindows: StyledWindow[] = [];
   let prevLabel = "[v0]";
   let accumulatedOffset = clipDurationsSec[0];
 
@@ -370,6 +528,38 @@ export function buildVideoTransitionGraph(
       parts.push(
         `${prevLabel}[v${i}]xfade=transition=${transition}:duration=${xfadeDur.toFixed(6)}:offset=${offset.toFixed(6)}${outLabel}`,
       );
+      if (spec.video.preset === "light_leak_flash" || spec.video.preset === "dreamy_focus_blur") {
+        if (!context) {
+          throw new Error(
+            `transition graph context (width/height/fps) is required to render the ${spec.video.preset} preset window`,
+          );
+        }
+        const startFrame = Math.round(offset * context.fps);
+        const endFrame = startFrame + Math.round(xfadeDur * context.fps);
+        if (startFrame < 0 || endFrame <= startFrame) {
+          throw new Error(
+            `invalid ${spec.video.preset} window [${startFrame}, ${endFrame}) — transition duration ${xfadeDur}s exceeds available overlap`,
+          );
+        }
+        // Degenerate blur window (D < 2): the triangle ramp divides by
+        // (D - 1), which is 0 here, and a single frame cannot ramp. Skip the
+        // styling pass entirely — emitting the blend would produce a NaN mix
+        // expression, which ffmpeg renders as BLACK FRAMES. The preset then
+        // renders exactly like the plain linear crossfade. This matches
+        // Remotion, whose D == 1 progress guard shows clip A on the single
+        // window frame (xfade alpha is 0 there) with no blur filter, and
+        // leaves compiler metadata and geometry untouched.
+        const degenerateBlurWindow =
+          spec.video.preset === "dreamy_focus_blur" && endFrame - startFrame < 2;
+        if (!degenerateBlurWindow) {
+          styledWindows.push({
+            preset: spec.video.preset,
+            startFrame,
+            endFrame,
+            durationSec: xfadeDur,
+          });
+        }
+      }
       accumulatedOffset = offset + clipDurationsSec[i];
     } else if (spec?.video.method === "fade_in_out") {
       // fade_to_black: fade-out on previous, fade-in on current, then concat
@@ -393,9 +583,22 @@ export function buildVideoTransitionGraph(
     prevLabel = outLabel;
   }
 
+  // Append frame-exact styling passes for the preset windows, chained over
+  // the main transition output. Window frames derive from the same offsets
+  // the xfade uses, so styling lands on the exact blend frames.
+  let outputLabel = prevLabel;
+  for (const [windowIndex, window] of styledWindows.entries()) {
+    const inputLabel = outputLabel;
+    const windowParts = window.preset === "light_leak_flash"
+      ? buildFlashFlareWindowParts(window, windowIndex, inputLabel, context!)
+      : buildBlurWindowParts(window, windowIndex, inputLabel, context!);
+    parts.push(...windowParts);
+    outputLabel = `[vout${windowIndex + 1}]`;
+  }
+
   return {
     filterChain: parts.join(";"),
-    outputLabel: prevLabel,
+    outputLabel,
   };
 }
 
@@ -524,6 +727,12 @@ export interface TransitionChainOptions {
   audioCodecArgs?: string[];
   /** Canonical output CFR, preferably the timeline numerator/denominator. */
   outputFps?: string;
+  /**
+   * Geometry context for Issue #34 preset styling (light_leak_flash /
+   * dreamy_focus_blur windows). Required when any transition uses those
+   * presets — the graph builder fails closed without it.
+   */
+  graphContext?: TransitionGraphContext;
   outputPath: string;
 }
 
@@ -800,6 +1009,7 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
       opts.inputs.length,
       opts.clipDurationsSec,
       opts.transitions,
+      opts.graphContext,
     );
   if (videoChain) parts.push(videoChain);
 

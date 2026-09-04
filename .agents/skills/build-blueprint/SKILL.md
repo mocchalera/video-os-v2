@@ -17,6 +17,10 @@ metadata:
 - `runtime/commands/blueprint.ts` の narrative loop に従うこと。
   frame → read → draft → evaluate → confirm → promote
 - 入力は `creative_brief.yaml`, `unresolved_blockers.yaml`, `selects_candidates.yaml`, 任意で `STYLE.md`。
+- `04_plan/edit_blueprint.yaml` は authoring intent、`05_timeline/timeline.json` は compiled canonical truth とする。
+  caption text/timing/approval は caption review/finalize と FFmpeg/libass speech route が所有し、
+  Remotion/HyperFrames は登録済み content element だけを描画する。visual treatment patch、platform
+  profile、SFX rights、shared AudioRenderPlan、agent QA、human approval、platform preview は別の契約とする。
 
 ## やること（ステップ）
 1. brief の autonomy を見て、`full` か `collaborative` かを決める。
@@ -30,15 +34,17 @@ metadata:
 7. speech-led / interview では promotion 前に first-pass quality audit を行う。
    - 各 dialogue primary は質問テロップなしでも主語または指示対象、比較の両側、原因と結果、結論が範囲内で回収できる
    - 推薦・受講推奨・CTA は単独で置かず、直前または同じ回答に理由、判断問題、具体的な不利益のいずれかを残す
-   - `dialogue_policy.cut_tail_hold_sec >= 0.25` と `cut_audio_fade_out_sec >= 0.16` を基本とする
-   - `ending_policy` は完全な最終発言後の動く元素材を `tail_hold_sec >= 1.5` 残し、音声と映像をフェードする。静止フレームで終端を延ばさない
+   - `dialogue_policy.cut_tail_hold_sec` と `cut_audio_fade_out_sec` は project の timing policy/profile から解決する
+   - `ending_policy` は完全な最終発言後の動く元素材を policy が要求する tail だけ残し、音声と映像をフェードする。静止フレームで終端を延ばさない
    - 字幕は speech caption 1レイヤーとし、質問・章ラベルに発話本文を重複させない
    audit に失敗した場合は、尺を優先して通さず、完全な fallback の昇格または候補範囲の再選択を行う。
-8. 明示的な短尺SNS案件（social delivery かつ目標90秒以下）では retention audit も行う。
-   - `hook_priority: aggressive` または brief がコールドオープンを要求する場合、最強の実在payoff/reactionを1〜2秒だけ先出しし、setupへ戻って完全版をおおむね全尺65%以前に開始する
+8. 明示的な短尺SNS delivery profile では retention audit も行う。
+   - `hook_priority: aggressive` または brief がコールドオープンを要求する場合、最強の実在payoff/reactionを
+     profile が定める opening window だけ先出しし、setupへ戻って完全版を configured start window 内に開始する
    - 同じ素材へ意図的に戻る場合は別source rangeを優先し、必要なら `allow_revisit` にcallback理由を残す
    - `beat.id` / `beat.label` は構造用、画面表示文言は `beat.viewer_label` に視聴者の言葉で書く。`HOOK` / `LEVEL 1` / `PAYOFF` / `ENDING` を brief 指定なしに画面へ出さない
-   - talking-head / low-motion素材では6〜12秒ごとの意味的な転換点に、実在リアクション、登録済みreframe/punch-in、登録済み強調overlayのいずれかを計画する。無意味なzoomやflashで埋めない
+   - talking-head / low-motion素材では policy が定める refresh interval ごとの意味的な転換点に、実在リアクション、
+     登録済みreframe/punch-in、登録済み強調overlayのいずれかを計画する。無意味なzoomやflashで埋めない
    - `credibility_first` / 高い信用優先では断片的なspoilerを強制せず、根拠を伴う完全な主張をhookにする
    - このauditは短尺SNS以外へ適用しない
 9. brief がBGMを要求する場合だけ、`music_policy` にレビュー済みライブラリ／BGM Packからの選曲を明記する。

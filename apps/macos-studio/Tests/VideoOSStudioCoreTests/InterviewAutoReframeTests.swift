@@ -94,4 +94,57 @@ final class InterviewAutoReframeTests: XCTestCase {
 
         XCTAssertNil(proposal)
     }
+
+    func testPlannerUsesRegisteredPolicyForWidePunchAndHoldModes() throws {
+        let samples = [InterviewFramingSample(
+            timeSeconds: 0,
+            face: InterviewFaceObservation(
+                x: 0.38,
+                y: 0.20,
+                width: 0.24,
+                height: 0.24,
+                eyeX: 0.50,
+                eyeY: 0.45,
+                confidence: 0.96
+            ),
+            hands: []
+        )]
+        let policy = InterviewFramingPolicy.studioContractV1
+
+        XCTAssertEqual(policy.version, "framing-policy/v1")
+        XCTAssertEqual(policy.policyID, "studio-interview-framing-v1")
+        XCTAssertEqual(
+            try XCTUnwrap(InterviewAutoReframePlanner.propose(
+                samples: samples,
+                outputWidth: 1_920,
+                outputHeight: 1_080,
+                policy: policy,
+                mode: .wide
+            )).zoom,
+            1.0,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(InterviewAutoReframePlanner.propose(
+                samples: samples,
+                outputWidth: 1_920,
+                outputHeight: 1_080,
+                policy: policy,
+                mode: .punch
+            )).zoom,
+            1.18,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(InterviewAutoReframePlanner.propose(
+                samples: samples,
+                outputWidth: 1_920,
+                outputHeight: 1_080,
+                policy: policy,
+                mode: .hold
+            )).zoom,
+            1.167,
+            accuracy: 0.001
+        )
+    }
 }

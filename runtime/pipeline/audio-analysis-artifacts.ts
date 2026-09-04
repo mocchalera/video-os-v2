@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { QualityThresholds } from "../connectors/ffmpeg-segmenter.js";
 import type { AssetItem } from "../connectors/ffprobe.js";
 import type { AssetSttResult } from "../connectors/openai-stt.js";
+import { hasTemporalVideo } from "../artifacts/source-media-capabilities.js";
 import { buildCurrentAudioEvents, writeAudioEvents } from "../artifacts/audio-events.js";
 import { buildProjectAudioStoryGraph } from "../artifacts/audio-story-project-builder.js";
 import {
@@ -16,9 +17,12 @@ import {
 import { readAudioStoryGraph } from "../artifacts/p2-audio-story-graph.js";
 import type { SourceLedger } from "../artifacts/source-ledger.js";
 import { runProjectBgmAnalysis } from "../media/bgm-analyzer.js";
+import type { BgmMeasuredBackend } from "../media/bgm-analyzer.js";
+import { sha256FileHex } from "../source-content-identity.js";
 import type { AssetsJson, SegmentsJson } from "./pipeline-types.js";
 import type { PeakShard } from "./stages/peak.js";
 import type { VlmShard } from "./stages/vlm.js";
+import { inspectAnalysisCacheEligibility } from "./analysis-cache.js";
 
 export type AudioStoryGraphStatus = "ready" | "partial" | "skipped";
 
@@ -33,6 +37,7 @@ export interface AudioStoryStatusAnalysis {
     readyAssetIds: string[];
     failedAssetIds: string[];
     unmatchedRequestedCount: number;
+    bindingFailures?: string[];
   };
 }
 
@@ -54,6 +59,10 @@ export interface FinalizeAudioAnalysisArtifactsOptions {
   vlmShards?: VlmShard[];
   peakShards?: PeakShard[];
   bgmSourceFiles?: string[];
+  /** Force one built-in detector for deterministic public-route fixtures. */
+  bgmForceBackend?: "aubiotrack" | "ffmpeg" | "librosa";
+  /** Optional deterministic measured backend; null records provider unavailability. */
+  bgmBackend?: BgmMeasuredBackend | null;
   skipBgmAnalysis?: boolean;
   skipVlm?: boolean;
   vlmProviderAvailable?: boolean;
@@ -61,27 +70,77 @@ export interface FinalizeAudioAnalysisArtifactsOptions {
 }
 
 export function isExplicitAudioOnly(asset: AssetItem): boolean {
-  return Boolean(asset.audio_stream) && !asset.video_stream;
+  return Boolean(asset.audio_stream) && !hasTemporalVideo(asset);
 }
 
 export function resolveExplicitBgmSources(
   bgmSourceFiles: string[] | undefined,
   assetsJson: AssetsJson,
   sourceFileMap: Map<string, string>,
-): { sources: Array<{ sourceFile: string; assetId: string }>; requestedCount: number; unmatchedCount: number } {
+): {
+  sources: Array<{ sourceFile: string; assetId: string }>;
+  requestedCount: number;
+  unmatchedCount: number;
+  bindingFailures?: string[];
+  bindingFailedAssetIds?: string[];
+} {
   const requested = new Set((bgmSourceFiles ?? []).map(canonicalFileIdentity));
   if (requested.size === 0) return { sources: [], requestedCount: 0, unmatchedCount: 0 };
+  const matchedAssetIds: string[] = [];
   const sources = assetsJson.items.flatMap((asset) => {
     const sourceFile = sourceFileMap.get(asset.asset_id);
-    return sourceFile && requested.has(canonicalFileIdentity(sourceFile))
-      ? [{ sourceFile, assetId: asset.asset_id }]
-      : [];
+    if (!sourceFile || !requested.has(canonicalFileIdentity(sourceFile))) return [];
+    matchedAssetIds.push(asset.asset_id);
+    if (!asset.audio_stream) return [];
+    const expectedHash = asset.source_content_sha256;
+    if (!expectedHash || !/^[0-9a-f]{64}$/.test(expectedHash)) return [];
+    try {
+      if (!fs.statSync(sourceFile).isFile()) return [];
+      if (sha256FileHex(sourceFile) !== expectedHash) return [];
+    } catch {
+      return [];
+    }
+    return [{ sourceFile, assetId: asset.asset_id }];
   });
-  return {
-    sources,
-    requestedCount: requested.size,
-    unmatchedCount: Math.max(0, requested.size - sources.length),
-  };
+  const unmatchedCount = Math.max(0, requested.size - matchedAssetIds.length);
+  const bindingFailures = new Set<string>();
+  const bindingFailedAssetIds = new Set<string>();
+  if (unmatchedCount > 0) bindingFailures.add("bgm_source_unmatched");
+  if (requested.size > 1 || matchedAssetIds.length > 1) bindingFailures.add("bgm_source_multiple");
+  for (const assetId of matchedAssetIds) {
+    if (!sources.some((source) => source.assetId === assetId)) {
+      bindingFailedAssetIds.add(assetId);
+      const asset = assetsJson.items.find((item) => item.asset_id === assetId);
+      const sourceFile = sourceFileMap.get(assetId);
+      if (!asset?.audio_stream) bindingFailures.add("bgm_source_not_audio");
+      else if (!asset.source_content_sha256 || !/^[0-9a-f]{64}$/.test(asset.source_content_sha256)) {
+        bindingFailures.add("bgm_source_identity_missing");
+      } else if (!sourceFile) {
+        bindingFailures.add("bgm_source_identity_unverifiable");
+      } else {
+        try {
+          if (!fs.statSync(sourceFile).isFile()) bindingFailures.add("bgm_source_identity_unverifiable");
+          else if (sha256FileHex(sourceFile) !== asset.source_content_sha256) bindingFailures.add("bgm_source_hash_mismatch");
+          else bindingFailures.add("bgm_source_identity_unverifiable");
+        } catch {
+          bindingFailures.add("bgm_source_identity_unverifiable");
+        }
+      }
+    }
+  }
+  if (bindingFailures.size > 0) {
+    // A role is atomic: a partially resolved or multiply resolved request is
+    // not allowed to publish analysis for whichever source happened to match.
+    for (const assetId of matchedAssetIds) bindingFailedAssetIds.add(assetId);
+    return {
+      sources: [],
+      requestedCount: requested.size,
+      unmatchedCount,
+      bindingFailures: [...bindingFailures].sort(),
+      ...(bindingFailedAssetIds.size > 0 ? { bindingFailedAssetIds: [...bindingFailedAssetIds].sort() } : {}),
+    };
+  }
+  return { sources, requestedCount: requested.size, unmatchedCount };
 }
 
 export async function finalizeAudioAnalysisArtifacts(
@@ -103,18 +162,32 @@ export async function finalizeAudioAnalysisArtifacts(
     options.sourceFileMap,
   );
   const bgmSources = bgmResolution.sources;
+  const bgmBindingFailed = (bgmResolution.bindingFailures?.length ?? 0) > 0;
+  if (bgmBindingFailed) fs.rmSync(path.join(options.projectDir, "03_analysis/bgm_analysis.json"), { force: true });
   const bgmResult = options.skipBgmAnalysis
     ? runProjectBgmAnalysis({
       bgmSources: [],
       explicitRequestCount: 0,
       projectDir: options.projectDir,
       projectId: options.projectId,
+      forceBackend: options.bgmForceBackend,
     })
+    : bgmBindingFailed
+      ? {
+        writtenPaths: [],
+        readyAssetIds: [],
+        failures: (bgmResolution.bindingFailedAssetIds ?? []).map((assetId) => ({
+          assetId,
+          reason: "bgm_source_binding_failed",
+        })),
+      }
     : runProjectBgmAnalysis({
       bgmSources,
       explicitRequestCount: bgmResolution.requestedCount,
       projectDir: options.projectDir,
       projectId: options.projectId,
+      forceBackend: options.bgmForceBackend,
+      measuredBackend: options.bgmBackend,
     });
   const vlm = collectVlmStageResults(
     options.assetsJson,
@@ -129,6 +202,19 @@ export async function finalizeAudioAnalysisArtifacts(
     !options.skipPeak,
   );
   const bgmReadyAssetIds = bgmResult.readyAssetIds;
+  const bgmArtifactPath = path.join(options.projectDir, "03_analysis/bgm_analysis.json");
+  let bgmArtifactHash: string | null = null;
+  if (fs.existsSync(bgmArtifactPath)) {
+    try {
+      bgmArtifactHash = computeNormalizedJsonHash(JSON.parse(fs.readFileSync(bgmArtifactPath, "utf-8")));
+    } catch {
+      bgmArtifactHash = null;
+    }
+  }
+  const bgmFailedAssetIds = [...new Set([
+    ...bgmResult.failures.map((failure) => failure.assetId),
+    ...(bgmResolution.bindingFailedAssetIds ?? []),
+  ])].sort();
   const baseAnalysis = {
     assets: options.assetsJson.items,
     segments: options.segmentsJson.items,
@@ -150,7 +236,9 @@ export async function finalizeAudioAnalysisArtifacts(
       unmatchedRequestedCount: bgmResolution.unmatchedCount,
       requestedAssetIds: bgmSources.map((source) => source.assetId),
       readyAssetIds: bgmReadyAssetIds,
-      failedAssetIds: bgmResult.failures.map((failure) => failure.assetId),
+      failedAssetIds: bgmFailedAssetIds,
+      ...(bgmResolution.bindingFailures ? { bindingFailures: bgmResolution.bindingFailures } : {}),
+      artifactHash: bgmArtifactHash,
     },
   };
   const currentAssetIds = new Set(options.assetsJson.items.map((asset) => asset.asset_id));
@@ -166,6 +254,7 @@ export async function finalizeAudioAnalysisArtifacts(
     ledger: options.ledger,
     analysis: {
       ...baseAnalysis,
+      segmentsSchemaValid: inspectAnalysisCacheEligibility(options.projectDir).eligible,
       audioStoryGraph: {
         status: predictedGraphStatus,
         assetIds: [...audioStoryAssetIds].sort(),
@@ -195,7 +284,9 @@ export function predictAudioStoryGraphStatus(
   const sttFailed = Boolean(
     analysis.sttResults && [...analysis.sttResults.values()].some((result) => !result.success),
   );
-  const bgmFailed = analysis.bgm.failedAssetIds.length > 0 || analysis.bgm.unmatchedRequestedCount > 0;
+  const bgmFailed = analysis.bgm.failedAssetIds.length > 0
+    || analysis.bgm.unmatchedRequestedCount > 0
+    || (analysis.bgm.bindingFailures?.length ?? 0) > 0;
   if (sttFailed || analysis.audioEvents.failures.size > 0 || bgmFailed) return "partial";
   const hasNodes = hasTranscriptNodes
     || analysis.audioEvents.itemCount > 0

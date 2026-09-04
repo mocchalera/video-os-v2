@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-ask-dispatch.schema.json",
+  "type": "object",
+  "required": ["version", "project_id", "review_identity", "generation_id", "video_sha256", "timeline_sha256", "idempotency_key", "payload_sha256", "status", "attempts", "ask_id", "error", "payload"],
+  "properties": {
+    "version": { "const": "review-ask-dispatch/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "review_identity": { "$ref": "#/$defs/hash" },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "video_sha256": { "$ref": "#/$defs/hash" },
+    "timeline_sha256": { "$ref": "#/$defs/hash" },
+    "idempotency_key": { "$ref": "#/$defs/hash" },
+    "payload_sha256": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "status": { "enum": ["blocked", "pending", "dispatch_failed", "dispatched", "responded", "stale"] },
+    "attempts": { "type": "integer", "minimum": 0 },
+    "ask_id": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] },
+    "payload": { "anyOf": [{ "$ref": "#/$defs/payload" }, { "type": "null" }] },
+    "round_event_sha256": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "blocked" } }, "required": ["status"] },
+      "then": { "properties": { "payload_sha256": { "type": "null" }, "payload": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["pending", "dispatch_failed", "dispatched", "responded", "stale"] } }, "required": ["status"] },
+      "then": { "properties": { "payload_sha256": { "$ref": "#/$defs/hash" }, "payload": { "$ref": "#/$defs/payload" } } }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "stringArray": { "type": "array", "items": { "type": "string" } },
+    "artifact": { "type": "object", "required": ["path", "sha256"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/hash" } }, "additionalProperties": false },
+    "payload": {
+      "type": "object",
+      "required": ["review_identity", "generation_id", "media", "duration_seconds", "bgm", "caption_count", "qa_warnings", "unresolved_items", "choices", "storyboard"],
+      "properties": {
+        "review_identity": { "$ref": "#/$defs/hash" },
+        "generation_id": { "$ref": "#/$defs/hash" },
+        "media": { "type": "object", "required": ["locator", "sha256"], "properties": { "locator": { "type": "string", "pattern": "^project:" }, "sha256": { "$ref": "#/$defs/hash" } }, "additionalProperties": false },
+        "duration_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "bgm": { "enum": ["present", "absent"] },
+        "caption_count": { "type": "integer", "minimum": 0 },
+        "qa_warnings": { "$ref": "#/$defs/stringArray" },
+        "unresolved_items": { "$ref": "#/$defs/stringArray" },
+        "choices": { "const": ["approve", "request_changes", "free_text"] },
+        "storyboard": {
+          "type": "object",
+          "required": ["projection_id", "manifest", "diff_summary"],
+          "properties": {
+            "projection_id": { "type": "string", "minLength": 1 },
+            "manifest": { "$ref": "#/$defs/artifact" },
+            "diff_summary": { "type": "object", "required": ["trims", "crops", "captions"], "properties": { "trims": { "$ref": "#/$defs/stringArray" }, "crops": { "$ref": "#/$defs/stringArray" }, "captions": { "$ref": "#/$defs/stringArray" } }, "additionalProperties": false }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type {
   CreativeBrief,
   EditBlueprint,
@@ -30,6 +31,135 @@ import {
   type StageResult,
 } from "../runtime/eval/brief-alignment-types.js";
 import type { SelectionCoverageSegment } from "../runtime/eval/selection-coverage.js";
+
+type DirectiveTarget = "caption" | "music" | "audio" | "ending";
+
+function writeDirectiveProject(
+  item: string,
+  target: DirectiveTarget,
+  state: "valid" | "missing" | "conflict",
+): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `brief-alignment-directive-${target}-`));
+  fs.mkdirSync(path.join(tmp, "01_intent"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, "04_plan"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, "05_timeline"), { recursive: true });
+
+  const sourceBrief = parseYaml(fs.readFileSync(
+    path.resolve("projects/demo/01_intent/creative_brief.yaml"),
+    "utf-8",
+  )) as Record<string, unknown>;
+  sourceBrief.must_have = [item];
+  fs.writeFileSync(
+    path.join(tmp, "01_intent/creative_brief.yaml"),
+    stringifyYaml(sourceBrief),
+    "utf-8",
+  );
+
+  const sourceBlueprint = parseYaml(fs.readFileSync(
+    path.resolve("projects/demo/04_plan/edit_blueprint.yaml"),
+    "utf-8",
+  )) as Record<string, any>;
+  const timeline = JSON.parse(fs.readFileSync(
+    path.resolve("projects/demo/05_timeline/timeline.json"),
+    "utf-8",
+  )) as Record<string, any>;
+  timeline.provenance ??= {};
+
+  if (target === "caption") {
+    if (state === "missing") {
+      delete sourceBlueprint.caption_policy;
+      delete timeline.provenance.caption_policy;
+    } else {
+      sourceBlueprint.caption_policy = {
+        language: "ja",
+        delivery_mode: "burn_in",
+        source: state === "conflict" ? "none" : "transcript",
+        styling_class: "clean-lower-third",
+      };
+      timeline.provenance.caption_policy = {
+        mode: state === "conflict" ? "off" : "auto",
+        source: "explicit_brief",
+      };
+    }
+  }
+
+  if (target === "music") {
+    delete sourceBlueprint.music_policy.bgm_asset_id;
+    delete sourceBlueprint.music_policy.bgm_segment_id;
+    delete sourceBlueprint.music_policy.bgm_duration_sec;
+    const a2 = timeline.tracks.audio.find((track: Record<string, unknown>) => track.track_id === "A2");
+    a2.clips = [];
+    if (state === "valid") {
+      sourceBlueprint.music_policy.bgm_asset_id = "AST_BGM";
+      sourceBlueprint.music_policy.bgm_segment_id = "SEG_BGM";
+      sourceBlueprint.music_policy.bgm_duration_sec = 60;
+      const musicClip = structuredClone(timeline.tracks.audio[0].clips[0]);
+      Object.assign(musicClip, {
+        clip_id: "CLP_BGM",
+        segment_id: "SEG_BGM",
+        asset_id: "AST_BGM",
+        src_in_us: 0,
+        src_out_us: 60_000_000,
+        timeline_in_frame: 0,
+        timeline_duration_frames: 1440,
+        role: "bgm",
+      });
+      a2.clips = [musicClip];
+    } else if (state === "conflict") {
+      sourceBlueprint.music_policy.bgm_duration_sec = 0;
+    }
+  }
+
+  if (target === "audio") {
+    if (state === "missing") {
+      delete timeline.provenance.audio_policy;
+    } else {
+      timeline.provenance.audio_policy = {
+        mode: state === "conflict" ? "bgm_only" : "ducking",
+        source: "explicit_brief",
+      };
+    }
+  }
+
+  if (target === "ending") {
+    sourceBlueprint.ending_policy = state === "missing"
+      ? { should_feel: "calm hard cut" }
+      : state === "conflict"
+        ? { should_feel: "gentle release", video_fade_out_sec: 1, video_fade_color: "black" }
+        : { should_feel: "gentle release", video_fade_out_sec: 1, video_fade_color: "black" };
+    if (state === "valid") {
+      const finalClip = timeline.tracks.video
+        .flatMap((track: Record<string, any>) => track.clips)
+        .sort((left: Record<string, number>, right: Record<string, number>) =>
+          (left.timeline_in_frame + left.timeline_duration_frames) -
+          (right.timeline_in_frame + right.timeline_duration_frames)
+        )
+        .at(-1);
+      finalClip.metadata = {
+        ...(finalClip.metadata ?? {}),
+        ending_treatment: {
+          extended_frames: 0,
+          audio_fade_out_frames: 0,
+          video_fade_out_frames: 24,
+          video_fade_color: "black",
+          clamped_before_next_speech: false,
+        },
+      };
+    }
+  }
+
+  fs.writeFileSync(
+    path.join(tmp, "04_plan/edit_blueprint.yaml"),
+    stringifyYaml(sourceBlueprint),
+    "utf-8",
+  );
+  fs.writeFileSync(
+    path.join(tmp, "05_timeline/timeline.json"),
+    `${JSON.stringify(timeline, null, 2)}\n`,
+    "utf-8",
+  );
+  return tmp;
+}
 
 function brief(): CreativeBrief {
   return {
@@ -200,6 +330,23 @@ describe("brief alignment deterministic scorers", () => {
     expect(result.evidence.some((item) => item.includes("production directive"))).toBe(true);
   });
 
+  it.each([
+    "全編でStrava UIが映るスマホ画面を使う",
+    "現地の環境音が入った素材を選ぶ",
+    "音楽を演奏する人物が画面に映る",
+    "既存の本人発話またはユーザー承認済みテロップ",
+  ])("scores missing source-dependent and mixed must-haves as uncovered: %s", (mustHave) => {
+    const sourceBrief = { ...brief(), must_have: [mustHave] } as CreativeBrief;
+    const emptySelects = { ...selects(), candidates: [] };
+
+    const result = scoreMustHaveCoverage(sourceBrief, emptySelects, []);
+
+    expect(result.score).toBe(0);
+    expect(result.gaps).toEqual([
+      `missing explicit candidate evidence for must_have: ${mustHave}`,
+    ]);
+  });
+
   it("flags must-avoid evidence in candidate rationale/evidence", () => {
     const mutated = structuredClone(selects());
     mutated.candidates[0].why_it_matches = "This creates danger panic.";
@@ -310,6 +457,44 @@ describe("brief alignment LLM judge", () => {
 });
 
 describe("brief alignment orchestration", () => {
+  it.each([
+    ["caption", "撮影日テロップを表示する"],
+    ["music", "BGMを全編で使用する"],
+    ["audio", "声と環境音をダッキングしてミックスする"],
+    ["ending", "フェードアウトで終わる"],
+  ] as const)("fails closed when deferred %s policy is missing or contradictory", async (target, item) => {
+    for (const state of ["missing", "conflict"] as const) {
+      const tmp = writeDirectiveProject(item, target, state);
+      try {
+        await expect(evaluateBriefAlignment(tmp, {
+          stages: ["blueprint"],
+          useLlm: false,
+          evaluatedAt: "2026-08-26T00:00:00.000Z",
+        })).rejects.toThrow(/production directive/i);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it.each([
+    ["caption", "撮影日テロップを表示する"],
+    ["music", "BGMを全編で使用する"],
+    ["audio", "声と環境音をダッキングしてミックスする"],
+    ["ending", "フェードアウトで終わる"],
+  ] as const)("accepts deferred %s policy when its downstream artifact is concrete", async (target, item) => {
+    const tmp = writeDirectiveProject(item, target, "valid");
+    try {
+      await expect(evaluateBriefAlignment(tmp, {
+        stages: ["blueprint"],
+        useLlm: false,
+        evaluatedAt: "2026-08-26T00:00:00.000Z",
+      })).resolves.toMatchObject({ project: expect.any(String) });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("renormalizes composite over present stage weights", () => {
     expect(computeBriefAlignmentComposite({ selects: stage(0.5), blueprint: stage(1) })).toBeCloseTo(0.727, 3);
     expect(computeBriefAlignmentComposite({ blueprint: stage(0.75) })).toBe(0.75);
@@ -464,7 +649,10 @@ describe("brief alignment orchestration", () => {
       });
 
       const narrative = report.stages.selects?.axes.narrative_structure;
-      expect(narrative?.confidence).toBe(0.8);
+      // Issue #32 M0 audit amendment: deterministic axes are degraded and
+      // capped at the 0.5 degraded confidence ceiling.
+      expect(narrative?.confidence).toBe(0.5);
+      expect(narrative?.confidence_basis).toBe("degraded");
       expect(narrative?.score).toBeGreaterThan(0.9);
       expect(narrative?.evidence).toContain("story_role present on 4/4 candidates");
       expect(narrative?.evidence).toContain("story_role semantic_rank order hook -> experience -> closing confirmed");

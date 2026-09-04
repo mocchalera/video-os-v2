@@ -6,6 +6,7 @@ import { parse as parseYaml } from "yaml";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import type { VlmFn } from "../runtime/connectors/gemini-vlm.js";
 import type { VisualQualityMeasurements } from "../runtime/connectors/ffmpeg-motion.js";
+import { validateArtifact } from "../runtime/artifacts/loaders.js";
 import { runPipeline, SourceReadinessError } from "../runtime/pipeline/ingest.js";
 import type { PipelineStageProgress } from "../runtime/progress.js";
 import {
@@ -443,14 +444,29 @@ describe("EYE-002 Marlin degraded readiness", () => {
     baseSegment.tags = ["base_tag"];
     baseSegment.interest_points = [{ frame_us: 250_000, label: "base interest", confidence: 0.6 }];
     baseSegment.confidence.summary = { score: 0.6, source: "base-producer", status: "partial" };
-    baseSegment.provenance.summary = { method: "grounded_vlm", model: "base-model" };
+    const baseSummaryProvenance = {
+      stage: "vlm",
+      method: "grounded_vlm",
+      connector_version: "test-base-v1",
+      policy_hash: "test-base-policy",
+      request_hash: "test-base-request",
+      model_alias: "base-model",
+    };
+    baseSegment.provenance.summary = baseSummaryProvenance;
     baseSegment.peak_analysis = {
       peak_moments: [{ peak_ref: "BASE_PEAK", timestamp_us: 500_000, type: "visual_peak", confidence: 0.6, description: "base peak", source_pass: "fallback" }],
       recommended_in_out: { best_in_us: 0, best_out_us: 1_000_000, rationale: "base", source_pass: "fallback" },
       visual_energy_curve: [],
       support_signals: { motion_support_score: 0.6, audio_support_score: 0, fused_peak_score: 0.6 },
-      provenance: { precision_mode: "degraded_motion_audio", fusion_version: "base" },
+      provenance: {
+        coarse_prompt_template_id: "test-base-coarse",
+        refine_prompt_template_id: "test-base-refine",
+        precision_mode: "degraded_motion_audio",
+        fusion_version: "base",
+        support_signal_version: "test-base-support",
+      },
     };
+    expect(() => validateArtifact(base, "segments.schema.json")).not.toThrow();
     fs.writeFileSync(segmentsPath, JSON.stringify(base, null, 2));
 
     const successful = await runPipeline({ ...common, marlinFn: successfulMarlin("successful stale scene") });
@@ -470,7 +486,7 @@ describe("EYE-002 Marlin degraded readiness", () => {
     expect(failed.analysisReadiness.overall).toBe("partial");
     expect(restored.summary).toBe("base non-Marlin summary");
     expect(restored.confidence.summary).toEqual({ score: 0.6, source: "base-producer", status: "partial" });
-    expect(restored.provenance.summary).toEqual({ method: "grounded_vlm", model: "base-model" });
+    expect(restored.provenance.summary).toEqual(baseSummaryProvenance);
     expect(restored.tags).toEqual(expect.arrayContaining(["base_tag", "later_non_marlin_tag"]));
     expect(restored.tags).not.toContain("successful_stale_scene");
     expect(restored.interest_points).toEqual(expect.arrayContaining([

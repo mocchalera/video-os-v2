@@ -5,11 +5,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ASS_HEAVY_VIDEO_FONT } from "../editor/shared/font-contract.js";
 import type { TimelineIR } from "../runtime/compiler/types.js";
 import type { ContentRenderPlan } from "../runtime/content/render-plan.js";
+import type { CaptionVisualTreatmentInput } from "../runtime/caption/visual-treatment.js";
+import type { SubjectOccupancyTrack } from "../runtime/review/subject-occupancy.js";
+import type { SourceInputAttestation } from "../runtime/render/source-input-attestation.js";
 import {
+  assertSocialReviewAudioPlan,
+  assertCaptionPlanCanonicalFreshness,
+  assertCaptionPlanDerivedMapping,
+  assertSubjectOccupancySourceBinding,
   parseSocialReviewArgs,
   planSocialVisualLayers,
   normalizeCaptionPlan,
   resolveProjectSocialReviewCaptionStyle,
+  resolveSocialCaptionCollisionIdentity,
   resolveSocialReviewCaptionStyle,
   socialReviewCaptionStyle,
   timelineVisualDurationFrames,
@@ -69,18 +77,107 @@ function timeline(): TimelineIR {
 }
 
 describe("social review renderer planning", () => {
+  it("rejects mixed, already-mastered, and repeated mastering routes before render writes", () => {
+    const finalMastering = {
+      loudness_target_lufs: -16,
+      lra_target: 7,
+      true_peak_target_dbtp: -1.5,
+      count: 1 as const,
+      stage: "after_mix" as const,
+      owner: "shared_audio_render_plan" as const,
+    };
+    expect(() => assertSocialReviewAudioPlan({
+      strategy: "dialogue_only",
+      final_mastering: finalMastering,
+    })).not.toThrow();
+    expect(() => assertSocialReviewAudioPlan({
+      strategy: "legacy_embedded_bgm",
+      final_mastering: finalMastering,
+    })).toThrow(/mixed audio/i);
+    expect(() => assertSocialReviewAudioPlan({
+      strategy: "original_passthrough",
+      final_mastering: { ...finalMastering, count: 0, stage: "not_applied" },
+    })).toThrow(/already.mastered|original.passthrough/i);
+    expect(() => assertSocialReviewAudioPlan({
+      strategy: "dialogue_only",
+      final_mastering: { ...finalMastering, count: 2 as never },
+    })).toThrow(/exactly once/i);
+  });
+
+  it("allows count-zero only for a plan-bound music_master preserve decision", () => {
+    const finalMastering = {
+      loudness_target_lufs: -16,
+      lra_target: 7,
+      true_peak_target_dbtp: -1.5,
+      count: 1 as const,
+      stage: "after_mix" as const,
+      owner: "shared_audio_render_plan" as const,
+    };
+    const preserveMaster = { audio_decision: "preserve" } as never;
+    const masteringMaster = { audio_decision: "mastering" } as never;
+    expect(() => assertSocialReviewAudioPlan({
+      strategy: "music_master",
+      music_master: preserveMaster,
+      final_mastering: { ...finalMastering, count: 0, stage: "not_applied" },
+    })).not.toThrow();
+    for (const count of [0, 2] as const) {
+      expect(() => assertSocialReviewAudioPlan({
+        strategy: "music_master",
+        music_master: masteringMaster,
+        final_mastering: { ...finalMastering, count: count as never },
+      })).toThrow(/exactly once|zero mastering/i);
+    }
+  });
+
+  it("binds caption/edit-plan freshness to canonical timeline hash, not version text", () => {
+    const canonical = `sha256:${"a".repeat(64)}`;
+    const plan = { version: "1", base_timeline_hash: canonical, captions: [{ text: "x", in_frame: 0, out_frame: 1, style: "simple-shadow" as const }] };
+    expect(() => assertCaptionPlanCanonicalFreshness(plan, canonical)).not.toThrow();
+    expect(() => assertCaptionPlanCanonicalFreshness({ ...plan, version: "1", base_timeline_hash: `sha256:${"b".repeat(64)}` }, canonical)).toThrow(/canonical timeline hash/i);
+  });
+
+  it("fails closed for an external caption plan that is not projected across a ripple", () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "social-review-caption-mapping-"));
+    tempDirs.push(projectDir);
+    fs.mkdirSync(path.join(projectDir, "05_timeline"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "05_timeline", "derived-frame-mapping.json"), JSON.stringify({
+      version: "derived-frame-mapping/v1",
+      policy: "ripple-semantic-anchor/v1",
+      operations: [{ index: 0, op: "insert_segment", ripple: true }],
+      entities: [],
+      mapping_sha256: "sha256:ignored-by-unit-fixture",
+    }));
+    const identity = {
+      derived_mapping: {
+        path: "05_timeline/derived-frame-mapping.json",
+        version: "derived-frame-mapping/v1" as const,
+        sha256: "sha256:mapping",
+      },
+    };
+    const plan = {
+      version: "1",
+      base_timeline_hash: "sha256:canonical",
+      captions: [{ text: "caption", in_frame: 0, out_frame: 12, style: "simple-shadow" as const }],
+    };
+    expect(() => assertCaptionPlanDerivedMapping(plan, identity, projectDir)).toThrow(/unprojected.*ripple/i);
+    expect(() => assertCaptionPlanDerivedMapping({ ...plan, derived_mapping_sha256: identity.derived_mapping.sha256 }, identity, projectDir)).not.toThrow();
+  });
+
   it("accepts an explicit projected timeline without changing the legacy default", () => {
     expect(parseSocialReviewArgs([
       "node",
       "script",
       "--project",
       "/tmp/project",
+      "--repo-sfx-root",
+      "/tmp/repo/resources/sfx",
       "--timeline",
       "/tmp/project/05_timeline/timeline-phase5.json",
       "--captions",
       "/tmp/project/06_review/captions.json",
     ])).toMatchObject({
       projectDir: "/tmp/project",
+      repoSfxRoot: "/tmp/repo/resources/sfx",
       timelinePath: "/tmp/project/05_timeline/timeline-phase5.json",
     });
     expect(parseSocialReviewArgs([
@@ -91,6 +188,9 @@ describe("social review renderer planning", () => {
       "--captions",
       "/tmp/project/06_review/captions.json",
     ]).timelinePath).toBeUndefined();
+
+    const renderSource = fs.readFileSync("scripts/render-social-review.ts", "utf8");
+    expect(renderSource).toMatch(/resolveSharedAudioRenderPlan\(\{[\s\S]*repoSfxRoot[\s\S]*\}\);/);
   });
 
   it("includes a CTA that extends beyond the speaker footage", () => {
@@ -160,6 +260,60 @@ describe("social review renderer planning", () => {
       { text: "raw境界は描画しない", in_frame: 30, out_frame: 48, style: "simple-shadow" },
     ]);
     expect(validateCaptionPlan(plan, 96)).toHaveLength(2);
+  });
+
+  it("preserves canonical caption IDs and resolves collision roles from visual treatment without changing cue bytes", () => {
+    const captions = [
+      { text: "baseline", in_frame: 0, out_frame: 10, style: "simple-shadow" as const },
+      { text: "keyword", in_frame: 10, out_frame: 20, style: "simple-shadow" as const },
+      { text: "title", in_frame: 20, out_frame: 30, style: "simple-shadow" as const },
+    ];
+    const before = JSON.stringify(captions);
+    const visual = {
+      caption_identity: captions.map((caption, index) => ({
+        caption_id: `SC_${index + 1}`,
+        stable_root_id: `SC_${index + 1}`,
+        text: caption.text,
+        timeline_in_frame: caption.in_frame,
+        timeline_duration_frames: caption.out_frame - caption.in_frame,
+        treatment: {
+          caption_id: `SC_${index + 1}`,
+          stable_root_id: `SC_${index + 1}`,
+          anchor: "bottom_center",
+          style_ref: "sns-vertical",
+          hierarchy_role: index === 1 ? "keyword" : index === 2 ? "annotation" : "speech",
+          fallback: "registered_fallback",
+        },
+      })),
+    } as unknown as CaptionVisualTreatmentInput;
+
+    expect(resolveSocialCaptionCollisionIdentity(captions, visual)).toEqual([
+      { caption_id: "SC_1", role: "baseline" },
+      { caption_id: "SC_2", role: "emphasis" },
+      { caption_id: "SC_3", role: "title" },
+    ]);
+    expect(JSON.stringify(captions)).toBe(before);
+  });
+
+  it("rejects stale or forged subject source asset/hash/segment/range before rendering", () => {
+    const subject = {
+      source_identity: {
+        asset_id: "a1",
+        segment_id: "s1",
+        source_content_hash: `sha256:${"a".repeat(64)}`,
+        source_range: { src_in_us: 0, src_out_us: 4_000_000 },
+      },
+    } as SubjectOccupancyTrack;
+    const attestation = {
+      source_inputs: [{ asset_id: "a1", content_sha256: "a".repeat(64) }],
+    } as SourceInputAttestation;
+    expect(() => assertSubjectOccupancySourceBinding(subject, timeline(), attestation)).not.toThrow();
+    const forged = structuredClone(subject);
+    forged.source_identity.source_content_hash = `sha256:${"b".repeat(64)}`;
+    expect(() => assertSubjectOccupancySourceBinding(forged, timeline(), attestation)).toThrow(/stale|absent/i);
+    const staleRange = structuredClone(subject);
+    staleRange.source_identity.source_range.src_out_us += 1;
+    expect(() => assertSubjectOccupancySourceBinding(staleRange, timeline(), attestation)).toThrow(/segment\/range.*stale/i);
   });
 
   it("uses the verified static heavy face for social captions", () => {

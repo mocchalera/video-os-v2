@@ -42,10 +42,11 @@ if (optionsJson) {
   }
 }
 
-// ── Stub ReviewAgent for editor-initiated reviews ───────────────
-// In production, this would delegate to an LLM-backed agent.
-// The stub reads existing review artifacts if present, or produces
-// a minimal "re-review needed" report.
+// ── Development ReviewAgent adapter ────────────────────────────
+// A real deployment may replace this adapter with an LLM-backed agent. Even
+// the development path now emits the v2 judgment envelope and consumes the
+// command-supplied whole-cut context. The command remains authoritative for
+// render identity and semantic status; this adapter cannot forge either.
 
 class StubReviewAgent implements ReviewAgent {
   async run(ctx: ReviewAgentContext): Promise<ReviewAgentResult> {
@@ -60,16 +61,18 @@ class StubReviewAgent implements ReviewAgent {
       } catch { /* use default */ }
     }
 
-    // Generate a minimal review report
+    // Generate a minimal v2 review report. The command evaluates and attaches
+    // the identity-bound whole-cut result after this untrusted agent output.
     const report = {
-      version: "1",
+      version: "2",
       project_id: ctx.projectId,
       timeline_version: ctx.timelineVersion,
       created_at: new Date().toISOString(),
       summary_judgment: {
         status: "needs_revision" as const,
-        rationale: "Editor-initiated review — stub agent. Replace with LLM-backed ReviewAgent for production reviews.",
+        rationale: `Editor-initiated v2 review adapter. Whole-cut semantic status: ${ctx.wholeCutSemantic.status}; replace the adapter with an LLM-backed provider for semantic conclusions.`,
         confidence: 0.5,
+        confidence_basis: "degraded" as const,
       },
       strengths: [
         { summary: "Timeline structure is valid and compilable." },
@@ -85,9 +88,18 @@ class StubReviewAgent implements ReviewAgent {
       mismatches_to_brief: [],
       mismatches_to_blueprint: [],
       recommended_next_pass: {
-        goal: "Replace stub agent with LLM-backed review for meaningful analysis",
-        actions: ["Configure REVIEW_AGENT_PROVIDER environment variable"],
+        goal: "Resolve the whole-cut semantic HOLD or configure a semantic provider",
+        actions: ["Review the full rough render and supplied brief-derived axes", "Configure REVIEW_AGENT_PROVIDER for semantic observations"],
       },
+      editorial_judgments: [{
+        observation: "The development adapter did not independently inspect the full rough render.",
+        inference: "No semantic conclusion is supported by this adapter alone.",
+        editorial_intent: "Keep the review in a human-reviewable state until whole-cut evidence is supplied.",
+        evidence: [{ kind: "artifact_ref" as const, ref: "01_intent/creative_brief.yaml" }],
+        confidence: 0.5,
+        confidence_basis: "degraded" as const,
+      }],
+      whole_cut_semantic: ctx.wholeCutSemantic,
     };
 
     return {
@@ -137,7 +149,7 @@ async function main(): Promise<void> {
         const result = await runReview(resolvedDir, agent, {
           requireCompiledTimeline: options.require_compiled_timeline !== false,
           skipPreview: options.skip_preview === true,
-          render: options.render === true,
+          render: options.render !== false,
           allowUnverifiedVisual: options.allow_unverified_visual === true,
           visualQaWaiverReason: options.visual_qa_waiver_reason as string | undefined,
         });

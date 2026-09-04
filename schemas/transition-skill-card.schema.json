@@ -103,7 +103,7 @@
         },
         "transition_type": {
           "type": "string",
-          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black", "film_crossfade", "light_leak_flash", "dreamy_focus_blur"]
         },
         "crossfade_sec": { "type": "number", "minimum": 0 },
         "hold_side": { "type": "string", "enum": ["left", "right"] },
@@ -118,7 +118,7 @@
       "properties": {
         "transition_type": {
           "type": "string",
-          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black", "film_crossfade", "light_leak_flash", "dreamy_focus_blur"]
         },
         "crossfade_sec": { "type": "number", "minimum": 0 },
         "audio_overlap_sec": { "type": "number", "minimum": 0 },

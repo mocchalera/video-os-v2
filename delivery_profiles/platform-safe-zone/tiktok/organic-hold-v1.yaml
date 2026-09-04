@@ -1,0 +1,29 @@
+version: platform-safe-zone-profile/v1
+profile_id: tiktok-organic-production-hold-v1
+platform: tiktok
+surface: organic
+delivery_variant: production-organic
+evidence_status: unavailable
+source_references:
+  - url: https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads?lang=en
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: TikTok for Business
+    evidence_kind: official_documentation
+    notes: This is an ads reference; its format and safe-zone guidance must not be transferred to organic FYP geometry.
+measured_at: null
+geometry:
+  status: unknown
+  coordinate_system: unknown
+  viewport: { status: unknown }
+  ui_regions: { unknown: true, regions: [] }
+  safe_regions: { unknown: true, regions: [] }
+  method: unknown
+  confidence: unknown
+device_evidence: { status: unknown }
+screenshot_evidence: { status: unknown }
+supersession: { state: active, reason: Organic FYP device/app/screenshot evidence is unavailable. }
+fallback:
+  mode: hold
+  human_preview_required: true
+  reason: No current organic TikTok safe-zone evidence is available.

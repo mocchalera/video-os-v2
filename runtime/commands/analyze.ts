@@ -21,6 +21,8 @@ import {
   buildAnalysisCoverageReport,
   writeAnalysisCoverageReport,
   writeSourceMediaManifest,
+  type AnalysisCoverageReport,
+  validateAnalysisCoverageFreshness,
 } from "../artifacts/p1-manifest-coverage.js";
 import {
   buildSourceLedger,
@@ -35,12 +37,19 @@ import {
 import { atomicWriteJson, atomicWriteYaml } from "../pipeline/stages/_util.js";
 import { buildGapReport } from "../pipeline/stages/gap-report.js";
 import {
+  runImageQcGate,
+  IMAGE_QC_REPORT_RELATIVE_PATH,
+  type ImageQcGateResult,
+} from "../artifacts/image-qc-report.js";
+import {
   createMarlinFnFromEnvironment,
   marlinModelFromEnvironment,
   marlinQueriesFromEnvironment,
   MARLIN_EVENTS_RELATIVE_PATH,
   shouldRunMarlinAnalysis,
 } from "../pipeline/stages/marlin.js";
+import { inspectAnalysisCacheEligibility } from "../pipeline/analysis-cache.js";
+import type { BgmMeasuredBackend } from "../media/bgm-analyzer.js";
 
 export interface AnalyzeCommandOptions {
   sourceFiles: string[];
@@ -53,6 +62,12 @@ export interface AnalyzeCommandOptions {
   skipMediaLink?: boolean;
   skipPreflight?: boolean;
   skipBgmAnalysis?: boolean;
+  /** Explicitly bind one current source asset to the music/BGM role. */
+  bgmSourceFiles?: string[];
+  /** Force one built-in detector for deterministic public-route fixtures. */
+  bgmForceBackend?: "aubiotrack" | "ffmpeg" | "librosa";
+  /** Optional deterministic measured backend; null records provider unavailability. */
+  bgmBackend?: BgmMeasuredBackend | null;
   language?: string;
   sttProvider?: string;
   contentHint?: string;
@@ -61,6 +76,8 @@ export interface AnalyzeCommandOptions {
   clearCache?: boolean;
   stageProgress?: PipelineStageProgress;
   sourceDiscovery?: SourceDiscoveryResult;
+  firstPreviewDeadlineAtMs?: number;
+  firstPreviewCompileRenderReserveMs?: number;
 }
 
 export interface AnalyzeRunnerContext extends AnalyzeCommandOptions {
@@ -72,6 +89,7 @@ export interface AnalyzeRunnerContext extends AnalyzeCommandOptions {
 export interface AnalyzeRunnerResult {
   artifactsCreated?: string[];
   sourceLedger?: SourceLedger;
+  analysisCoverageReport?: AnalysisCoverageReport;
 }
 
 export interface AnalyzeRunner {
@@ -93,6 +111,7 @@ const ANALYZE_ARTIFACT_CANDIDATES = [
   "03_analysis/gap_report.yaml",
   "03_analysis/bgm_analysis.json",
   MARLIN_EVENTS_RELATIVE_PATH,
+  IMAGE_QC_REPORT_RELATIVE_PATH,
 ];
 
 export async function runAnalyze(
@@ -109,6 +128,7 @@ export async function runAnalyze(
   pt.advance();
   const projectId = ctx.doc.project_id || path.basename(ctx.projectDir);
   const normalizedSourceFiles = normalizeSourceLocators(options.sourceFiles ?? [], process.cwd());
+  const normalizedBgmSourceFiles = normalizeSourceLocators(options.bgmSourceFiles ?? [], process.cwd());
 
   if (normalizedSourceFiles.length === 0) {
     persistAnalyzeReadinessArtifacts(
@@ -163,6 +183,7 @@ export async function runAnalyze(
     const runnerResult = await runner.run({
       ...options,
       sourceFiles: normalizedSourceFiles,
+      bgmSourceFiles: normalizedBgmSourceFiles,
       sourceDiscovery,
       projectDir: ctx.projectDir,
       projectId,
@@ -201,6 +222,20 @@ export async function runAnalyze(
       undefined,
       true,
     );
+    if (runnerResult.analysisCoverageReport) {
+      writeAnalysisCoverageReport(ctx.projectDir, runnerResult.analysisCoverageReport);
+    }
+    const cacheEligibility = inspectAnalysisCacheEligibility(ctx.projectDir);
+    const coverageFreshness = validateAnalysisCoverageFreshness(ctx.projectDir);
+    if (!cacheEligibility.eligible || !coverageFreshness.valid) {
+      throw new Error(
+        `Gate 1 canonical analysis validation failed: ${cacheEligibility.violations.map((violation) =>
+          `${violation.artifact}:${violation.rule}:${violation.message}`
+        ).concat(coverageFreshness.violations.map((message) =>
+          `03_analysis/analysis_coverage_report.json:analysis_coverage_freshness:${message}`
+        )).join(" | ")}`,
+      );
+    }
     pt.advance("03_analysis/assets.json");
 
     const reconcileResult = reconcileAndPersist(
@@ -282,20 +317,55 @@ class DefaultAnalyzeRunner implements AnalyzeRunner {
         contentHint: ctx.contentHint,
         skipMediaLink: ctx.skipMediaLink,
         skipBgmAnalysis: ctx.skipBgmAnalysis,
+        bgmSourceFiles: ctx.bgmSourceFiles,
+        bgmForceBackend: ctx.bgmForceBackend,
+        bgmBackend: ctx.bgmBackend,
         vlmConcurrency: ctx.concurrency ?? DEFAULT_VLM_CONCURRENCY,
         noCache: ctx.noCache,
         clearCache: ctx.clearCache,
         stageProgress: ctx.stageProgress,
         sourceDiscovery: ctx.sourceDiscovery,
+        firstPreviewDeadlineAtMs: ctx.firstPreviewDeadlineAtMs,
+        firstPreviewCompileRenderReserveMs: ctx.firstPreviewCompileRenderReserveMs,
       });
+
+      // Issue 37: pre-compile VLM image QC gate over AI-generated still-image
+      // assets (same route the public analyze CLI uses).
+      await runAnalyzeImageQcGate({
+        projectDir: ctx.projectDir,
+        projectId: ctx.projectId,
+      });
+
       return {
         artifactsCreated: collectExistingAnalyzeArtifacts(ctx.projectDir),
         sourceLedger: result.sourceLedger,
+        analysisCoverageReport: result.analysisCoverageReport,
       };
     } finally {
       await marlinFn?.close?.();
     }
   }
+}
+
+/**
+ * Issue 37 image QC gate invocation shared by the public analyze CLI and
+ * DefaultAnalyzeRunner. The gate itself publishes a sanitized report and
+ * projects optional-unavailable results into the Issue 44 taxonomy.
+ */
+export interface AnalyzeImageQcGateOptions {
+  projectDir: string;
+  projectId?: string;
+  briefContext?: string;
+}
+
+export async function runAnalyzeImageQcGate(options: AnalyzeImageQcGateOptions): Promise<ImageQcGateResult> {
+  // The public route invokes the canonical gate directly. Optional model
+  // absence is represented in the report; qa_failed and required capability
+  // absence are left for the compile gate to reject.
+  return runImageQcGate({
+    projectDir: options.projectDir,
+    projectId: options.projectId,
+  });
 }
 
 export function persistAnalyzeReadinessArtifacts(
@@ -349,4 +419,18 @@ function collectExistingAnalyzeArtifacts(projectDir: string): string[] {
   return ANALYZE_ARTIFACT_CANDIDATES.filter((relativePath) =>
     fs.existsSync(path.join(projectDir, relativePath))
   );
+}
+
+/**
+ * Best-effort brief text for the image QC semantic-consistency check. Missing
+ * or unreadable briefs degrade to "" (the prompt then says no brief context is
+ * available) — never a gate failure.
+ */
+export function readBriefContextForImageQc(projectDir: string): string {
+  const briefPath = path.join(projectDir, "01_intent/creative_brief.yaml");
+  try {
+    return fs.readFileSync(briefPath, "utf8").trim().slice(0, 2000);
+  } catch {
+    return "";
+  }
 }

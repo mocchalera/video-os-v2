@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/premiere-export-identity.schema.json",
+  "title": "Video OS Premiere export identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "project_id", "export_kind", "timeline", "caption", "visual_treatment", "audio", "source_identity", "route_capability", "visual_effects", "human_approval", "export_identity_hash"],
+  "properties": {
+    "version": { "const": "premiere-export-identity/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "export_kind": { "const": "fcp7_xml" },
+    "timeline": { "$ref": "#/$defs/artifact" },
+    "review_edit_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "cut_identity", "receipt"],
+      "properties": {
+        "mode": { "enum": ["derived", "legacy_canonical"] },
+        "cut_identity": { "$ref": "#/$defs/hash" },
+        "receipt": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] }
+      }
+    },
+    "caption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "status", "approval", "approval_hash", "text_timing_hash"],
+      "properties": {
+        "owner": { "const": "caption_runtime_review_core_studio" },
+        "status": { "enum": ["approved", "not_applicable", "missing", "stale"] },
+        "approval": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "approval_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "text_timing_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+      }
+    },
+    "visual_treatment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "status", "input_hash", "input", "typography_policy_hash", "visual_treatment_patch_hash", "capability_hash"],
+      "properties": {
+        "owner": { "enum": ["ffmpeg-libass", "not_applicable"] },
+        "status": { "enum": ["resolved", "not_applicable", "blocked"] },
+        "input_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "input": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "typography_policy_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "visual_treatment_patch_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "capability_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "status", "plan", "plan_hash", "profile_id", "profile_hash"],
+      "properties": {
+        "owner": { "enum": ["shared_audio_render_plan", "legacy_dialogue_route", "not_applicable"] },
+        "status": { "enum": ["resolved", "not_applicable", "missing"] },
+        "plan": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "plan_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "profile_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+      }
+    },
+    "source_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source_map", "source_inputs_hash", "assets"],
+      "properties": {
+        "status": { "enum": ["verified", "declared_reference"] },
+        "source_map": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "source_inputs_hash": { "$ref": "#/$defs/hash" },
+        "assets": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["asset_id", "locator", "content_sha256"], "properties": { "asset_id": { "type": "string", "minLength": 1 }, "locator": { "type": "string", "minLength": 1 }, "content_sha256": { "$ref": "#/$defs/hash" } } } }
+      }
+    },
+    "route_capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "hash", "assembly_engine", "caption_renderer", "content_renderers"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "hash": { "$ref": "#/$defs/hash" },
+        "assembly_engine": { "enum": ["ffmpeg", "remotion"] },
+        "caption_renderer": { "enum": ["ffmpeg-libass", "none"] },
+        "content_renderers": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "visual_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "unsupported", "baked_clip_ids"],
+      "properties": {
+        "status": { "enum": ["editable", "baked", "none", "blocked"] },
+        "unsupported": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["clip_id", "status", "reason"], "properties": { "clip_id": { "type": "string" }, "status": { "type": "string" }, "reason": { "type": "string" } } } },
+        "baked_clip_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "human_approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caption_status", "export_status"],
+      "properties": {
+        "caption_status": { "enum": ["approved", "not_applicable", "missing", "stale"] },
+        "export_status": { "const": "not_requested" }
+      }
+    },
+    "export_identity_hash": { "$ref": "#/$defs/hash" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "caption": { "properties": { "status": { "const": "approved" } } } }, "required": ["caption"] },
+      "then": { "properties": { "caption": { "required": ["approval", "approval_hash", "text_timing_hash"], "properties": { "approval": { "type": "object" } } } } }
+    },
+    {
+      "if": { "properties": { "visual_treatment": { "properties": { "status": { "const": "resolved" } } } }, "required": ["visual_treatment"] },
+      "then": { "properties": { "visual_treatment": { "required": ["input", "input_hash"] } } }
+    }
+  ],
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/hash" } }
+    }
+  }
+}

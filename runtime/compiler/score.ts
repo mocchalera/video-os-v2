@@ -18,6 +18,7 @@ import type { BgmSection } from "./transition-types.js";
 import type { BeatEvent } from "../media/bgm-analyzer.js";
 import { getCandidateRef } from "./candidate-ref.js";
 import { resolveStillImageHold } from "../artifacts/still-image-policy.js";
+import type { StillHoldResolutionContext } from "../artifacts/still-image-policy.js";
 
 // ── BGM-aware scoring context ───────────────────────────────────────
 
@@ -106,6 +107,7 @@ export function scoreCandidates(
   durationPolicy?: DurationPolicy,
   bgmContext?: BgmScoringContext,
   stillDurationPolicy?: StillDurationPolicy,
+  stillHoldContext?: StillHoldResolutionContext,
 ): RankedCandidateTable {
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const nonReject = candidates.filter((c) => c.role !== "reject");
@@ -213,6 +215,7 @@ export function scoreCandidates(
         planPriority,
         computeBeatMatchAdjustment(candidate, beat),
         stillDurationPolicy,
+        stillHoldContext,
       );
       scored.push(entry);
     }
@@ -243,6 +246,7 @@ function scoreCandidate(
   planPriority?: "primary" | "fallback",
   beatMatchAdjustment?: BeatMatchAdjustment,
   stillDurationPolicy?: StillDurationPolicy,
+  stillHoldContext?: StillHoldResolutionContext,
 ): ScoredCandidate {
   // 1. Semantic rank score: higher rank (lower number) → higher score
   //    Normalize: 1.0 for rank 1, decaying. Use 1 / rank.
@@ -261,12 +265,12 @@ function scoreCandidate(
       : candidate.still_image,
   };
   const unconstrainedStill = candidate.media_kind === "image" && stillDurationPolicy
-    ? resolveStillImageHold(scoreCandidateStill, stillDurationPolicy, stillDurationPolicy.max_hold_frames)
+    ? resolveStillImageHold(scoreCandidateStill, stillDurationPolicy, stillDurationPolicy.max_hold_frames, stillHoldContext)
     : undefined;
   const candidateDurationFrames = unconstrainedStill
     ? targetFrames < unconstrainedStill.min_hold_frames
       ? unconstrainedStill.min_hold_frames
-      : resolveStillImageHold(scoreCandidateStill, stillDurationPolicy!, targetFrames).hold_frames
+      : resolveStillImageHold(scoreCandidateStill, stillDurationPolicy!, targetFrames, stillHoldContext).hold_frames
     : (candidate.src_out_us - candidate.src_in_us) / usPerFrame;
   const durationDiff = Math.abs(candidateDurationFrames - targetFrames);
 

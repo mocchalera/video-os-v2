@@ -1,0 +1,68 @@
+version: audio-delivery-profile/v1
+profile_id: instagram-reels-organic-audio-v1
+profile_version: v1
+platform: instagram
+surface: reels
+release_scope: organic
+delivery_variant: production-reference
+status: partial
+source_references:
+  - url: https://www.facebook.com/help/instagram/1038071743007909?locale=en_GB
+    title: Instagram Help Center Reels reference
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: Meta Help Center
+    evidence_kind: official_documentation
+    notes: Official page is retained as context; it does not establish the audio numbers below.
+retrieved_at: '2026-08-21'
+owner: Video OS maintainers
+verification:
+  owner: Video OS maintainers
+  verified_at: null
+  review_due_at: null
+supersession:
+  state: active
+assumptions:
+  - Instagram platform loudness, true-peak, codec, and normalization behavior are not claimed without current official audio evidence.
+  - Internal generic targets may be used only as clearly labeled fixture inputs.
+dialogue_processing:
+  authority_track: A1
+  conflict_policy: dialogue_first
+  finishing_engine: existing_dialogue_finishing
+  optional_stages: [policy-requested dialogue finishing]
+  single_mastering_owner: shared_audio_render_plan
+  single_mastering_stage: after_mix
+  max_mastering_passes: 1
+measurement_requirements:
+  encoded_result_required: true
+  method:
+    loudness: ffmpeg loudnorm pass 1 on encoded result
+    true_peak: ffmpeg loudnorm input_tp on encoded result
+    format: ffprobe encoded stream and container
+    duration: ffprobe encoded stream duration
+    av_sync: ffprobe audio/video duration and start-time comparison
+  integrated_loudness: { status: unknown, basis: unknown, notes: Platform-required value is not supported by this source. }
+  short_term_loudness: { status: unknown, basis: unknown }
+  lra: { status: unknown, basis: unknown }
+  true_peak: { status: unknown, basis: unknown, notes: Platform-required value is not supported by this source. }
+  voice_intelligibility: { status: not_claimed, basis: unknown, proxies: [encoded format inspection, mono fold-down command], human_required: true }
+  diagnostics: { clipping: optional astats, silence: threshold must be supplied, dropout: not asserted, channel: ffprobe, phase: not asserted }
+encoding_requirements:
+  container: { status: unknown, basis: unknown }
+  codec: { status: unknown, basis: unknown }
+  sample_rate_hz: { status: unknown, basis: unknown }
+  channels: { status: unknown, basis: unknown }
+  true_peak_margin_dbtp: { status: unknown, basis: unknown }
+  encode_preview: { status: unknown, method: encode local preview and inspect in Instagram surface, human_required: true }
+playback_evidence:
+  stereo: { status: unknown, method: encoded inspection only, human_required: true }
+  mono_fold_down: { status: unknown, method: ffmpeg fixture plus human audition, human_required: true }
+  mobile_fixture: { status: unknown, method: no current device fixture, human_required: true }
+normalization:
+  status: unknown
+  assumption: Instagram normalization/transcode behavior is unknown; no normalization is applied or simulated by this profile.
+human_preview:
+  required: true
+  gates: [human_platform_audition, mono_mobile_playback]
+  status: pending
+fallback: { on_missing_tool: fail_open, on_stale_or_unknown: human_hold, reason: Official context does not establish current audio requirements. }

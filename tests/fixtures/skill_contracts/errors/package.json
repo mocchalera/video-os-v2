@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "good": "tsx scripts/good.ts",
+    "indirect": "node -e \"process.exit(0)\""
+  }
+}

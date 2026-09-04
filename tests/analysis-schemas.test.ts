@@ -388,8 +388,11 @@ describe("M2 Phase 1 — analysis schemas", () => {
 
   describe("transcript schema", () => {
     it("accepts transcript with new optional fields (live profile)", () => {
+      // Long-standing live-profile contract (Issue #35 authority):
+      // artifact_version analysis-v2 is centrally supported; project_id must
+      // match the consuming brief.
       const liveTranscript = {
-        project_id: "test-live",
+        project_id: "sample-mountain-reset",
         artifact_version: "analysis-v2",
         transcript_ref: "TR_AST_001",
         asset_id: "AST_001",
@@ -439,7 +442,7 @@ describe("M2 Phase 1 — analysis schemas", () => {
 
     it("rejects transcript missing required root fields", () => {
       const badTranscript = {
-        project_id: "test",
+        project_id: "sample-mountain-reset",
         artifact_version: "analysis-v1",
         // missing transcript_ref, asset_id, items
       };
@@ -451,17 +454,19 @@ describe("M2 Phase 1 — analysis schemas", () => {
 
       const result = validateProject(tmp);
 
+      // The central transcript authority reports deterministic rules
+      // (transcript_schema_invalid) instead of the generic "schema" rule.
       const violations = result.violations.filter(
         (v) =>
           v.artifact === "03_analysis/transcripts/TR_BAD.json" &&
-          v.rule === "schema",
+          v.rule.startsWith("transcript_"),
       );
       expect(violations.length).toBeGreaterThanOrEqual(1);
     });
 
     it("rejects transcript item missing required fields", () => {
       const badTranscript = {
-        project_id: "test",
+        project_id: "sample-mountain-reset",
         artifact_version: "analysis-v1",
         transcript_ref: "TR_BAD",
         asset_id: "AST_001",
@@ -483,7 +488,7 @@ describe("M2 Phase 1 — analysis schemas", () => {
       const violations = result.violations.filter(
         (v) =>
           v.artifact === "03_analysis/transcripts/TR_BAD.json" &&
-          v.rule === "schema",
+          v.rule.startsWith("transcript_"),
       );
       expect(violations.length).toBeGreaterThanOrEqual(1);
     });
@@ -494,6 +499,8 @@ describe("M2 Phase 1 — analysis schemas", () => {
   describe("analysis policy schema", () => {
     it("validates the default policy from runtime/analysis-defaults.yaml", () => {
       const defaults = loadDefaults();
+      expect((defaults.vlm as Record<string, unknown>).segment_visual_output_tokens_max)
+        .toBe(1024);
 
       const tmp = createTempProject("policy-defaults", {
         "analysis_policy.yaml": defaults,
@@ -506,6 +513,24 @@ describe("M2 Phase 1 — analysis schemas", () => {
         (v) => v.artifact === "analysis_policy.yaml",
       );
       expect(policyViolations).toHaveLength(0);
+    });
+
+    it("rejects non-positive editorial_llm.stage_timeout_ms", () => {
+      const defaults = loadDefaults();
+      const editorialLlm = defaults.editorial_llm as Record<string, unknown>;
+      editorialLlm.stage_timeout_ms = 0;
+
+      const tmp = createTempProject("policy-bad-stage-timeout", {
+        "analysis_policy.yaml": defaults,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      const policyViolations = result.violations.filter(
+        (v) => v.artifact === "analysis_policy.yaml" && v.rule === "schema",
+      );
+      expect(policyViolations.length).toBeGreaterThanOrEqual(1);
     });
 
     it("partial override missing root fields is accepted (merged from defaults)", () => {
@@ -537,6 +562,24 @@ describe("M2 Phase 1 — analysis schemas", () => {
         (v) => v.artifact === "analysis_policy.yaml" && v.rule === "schema",
       );
       expect(violations.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("rejects non-positive marlin.caption_max_new_tokens_max", () => {
+      const defaults = loadDefaults();
+      const marlin = defaults.marlin as Record<string, unknown>;
+      marlin.caption_max_new_tokens_max = 0;
+
+      const tmp = createTempProject("policy-bad-caption-tokens", {
+        "analysis_policy.yaml": defaults,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      const policyViolations = result.violations.filter(
+        (v) => v.artifact === "analysis_policy.yaml" && v.rule === "schema",
+      );
+      expect(policyViolations.length).toBeGreaterThanOrEqual(1);
     });
 
     it("rejects policy with additional unknown root field", () => {
@@ -984,7 +1027,7 @@ describe("M2 Phase 1 — analysis schemas", () => {
   describe("transcript live-profile (W3 fix)", () => {
     it("rejects live transcript (analysis_status: ready) without word_timing_mode", () => {
       const badTranscript = {
-        project_id: "test",
+        project_id: "sample-mountain-reset",
         artifact_version: "analysis-v2",
         transcript_ref: "TR_AST_001",
         asset_id: "AST_001",
@@ -1005,14 +1048,14 @@ describe("M2 Phase 1 — analysis schemas", () => {
       const violations = result.violations.filter(
         (v) =>
           v.artifact === "03_analysis/transcripts/TR_AST_001.json" &&
-          v.rule === "schema",
+          v.rule.startsWith("transcript_"),
       );
       expect(violations.length).toBeGreaterThanOrEqual(1);
     });
 
     it("rejects live transcript (analysis_status: partial) without word_timing_mode", () => {
       const badTranscript = {
-        project_id: "test",
+        project_id: "sample-mountain-reset",
         artifact_version: "analysis-v2",
         transcript_ref: "TR_AST_001",
         asset_id: "AST_001",
@@ -1032,14 +1075,14 @@ describe("M2 Phase 1 — analysis schemas", () => {
       const violations = result.violations.filter(
         (v) =>
           v.artifact === "03_analysis/transcripts/TR_AST_001.json" &&
-          v.rule === "schema",
+          v.rule.startsWith("transcript_"),
       );
       expect(violations.length).toBeGreaterThanOrEqual(1);
     });
 
     it("accepts transcript without analysis_status (no word_timing_mode required)", () => {
       const transcript = {
-        project_id: "test",
+        project_id: "sample-mountain-reset",
         artifact_version: "analysis-v1",
         transcript_ref: "TR_AST_001",
         asset_id: "AST_001",
@@ -1058,14 +1101,14 @@ describe("M2 Phase 1 — analysis schemas", () => {
       const violations = result.violations.filter(
         (v) =>
           v.artifact === "03_analysis/transcripts/TR_AST_001.json" &&
-          v.rule === "schema",
+          v.rule.startsWith("transcript_"),
       );
       expect(violations).toHaveLength(0);
     });
 
     it("accepts live transcript with word_timing_mode present", () => {
       const transcript = {
-        project_id: "test",
+        project_id: "sample-mountain-reset",
         artifact_version: "analysis-v2",
         transcript_ref: "TR_AST_001",
         asset_id: "AST_001",

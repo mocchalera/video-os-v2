@@ -122,6 +122,15 @@ export function buildAudioFinishApplyFilter(
   ].join(",");
 }
 
+/** A1 cleanup/dynamics only. Final loudness normalization remains owned by
+ * the shared post-mix mastering pass. */
+export function buildAudioFinishPreprocessFilter(
+  policy: ResolvedAudioFinishPolicy,
+): string | null {
+  const filters = buildAudioFinishPreFilters(policy);
+  return filters.length > 0 ? filters.join(",") : null;
+}
+
 export function buildAudioFinishPass1Args(
   inputPath: string,
   policy: ResolvedAudioFinishPolicy,

@@ -29,6 +29,7 @@ import type {
   TransitionType,
   TransitionEffects,
   BgmAnalysis,
+  BgmSection,
   AdjacencyFeatures,
   PeakType,
   StoryRole,
@@ -53,6 +54,7 @@ import {
   resolveCadenceFit,
 } from "./transition-skill-loader.js";
 import { cosineSimilarity } from "./visual-cache.js";
+import { TRANSITION_PRESET_DEFAULT_CROSSFADE_SEC } from "./transition-types.js";
 import type { SegmentEvidence } from "../artifacts/segment-editorial-evidence.js";
 import { classifyCutRelation } from "./cut-relation.js";
 
@@ -576,6 +578,8 @@ export function craftTransitionToSkillId(transition: CraftTransition | undefined
       return "crossfade_bridge";
     case "dip_to_black":
       return "silence_beat";
+    // Issue #34 presets are handled directly by the craft override path
+    // (no skill card indirection): the transition type equals the craft value.
     default:
       return undefined;
   }
@@ -648,6 +652,13 @@ function defaultCraftTransitionType(transition: CraftTransition | undefined): Tr
       return "crossfade";
     case "dip_to_black":
       return "fade_to_black";
+    // Issue #34 presets: craft value maps 1:1 to the transition type.
+    case "film_crossfade":
+      return "film_crossfade";
+    case "light_leak_flash":
+      return "light_leak_flash";
+    case "dreamy_focus_blur":
+      return "dreamy_focus_blur";
     default:
       return undefined;
   }
@@ -741,6 +752,45 @@ export function findBeatSnapTarget(
     target_frame: targetFrame,
     is_downbeat: bestTarget.isDownbeat,
     delta_frames: deltaFrames,
+  };
+}
+
+/**
+ * Issue #34: find the chorus section start nearest a cut frame.
+ *
+ * The light-leak flash must fire exactly on the chorus head ("サビ頭で…
+ * 1フレームのズレもなく発光"), so chorus section starts are first-class snap
+ * targets for `light_leak_flash` transitions. Returns undefined when no
+ * chorus section start lies within tolerance.
+ */
+export function findChorusSectionSnapTarget(
+  cutFramePos: number,
+  fpsNum: number,
+  bgmAnalysis: BgmAnalysis | undefined,
+  snapToleranceFrames: number,
+): { target_sec: number; target_frame: number; delta_frames: number; section_id: string } | undefined {
+  if (!bgmAnalysis || bgmAnalysis.analysis_status !== "ready") return undefined;
+
+  const cutSec = cutFramePos / fpsNum;
+  let best: { section: BgmSection; dist: number } | undefined;
+  for (const section of bgmAnalysis.sections) {
+    if (section.label !== "chorus") continue;
+    const dist = Math.abs(section.start_sec - cutSec);
+    if (dist < (best?.dist ?? Infinity)) {
+      best = { section, dist };
+    }
+  }
+  if (!best) return undefined;
+
+  const targetFrame = Math.round(best.section.start_sec * fpsNum);
+  const deltaFrames = targetFrame - cutFramePos;
+  if (Math.abs(deltaFrames) > snapToleranceFrames) return undefined;
+
+  return {
+    target_sec: best.section.start_sec,
+    target_frame: targetFrame,
+    delta_frames: deltaFrames,
+    section_id: best.section.id,
   };
 }
 
@@ -1057,7 +1107,18 @@ export function adjacencyDecide(
         transition_type: forcedCraftTransitionType,
         crossfade_sec: forcedCraftTransitionType === "crossfade" || forcedCraftTransitionType === "fade_to_black"
           ? 0.5
-          : undefined,
+          : forcedCraftTransitionType === "film_crossfade" ||
+              forcedCraftTransitionType === "light_leak_flash" ||
+              forcedCraftTransitionType === "dreamy_focus_blur"
+            ? TRANSITION_PRESET_DEFAULT_CROSSFADE_SEC[forcedCraftTransitionType]
+            : undefined,
+        // Issue #34 presets anchor the A/B window on the cut frame so the
+        // overlap (and any chorus flash) starts exactly at the transition cut.
+        ...(forcedCraftTransitionType === "film_crossfade" ||
+        forcedCraftTransitionType === "light_leak_flash" ||
+        forcedCraftTransitionType === "dreamy_focus_blur"
+          ? { beat_snap: "beat" as const, snap_anchor: "cut_frame" as const }
+          : {}),
       };
       selectionOutcome = "craft_override";
       selectionReasonCodes = ["craft_transition_override", `craft_transition:${craftTransition.transition}`];
@@ -1141,10 +1202,29 @@ export function adjacencyDecide(
 
     // BGM beat snap — respect snap_anchor for windowed transitions
     let snapResult: ReturnType<typeof findBeatSnapTarget> | undefined;
+    let chorusSectionId: string | undefined;
     if (activeTransitionEffects && !belowThreshold && !craftForcesCut) {
       const effects = activeTransitionEffects;
       const preferDownbeat = effects.beat_snap === "downbeat";
       const snapAnchor = effects.snap_anchor ?? "cut_frame";
+
+      // Issue #34: the light-leak flash must fire exactly on the chorus head.
+      // Chorus section starts take priority over generic beat targets for
+      // light_leak_flash transitions anchored on the cut frame.
+      if (transitionType === "light_leak_flash" && snapAnchor === "cut_frame") {
+        const chorusSnap = findChorusSectionSnapTarget(
+          cutFrame, opts.fpsNum, opts.bgmAnalysis, snapToleranceFrames,
+        );
+        if (chorusSnap) {
+          snapResult = {
+            target_sec: chorusSnap.target_sec,
+            target_frame: chorusSnap.target_frame,
+            is_downbeat: true,
+            delta_frames: chorusSnap.delta_frames,
+          };
+          chorusSectionId = chorusSnap.section_id;
+        }
+      }
 
       // For transition_center anchor (crossfade, fade_to_black), compute center
       // as cut_frame + half the crossfade window in frames
@@ -1154,7 +1234,7 @@ export function adjacencyDecide(
         snapReferenceFrame = cutFrame + halfWindowFrames;
       }
 
-      const rawSnap = findBeatSnapTarget(
+      const rawSnap = snapResult ?? findBeatSnapTarget(
         snapReferenceFrame, opts.fpsNum, opts.bgmAnalysis,
         preferDownbeat, snapToleranceFrames,
       );
@@ -1228,6 +1308,26 @@ export function adjacencyDecide(
       params.cut_frame_after_snap = cutFrame;
       params.snap_delta_frames = 0;
       hasParams = true;
+    }
+
+    // Issue #34 overlap presets blend with a fixed linear law:
+    // Frame = (1 - alpha) * A + alpha * B.
+    if (
+      transitionType === "film_crossfade" ||
+      transitionType === "light_leak_flash" ||
+      transitionType === "dreamy_focus_blur"
+    ) {
+      params.easing = "linear";
+      hasParams = true;
+      if (chorusSectionId) {
+        transition.metadata = {
+          ...transition.metadata,
+          chorus_entry: {
+            section_id: chorusSectionId,
+            flash_start_frame: snapResult?.target_frame ?? cutFrame,
+          },
+        };
+      }
     }
 
     if (hasParams) {

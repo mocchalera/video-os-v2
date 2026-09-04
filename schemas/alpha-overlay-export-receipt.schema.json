@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/alpha-overlay-export-receipt.schema.json",
+  "title": "Video OS alpha overlay export receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "status",
+    "ownership",
+    "canonical_claim",
+    "geometry",
+    "fps",
+    "codec",
+    "source",
+    "output",
+    "visual_treatment",
+    "human_approval"
+  ],
+  "properties": {
+    "version": { "const": "alpha-overlay-export-receipt/v1" },
+    "status": { "enum": ["canonical", "supplied_external", "metadata_only", "not_applicable"] },
+    "ownership": { "enum": ["canonical", "supplied", "external"] },
+    "canonical_claim": { "type": "boolean" },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "fps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["num", "den"],
+      "properties": {
+        "num": { "type": "integer", "minimum": 1 },
+        "den": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "codec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "pixel_format", "alpha_mode"],
+      "oneOf": [
+        { "$ref": "#/$defs/alphaCodec" },
+        { "$ref": "#/$defs/notApplicableCodec" }
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "pixel_format": { "type": "string", "minLength": 1 },
+        "alpha_mode": { "type": ["string", "null"] }
+      }
+    },
+    "source": { "$ref": "#/$defs/artifact" },
+    "output": {
+      "anyOf": [
+        { "$ref": "#/$defs/artifact" },
+        { "type": "null" }
+      ]
+    },
+    "visual_treatment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_hash", "profile_hash", "capability_hash"],
+      "properties": {
+        "input_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "capability_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+      }
+    },
+    "human_approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "owner", "receipt"],
+      "properties": {
+        "status": { "enum": ["not_requested", "pending", "approved", "rejected"] },
+        "owner": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "receipt": {
+          "anyOf": [
+            { "$ref": "#/$defs/artifact" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "canonical" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "ownership": { "const": "canonical" },
+          "canonical_claim": { "const": true },
+          "output": { "$ref": "#/$defs/artifact" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "supplied_external" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "ownership": { "enum": ["supplied", "external"] },
+          "canonical_claim": { "const": false },
+          "output": { "$ref": "#/$defs/artifact" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "metadata_only" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "ownership": { "enum": ["supplied", "external"] },
+          "canonical_claim": { "const": false },
+          "output": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "not_applicable" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "ownership": { "enum": ["supplied", "external"] },
+          "canonical_claim": { "const": false },
+          "output": { "type": "null" },
+          "codec": { "$ref": "#/$defs/notApplicableCodec" },
+          "visual_treatment": {
+            "properties": {
+              "input_hash": { "type": "null" },
+              "profile_hash": { "type": "null" },
+              "capability_hash": { "type": "null" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["canonical", "supplied_external", "metadata_only"] } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "codec": { "$ref": "#/$defs/alphaCodec" },
+          "visual_treatment": {
+            "properties": {
+              "capability_hash": { "$ref": "#/$defs/hash" }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "input_hash": { "type": "null" },
+                  "profile_hash": { "type": "null" }
+                }
+              },
+              {
+                "properties": {
+                  "input_hash": { "$ref": "#/$defs/hash" },
+                  "profile_hash": { "$ref": "#/$defs/hash" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "human_approval": { "properties": { "status": { "const": "not_requested" } } } }, "required": ["human_approval"] },
+      "then": { "properties": { "human_approval": { "properties": { "owner": { "type": "null" }, "receipt": { "type": "null" } } } } }
+    },
+    {
+      "if": { "properties": { "human_approval": { "properties": { "status": { "enum": ["pending", "rejected"] } } } }, "required": ["human_approval"] },
+      "then": { "properties": { "human_approval": { "properties": { "owner": { "type": "string", "minLength": 1 }, "receipt": { "type": "null" } } } } }
+    },
+    {
+      "if": { "properties": { "human_approval": { "properties": { "status": { "const": "approved" } } } }, "required": ["human_approval"] },
+      "then": { "properties": { "human_approval": { "properties": { "owner": { "type": "string", "minLength": 1 }, "receipt": { "$ref": "#/$defs/artifact" } } } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "supplied_external" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "canonical_claim": { "const": false }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["supplied_external", "metadata_only", "not_applicable"] } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "ownership": { "not": { "const": "canonical" } },
+          "canonical_claim": { "const": false }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "alphaCodec": {
+      "type": "object",
+      "required": ["name", "pixel_format", "alpha_mode"],
+      "oneOf": [
+        {
+          "properties": {
+            "name": { "const": "vp9" },
+            "pixel_format": { "const": "yuva420p" },
+            "alpha_mode": { "enum": ["1", "straight", "premultiplied"] }
+          }
+        },
+        {
+          "properties": {
+            "name": { "enum": ["prores", "prores_ks"] },
+            "pixel_format": { "enum": ["yuva444p10le", "yuva444p12le", "yuva422p10le"] },
+            "alpha_mode": { "enum": ["1", "straight", "premultiplied"] }
+          }
+        },
+        {
+          "properties": {
+            "name": { "const": "qtrle" },
+            "pixel_format": { "enum": ["argb", "rgba"] },
+            "alpha_mode": { "enum": ["1", "straight", "premultiplied"] }
+          }
+        },
+        {
+          "properties": {
+            "name": { "const": "png" },
+            "pixel_format": { "enum": ["argb", "rgba"] },
+            "alpha_mode": { "enum": ["1", "straight", "premultiplied"] }
+          }
+        },
+        {
+          "properties": {
+            "name": { "const": "ffv1" },
+            "pixel_format": { "enum": ["yuva420p", "yuva444p10le"] },
+            "alpha_mode": { "enum": ["1", "straight", "premultiplied"] }
+          }
+        },
+        {
+          "properties": {
+            "name": { "const": "hap_alpha" },
+            "pixel_format": { "const": "rgba" },
+            "alpha_mode": { "enum": ["1", "straight", "premultiplied"] }
+          }
+        }
+      ]
+    },
+    "notApplicableCodec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "pixel_format", "alpha_mode"],
+      "properties": {
+        "name": { "const": "none" },
+        "pixel_format": { "const": "none" },
+        "alpha_mode": { "type": "null" }
+      }
+    },
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    }
+  }
+}

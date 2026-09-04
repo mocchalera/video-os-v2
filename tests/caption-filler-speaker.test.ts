@@ -18,6 +18,8 @@ import {
   type CaptionPolicy,
   type CaptionGenerationOptions,
 } from "../runtime/caption/segmenter.js";
+import { applyCaptionWordTiming } from "../runtime/commands/caption.js";
+import type { CaptionDraft } from "../runtime/caption/editorial.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -698,6 +700,119 @@ describe("caption timeline remapping", () => {
     );
 
     expect(result.speech_captions.map((caption) => caption.text)).toEqual(["A1の発話字幕"]);
+  });
+
+  it("uses word timestamps from compiler nat_sound clips on canonical A1", () => {
+    const timeline = {
+      version: "1",
+      project_id: "test-filler",
+      created_at: "2026-08-20T00:00:00Z",
+      sequence: {
+        name: "A1 timing regression",
+        fps_num: 30,
+        fps_den: 1,
+        width: 1080,
+        height: 1920,
+        start_frame: 0,
+        output_aspect_ratio: "9:16",
+      },
+      tracks: {
+        video: [],
+        audio: [{
+          track_id: "A1",
+          kind: "audio" as const,
+          clips: [{
+            clip_id: "ACL_001",
+            segment_id: "SEG_001",
+            asset_id: "A_001",
+            src_in_us: 0,
+            src_out_us: 2_000_000,
+            timeline_in_frame: 0,
+            timeline_duration_frames: 60,
+            role: "nat_sound",
+            motivation: "original clip audio",
+            beat_id: "b01",
+            fallback_segment_ids: [],
+            confidence: 1,
+            quality_flags: [],
+          }],
+        }],
+      },
+      markers: [],
+      provenance: {
+        brief_path: "01_intent/creative_brief.yaml",
+        blueprint_path: "04_plan/edit_blueprint.yaml",
+        selects_path: "04_plan/selects_candidates.yaml",
+        compiler_version: "test",
+      },
+    };
+    const draft = {
+      version: "1.0",
+      project_id: "test-filler",
+      base_timeline_version: "1",
+      caption_policy: defaultPolicy,
+      speech_captions: [{
+        caption_id: "SC_0001",
+        asset_id: "A_001",
+        segment_id: "SEG_001",
+        timeline_in_frame: 0,
+        timeline_duration_frames: 60,
+        text: "はいどう",
+        transcript_ref: "TR_A_001",
+        transcript_item_ids: ["TRI_001"],
+        source: "transcript",
+        styling_class: "default",
+        metrics: { cps: 4, dwell_ms: 2_000 },
+        editorial: {
+          sourceText: "はいどう",
+          operations: [],
+          glossaryHits: [],
+          confidence: 1,
+          status: "clean",
+        },
+      }],
+      text_overlays: [],
+      draft_status: "ready_for_human_approval",
+      degraded_count: 0,
+    } satisfies CaptionDraft;
+    const transcripts = new Map([[
+      "A_001",
+      {
+        project_id: "test-filler",
+        artifact_version: "2.0.0",
+        transcript_ref: "TR_A_001",
+        asset_id: "A_001",
+        items: [{
+          item_id: "TRI_001",
+          speaker: "S1",
+          speaker_key: "A_001:S1",
+          start_us: 0,
+          end_us: 2_000_000,
+          text: "はいどう",
+          words: [
+            { word: "はい", start_us: 200_000, end_us: 360_000 },
+            { word: "どう", start_us: 360_000, end_us: 520_000 },
+          ],
+        }],
+      },
+    ]]);
+
+    const result = applyCaptionWordTiming(
+      draft,
+      defaultPolicy,
+      timeline,
+      transcripts,
+    );
+
+    expect(result.speech_captions[0]).toMatchObject({
+      timeline_in_frame: 6,
+      timeline_duration_frames: 10,
+      timing: {
+        source: "word_remap",
+        confidence: 0.8,
+        triggeredFallback: false,
+      },
+    });
   });
 
   it("uses sequence fps when the canonical timeline has no top-level fps", () => {

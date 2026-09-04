@@ -72,6 +72,9 @@
       "required": ["caption_id", "asset_id", "segment_id", "timeline_in_frame", "timeline_duration_frames", "text", "transcript_ref", "transcript_item_ids", "source", "styling_class", "metrics", "review", "issues", "risk_score"],
       "properties": {
         "caption_id": { "type": "string", "pattern": "^SC_" },
+        "root_id": { "type": "string", "pattern": "^SC_" },
+        "parent_ids": { "type": "array", "items": { "type": "string", "pattern": "^SC_" }, "uniqueItems": true },
+        "lineage_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "asset_id": { "type": "string" },
         "segment_id": { "type": "string" },
         "timeline_in_frame": { "type": "integer", "minimum": 0 },
@@ -79,7 +82,7 @@
         "text": { "type": "string", "minLength": 1 },
         "text_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "transcript_ref": { "type": "string" },
-        "transcript_item_ids": { "type": "array", "items": { "type": "string" } },
+        "transcript_item_ids": { "type": "array", "items": {} },
         "source": { "enum": ["transcript", "authored"] },
         "styling_class": { "type": "string" },
         "metrics": {

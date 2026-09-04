@@ -1,0 +1,5 @@
+{
+  "gate": "agent_qa",
+  "fixture": true,
+  "note": "deterministic agent QA pass metadata"
+}

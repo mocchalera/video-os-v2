@@ -356,6 +356,7 @@ export interface VerifyDerivedVideoProvenanceOptions {
   projectDir: string;
   provenancePath: string;
   expectedFinalVideoPath: string;
+  sourceInputs?: SourceInputAttestation;
 }
 
 export interface DerivedVideoProvenanceVerification {
@@ -395,6 +396,7 @@ export function verifyDerivedVideoProvenance(
         ? resolveRef(options.projectDir, value.transformation_chain.render_route_receipt)
         : undefined,
       handoffId: value.transformation_chain.handoff_id,
+      sourceInputs: options.sourceInputs,
       createdAt: value.created_at,
     });
     if (JSON.stringify(value) !== JSON.stringify(rebuilt)) {

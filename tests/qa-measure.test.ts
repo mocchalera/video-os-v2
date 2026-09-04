@@ -210,9 +210,9 @@ describe("qa measurement", () => {
     ]);
   });
 
-  // ── C-03 edge case: ebur128 stderr parse failure returns fallback ──
+  // Missing/unparseable loudness is represented as unavailable evidence.
 
-  it("returns fallback loudness when ffmpeg ebur128 output is unparseable", async () => {
+  it("does not synthesize loudness when ffmpeg ebur128 output is unparseable", async () => {
     execFileMock.mockImplementation((
       cmd: string,
       args: string[],
@@ -248,12 +248,11 @@ describe("qa measurement", () => {
       createdAt: "2026-03-24T00:00:00.000Z",
     });
 
-    // Should use fallback values instead of throwing
-    expect(result.loudness_integrated).toBe(-24);
-    expect(result.loudness_true_peak).toBe(-1);
+    expect(Number.isNaN(result.loudness_integrated)).toBe(true);
+    expect(Number.isNaN(result.loudness_true_peak)).toBe(true);
   });
 
-  it("returns fallback loudness when ffmpeg exits with error and no stderr", async () => {
+  it("does not synthesize loudness when ffmpeg exits with error and no stderr", async () => {
     execFileMock.mockImplementation((
       cmd: string,
       args: string[],
@@ -289,8 +288,7 @@ describe("qa measurement", () => {
       createdAt: "2026-03-24T00:00:00.000Z",
     });
 
-    // Should use fallback values
-    expect(result.loudness_integrated).toBe(-24);
-    expect(result.loudness_true_peak).toBe(-1);
+    expect(Number.isNaN(result.loudness_integrated)).toBe(true);
+    expect(Number.isNaN(result.loudness_true_peak)).toBe(true);
   });
 });

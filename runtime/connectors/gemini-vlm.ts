@@ -18,10 +18,19 @@ import type {
   ObservationGroupConfidence,
   ObservationValues,
 } from "../pipeline/stages/editorial-observation.js";
+import {
+  buildVlmSchemaContractPrompt,
+  formatVlmValidationError,
+  getVlmProviderResponseSchema,
+  getVlmRequiredPaths,
+  validateVlmGroundingResponse,
+  VLM_GROUNDING_RESPONSE_SCHEMA_VERSION,
+  type VlmValidationError,
+} from "../validation/vlm-grounding-response-validator.js";
 
 // ── Constants ──────────────────────────────────────────────────────
 
-export const VLM_CONNECTOR_VERSION = "gemini-vlm-v3.0.0";
+export const VLM_CONNECTOR_VERSION = "gemini-vlm-v3.3.0";
 
 /** Canonical prompt template for M2 segment enrichment. */
 export const PROMPT_TEMPLATE_ID = "m2-segment-grounded-v3";
@@ -32,15 +41,7 @@ const PROMPT_TEMPLATE = `Analyze the following video segment frames. Return a JS
 - "interest_points": array of notable moments, each with "frame_us" (microsecond timestamp), "label" (short description), "confidence" (0-1)
 - "quality_flags": array of quality issues detected (from vocabulary: "underexposed", "overexposed", "blurry", "shaky", "noisy", "interlaced", "letterboxed", "pillarboxed")
 - "confidence": object with "summary" (0-1), "tags" (0-1), "quality_flags" (0-1)
-- "editorial_observation": genre-neutral visible facts with "visual_tags", "motion_type", "camera_motion_direction", "subject_motion_direction", "shot_scale", "composition_anchor", "screen_side", "gaze_direction", "camera_axis", "dominant_subject_type", "dominant_colors", and "text_presence". Use only the documented enum values; use "unknown" or "not_applicable" rather than guessing. Include group confidence numbers for "tags", "motion", "framing", "direction", "appearance", and "text".
-  - motion_type: static|subtle|continuous|intermittent|rapid|mixed|unknown|not_applicable
-  - camera_motion_direction and subject_motion_direction: left|right|up|down|toward_camera|away_from_camera|mixed|unknown|not_applicable
-  - shot_scale: extreme_wide|wide|medium_wide|medium|medium_close_up|close_up|extreme_close_up|insert|unknown|not_applicable
-  - composition_anchor and screen_side: left|center|right|balanced|multiple|full_frame|unknown|not_applicable (screen_side does not use balanced)
-  - gaze_direction: screen_left|screen_right|camera|away|up|down|mixed|unknown|not_applicable
-  - camera_axis: axis_left|axis_right|on_axis|establishing|unknown|not_applicable
-  - dominant_subject_type: person|group|animal|object|landscape|architecture|text_graphic|mixed|unknown|not_applicable
-  - text_presence: present|absent|unknown|not_applicable
+- "editorial_observation": genre-neutral visible facts. Use the schema-derived contract below for exact paths, required keys, enum values, and confidence bounds. Use "unknown" or "not_applicable" rather than guessing.
 - "visual_quality": object with:
   - "scores": object with 0-1 numbers for "light_quality", "subject_prominence", "emotional_expression", "composition_score", "motion_quality"
   - "labels": object with string arrays for "lighting_style", "composition_tags", "expression_tags", "motion_tags"
@@ -52,12 +53,16 @@ visual_quality score rubric anchors:
 - composition_score: 0.9=strong balance/geometry/framing, 0.5=functional framing, 0.1=chaotic/unintentional
 - motion_quality: 0.9=intentional effective motion/stillness, 0.5=ordinary or not applicable, 0.1=unwanted/incoherent motion. It is an intent-relative appraisal, not a motion amount; a static landscape or title card is not low quality merely for being still.
 
+${buildVlmSchemaContractPrompt()}
+
 Respond ONLY with valid JSON, no markdown fences or explanation.`;
 
-const REPAIR_PROMPT = `The previous response was not valid JSON. Please respond with ONLY a valid JSON object matching the schema described earlier. No markdown, no explanation.`;
+const REPAIR_PROMPT_PREFIX = "Return ONLY a JSON object satisfying the canonical response contract. Repair these paths:";
 
 /** Compute SHA-256 hash of the normalized prompt template + schema version. */
-export function computePromptHash(schemaVersion: string = "3.0.0"): string {
+export function computePromptHash(
+  schemaVersion: string = VLM_GROUNDING_RESPONSE_SCHEMA_VERSION,
+): string {
   const normalized = PROMPT_TEMPLATE.trim().replace(/\s+/g, " ");
   return createHash("sha256")
     .update(normalized + "|" + schemaVersion)
@@ -67,7 +72,7 @@ export function computePromptHash(schemaVersion: string = "3.0.0"): string {
 
 /** Compute SHA-256 hash of the repair prompt template. */
 export function computeRepairPromptHash(): string {
-  const normalized = REPAIR_PROMPT.trim().replace(/\s+/g, " ");
+  const normalized = REPAIR_PROMPT_PREFIX.trim().replace(/\s+/g, " ");
   return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
 }
 
@@ -99,6 +104,44 @@ export interface VlmPolicy {
   parse_retry_max: number;
 }
 
+/** Safe provider finish reasons retained in diagnostics and provenance. */
+export type VlmFinishReason =
+  | "STOP"
+  | "MAX_TOKENS"
+  | "SAFETY"
+  | "RECITATION"
+  | "LANGUAGE"
+  | "OTHER"
+  | "BLOCKLIST"
+  | "PROHIBITED_CONTENT"
+  | "SPII"
+  | "MALFORMED_FUNCTION_CALL"
+  | "EOF"
+  | "unrecognized";
+
+/** Why a provider response was classified as truncated. */
+export type VlmTruncationReason = "max_tokens" | "eof";
+
+/** Bounded reason that caused the one optional schema/parse repair. */
+export type VlmRetryReason =
+  | "truncated_json"
+  | "no_candidate"
+  | "no_text"
+  | "no_json_span"
+  | "json_syntax_error"
+  | "schema_invalid"
+  | "schema_empty"
+  | "call_failure";
+
+/** Conservative lower bound for a useful structured response. */
+export const VLM_OUTPUT_TOKEN_BUDGET_MIN = 256;
+/** Hard ceiling independent of malformed or over-large policy input. */
+export const VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX = 8_192;
+const VLM_OUTPUT_TOKEN_BUDGET_DEFAULT_MAX = 1_024;
+const VLM_OUTPUT_TOKEN_ROUNDING = 64;
+const VLM_OUTPUT_TOKENS_PER_FRAME = 16;
+const VLM_SCHEMA_BYTES_PER_TOKEN = 4;
+
 /** Raw response expected from the VLM provider. */
 export interface VlmRawResponse {
   summary?: string;
@@ -110,9 +153,9 @@ export interface VlmRawResponse {
   }>;
   quality_flags?: unknown[];
   confidence?: {
-    summary?: number;
-    tags?: number;
-    quality_flags?: number;
+    summary?: unknown;
+    tags?: unknown;
+    quality_flags?: unknown;
   };
   visual_quality?: unknown;
   editorial_observation?: unknown;
@@ -166,9 +209,18 @@ export interface VlmEnrichmentResult {
   success: boolean;
   output?: VlmNormalizedOutput;
   error?: string;
+  parse_diagnostics?: VlmParseDiagnostic[];
   prompt_hash: string;
   model_alias: string;
   model_snapshot: string;
+  /** Locally requested, bounded generation budget for each provider attempt. */
+  requested_output_tokens?: number;
+  /** Final provider finish reason; null means the provider did not return one. */
+  finish_reason?: VlmFinishReason | null;
+  /** Number of provider requests represented by this call path. */
+  attempt_count?: number;
+  /** Reason for the repair attempt, or null when no repair was made. */
+  retry_reason?: VlmRetryReason | null;
   frame_grounding?: VlmFrameGrounding;
 }
 
@@ -210,11 +262,67 @@ export interface VlmCallOptions {
   maxOutputTokens: number;
   /** Transcript context to include in the prompt (optional). */
   transcriptContext?: string;
+  /** Canonical provider response schema used by structured-output routes. */
+  responseSchema?: Record<string, unknown>;
 }
 
 export interface VlmCallResult {
   rawJson: string;
   provider_request_id?: string;
+  response_diagnostic?: VlmResponseDiagnostic;
+}
+
+export type VlmParseStage =
+  | "no_candidate"
+  | "no_text"
+  | "no_json_span"
+  | "truncated_json"
+  | "json_syntax_error"
+  | "schema_invalid"
+  | "schema_empty";
+
+export type VlmResponsePartKind =
+  | "text"
+  | "thought_text"
+  | "inline_data"
+  | "file_data"
+  | "function_call"
+  | "function_response"
+  | "executable_code"
+  | "code_execution_result"
+  | "empty"
+  | "unknown"
+  | "unavailable";
+
+/** Privacy-safe response metadata. It never contains provider text or paths. */
+export interface VlmResponseDiagnostic {
+  candidate_count: number | null;
+  finish_reason: VlmFinishReason | null;
+  block_reason: string | null;
+  blocked: boolean;
+  candidates_token_count: number | null;
+  thoughts_token_count: number | null;
+  output_token_cap: number;
+  text_bytes: number | null;
+  text_sha256_16: string;
+  part_count: number | null;
+  text_part_count: number | null;
+  first_part_kind: VlmResponsePartKind;
+  has_open_brace: boolean;
+  ends_with_close_brace: boolean;
+  truncation_reason?: VlmTruncationReason | null;
+}
+
+export interface VlmParseDiagnostic {
+  attempt_index: number;
+  attempt_outcome: "parse_failure" | "call_failure";
+  error_code: string;
+  parse_stage?: VlmParseStage;
+  response_scope?: "provider_envelope" | "candidate_text";
+  json_error_offset?: number;
+  present_top_level_keys?: string[];
+  validation_errors?: VlmValidationError[];
+  response?: VlmResponseDiagnostic;
 }
 
 // ── Quality Flag Vocabulary ────────────────────────────────────────
@@ -287,6 +395,58 @@ export function computeFrameCount(
   const durationSec = durationUs / 1_000_000;
   const raw = Math.max(1, Math.ceil(durationSec * fps));
   return Math.min(raw, frameCap);
+}
+
+/**
+ * Estimate the response shape cost from the canonical schema itself.
+ *
+ * This is deliberately a small owner-operated heuristic: it uses the
+ * serialized schema size as a stable proxy for the amount of structured
+ * output the contract can carry, then the caller adds a bounded per-frame
+ * allowance for frame-specific interest points. Provider response content is
+ * never inspected or retained by this calculation.
+ */
+export function estimateVlmSchemaOutputTokens(
+  schema: Record<string, unknown> = getVlmProviderResponseSchema(),
+): number {
+  let serializedBytes = 0;
+  try {
+    const serialized = JSON.stringify(schema);
+    serializedBytes = typeof serialized === "string" ? Buffer.byteLength(serialized) : 0;
+  } catch {
+    serializedBytes = 0;
+  }
+  const estimate = Math.ceil(serializedBytes / VLM_SCHEMA_BYTES_PER_TOKEN);
+  return Math.min(
+    VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX,
+    Math.max(1, Number.isSafeInteger(estimate) ? estimate : 1),
+  );
+}
+
+/**
+ * Resolve one bounded output token budget for the initial call and its
+ * optional repair. The frame count and schema shape affect the request, while
+ * the policy value remains the hard per-call ceiling.
+ */
+export function computeVlmOutputTokenBudget(
+  frameCount: number,
+  schema: Record<string, unknown> = getVlmProviderResponseSchema(),
+  maxOutputTokens: number = VLM_OUTPUT_TOKEN_BUDGET_DEFAULT_MAX,
+): number {
+  const configuredMax = Number.isSafeInteger(maxOutputTokens) && maxOutputTokens > 0
+    ? maxOutputTokens
+    : VLM_OUTPUT_TOKEN_BUDGET_DEFAULT_MAX;
+  const hardMax = Math.min(configuredMax, VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX);
+  const normalizedFrameCount = Number.isSafeInteger(frameCount) && frameCount > 0
+    ? Math.min(frameCount, VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX)
+    : 0;
+  const estimated = estimateVlmSchemaOutputTokens(schema) +
+    normalizedFrameCount * VLM_OUTPUT_TOKENS_PER_FRAME;
+  const rounded = Math.ceil(estimated / VLM_OUTPUT_TOKEN_ROUNDING) * VLM_OUTPUT_TOKEN_ROUNDING;
+  return Math.min(
+    hardMax,
+    Math.max(1, Math.min(VLM_OUTPUT_TOKEN_BUDGET_MIN, hardMax), rounded),
+  );
 }
 
 /**
@@ -538,6 +698,437 @@ export function normalizeVlmOutput(
 
 // ── Parse Retry ────────────────────────────────────────────────────
 
+/** Stable failure code for responses that parse but carry no usable content. */
+export const VLM_EMPTY_RESPONSE_ERROR = "vlm_semantically_empty_response";
+
+/**
+ * Stable failure code for parse failures. JSON.parse error messages can embed
+ * fragments of the raw provider body, so the raw message is never propagated.
+ */
+export const VLM_PARSE_FAILED_ERROR = "vlm_parse_failed";
+
+/** Stable failure code for JSON that parses but violates the canonical schema. */
+export const VLM_SCHEMA_VALIDATION_ERROR = "vlm_schema_validation_failed";
+
+/** Stable failure code for provider- or EOF-truncated JSON output. */
+export const VLM_TRUNCATED_RESPONSE_ERROR = "vlm_response_truncated";
+
+/**
+ * Stable failure code for arbitrary provider/runtime throws. Their messages
+ * are untrusted and may echo raw bodies or secrets, so only this code is
+ * recorded. Known-safe connector diagnostics and deadline/cancel errors are
+ * handled in classifyVlmCallError.
+ */
+export const VLM_CALL_FAILED_ERROR = "vlm_call_failed";
+
+/** Fixed non-secret code for deadline (TimeoutError) surfaces. */
+export const VLM_DEADLINE_EXCEEDED_ERROR = "vlm_deadline_exceeded";
+
+/** Fixed non-secret code for cancel/abort (AbortError) surfaces. */
+export const VLM_CANCELLED_ERROR = "vlm_cancelled";
+
+/** Provider placeholder enum values that convey no semantic content. */
+const OBSERVATION_PLACEHOLDER_VALUES = new Set(["unknown", "not_applicable"]);
+
+/** Canonical visual_quality score keys per segments.schema.json. */
+const VISUAL_QUALITY_SCORE_KEYS = [
+  "light_quality",
+  "subject_prominence",
+  "emotional_expression",
+  "composition_score",
+  "motion_quality",
+] as const;
+
+/** Canonical visual_quality label keys per segments.schema.json. */
+const VISUAL_QUALITY_LABEL_KEYS = [
+  "lighting_style",
+  "composition_tags",
+  "expression_tags",
+  "motion_tags",
+] as const;
+
+/** Known Gemini finishReason enum values safe to record in diagnostics. */
+const GEMINI_FINISH_REASONS = new Set([
+  "STOP",
+  "MAX_TOKENS",
+  "SAFETY",
+  "RECITATION",
+  "LANGUAGE",
+  "OTHER",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII",
+  "MALFORMED_FUNCTION_CALL",
+  // Kept as a safe adapter value for providers that surface an EOF reason.
+  "EOF",
+]);
+
+const GEMINI_BLOCK_REASONS = new Set([
+  "SAFETY",
+  "OTHER",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+]);
+
+/** Practical ceiling for any provider-derived count retained in diagnostics. */
+export const VLM_DIAGNOSTIC_COUNT_MAX = 1_000_000;
+
+const DIAGNOSTIC_TOP_LEVEL_KEYS = new Set([
+  "confidence",
+  "editorial_observation",
+  "interest_points",
+  "quality_flags",
+  "summary",
+  "tags",
+  "visual_quality",
+]);
+
+class GeminiVlmResponseError extends Error {
+  constructor(
+    message: string,
+    readonly parseStage: VlmParseStage,
+    readonly responseDiagnostic: VlmResponseDiagnostic,
+    readonly responseScope: VlmParseDiagnostic["response_scope"] = "candidate_text",
+    readonly jsonErrorOffset?: number,
+  ) {
+    super(message);
+    this.name = "GeminiVlmResponseError";
+  }
+}
+
+function boundedCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+      value >= 0 && value <= VLM_DIAGNOSTIC_COUNT_MAX
+    ? value
+    : null;
+}
+
+function allowlistedEnum(value: unknown, allowed: ReadonlySet<string>): string | null {
+  if (typeof value !== "string") return null;
+  return allowed.has(value) ? value : "unrecognized";
+}
+
+function allowlistedFinishReason(value: unknown): VlmFinishReason | null {
+  return allowlistedEnum(value, GEMINI_FINISH_REASONS) as VlmFinishReason | null;
+}
+
+/**
+ * Classify only the two bounded truncation signals understood by this
+ * connector. An unclosed object is the EOF-equivalent fallback when the
+ * provider does not return a finish reason.
+ */
+export function classifyVlmTruncationReason(
+  rawJson: string,
+  finishReason?: unknown,
+): VlmTruncationReason | null {
+  if (finishReason === "MAX_TOKENS") return "max_tokens";
+  if (finishReason === "EOF") return "eof";
+  const firstBrace = rawJson.indexOf("{");
+  const lastBrace = rawJson.lastIndexOf("}");
+  if (firstBrace < 0) return null;
+  if (hasUnclosedJsonStructure(rawJson, firstBrace)) return "eof";
+  if (lastBrace === -1 || lastBrace <= firstBrace) return "eof";
+  try {
+    JSON.parse(rawJson.slice(firstBrace, lastBrace + 1));
+    return null;
+  } catch (error) {
+    // JSON.parse's EOF/unterminated-string diagnostics are used only as a
+    // classification signal; the provider text is never returned or stored.
+    return error instanceof SyntaxError &&
+      /unexpected end|end of json input|unterminated string/i.test(error.message)
+      ? "eof"
+      : null;
+  }
+}
+
+function hasUnclosedJsonStructure(rawJson: string, start: number): boolean {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < rawJson.length; index += 1) {
+    const character = rawJson[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{" || character === "[") {
+      stack.push(character);
+    } else if (character === "}" || character === "]") {
+      const opener = stack.pop();
+      if ((character === "}" && opener !== "{") ||
+        (character === "]" && opener !== "[")) {
+        return false;
+      }
+    }
+  }
+  return inString || stack.length > 0;
+}
+
+const RESPONSE_PART_KINDS: ReadonlySet<VlmResponsePartKind> = new Set([
+  "text",
+  "thought_text",
+  "inline_data",
+  "file_data",
+  "function_call",
+  "function_response",
+  "executable_code",
+  "code_execution_result",
+  "empty",
+  "unknown",
+  "unavailable",
+]);
+
+function safeResponsePartKind(value: unknown): VlmResponsePartKind {
+  return typeof value === "string" && RESPONSE_PART_KINDS.has(value as VlmResponsePartKind)
+    ? value as VlmResponsePartKind
+    : "unknown";
+}
+
+function responseTextMetadata(rawJson: string, outputTokenCap: number): Pick<
+  VlmResponseDiagnostic,
+  "output_token_cap" | "text_bytes" | "text_sha256_16" |
+  "has_open_brace" | "ends_with_close_brace"
+> {
+  const trimmed = rawJson.trim();
+  return {
+    output_token_cap: Number.isSafeInteger(outputTokenCap) && outputTokenCap >= 0 &&
+        outputTokenCap <= VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX
+      ? outputTokenCap
+      : 0,
+    text_bytes: boundedCount(Buffer.byteLength(rawJson)),
+    text_sha256_16: createHash("sha256").update(rawJson).digest("hex").slice(0, 16),
+    has_open_brace: rawJson.includes("{"),
+    ends_with_close_brace: trimmed.endsWith("}"),
+  };
+}
+
+function fallbackResponseDiagnostic(
+  rawJson: string,
+  outputTokenCap: number,
+  inferTruncation = true,
+): VlmResponseDiagnostic {
+  return {
+    candidate_count: null,
+    finish_reason: null,
+    block_reason: null,
+    blocked: false,
+    candidates_token_count: null,
+    thoughts_token_count: null,
+    ...responseTextMetadata(rawJson, outputTokenCap),
+    part_count: null,
+    text_part_count: null,
+    first_part_kind: "unavailable",
+    truncation_reason: inferTruncation ? classifyVlmTruncationReason(rawJson) : null,
+  };
+}
+
+/** Rebuild provider metadata at the connector boundary without raw values. */
+function sanitizeResponseDiagnostic(
+  rawJson: string,
+  outputTokenCap: number,
+  diagnostic?: VlmResponseDiagnostic,
+): VlmResponseDiagnostic {
+  const fallback = fallbackResponseDiagnostic(rawJson, outputTokenCap);
+  if (!diagnostic) return fallback;
+  const truncationReason = classifyVlmTruncationReason(rawJson, diagnostic.finish_reason) ??
+    (diagnostic.truncation_reason === "max_tokens" || diagnostic.truncation_reason === "eof"
+      ? diagnostic.truncation_reason
+      : null);
+  return {
+    candidate_count: boundedCount(diagnostic.candidate_count),
+    finish_reason: allowlistedFinishReason(diagnostic.finish_reason),
+    block_reason: allowlistedEnum(diagnostic.block_reason, GEMINI_BLOCK_REASONS),
+    blocked: diagnostic.blocked === true,
+    candidates_token_count: boundedCount(diagnostic.candidates_token_count),
+    thoughts_token_count: boundedCount(diagnostic.thoughts_token_count),
+    ...responseTextMetadata(rawJson, outputTokenCap),
+    part_count: boundedCount(diagnostic.part_count),
+    text_part_count: boundedCount(diagnostic.text_part_count),
+    first_part_kind: safeResponsePartKind(diagnostic.first_part_kind),
+    truncation_reason: truncationReason,
+  };
+}
+
+function firstPartKind(part: Record<string, unknown> | undefined): VlmResponsePartKind {
+  if (!part || Object.keys(part).length === 0) return "empty";
+  if (part.thought === true && typeof part.text === "string") return "thought_text";
+  if (typeof part.text === "string") return "text";
+  if (isRecord(part.inlineData) || isRecord(part.inline_data)) return "inline_data";
+  if (isRecord(part.fileData) || isRecord(part.file_data)) return "file_data";
+  if (isRecord(part.functionCall) || isRecord(part.function_call)) return "function_call";
+  if (isRecord(part.functionResponse) || isRecord(part.function_response)) return "function_response";
+  if (isRecord(part.executableCode) || isRecord(part.executable_code)) return "executable_code";
+  if (isRecord(part.codeExecutionResult) || isRecord(part.code_execution_result)) {
+    return "code_execution_result";
+  }
+  return "unknown";
+}
+
+function presentTopLevelKeys(parsed: unknown): string[] | undefined {
+  if (!isRecord(parsed)) return undefined;
+  const keys = Object.keys(parsed)
+    .filter((key) => DIAGNOSTIC_TOP_LEVEL_KEYS.has(key))
+    .sort();
+  return keys.length > 0 ? keys : undefined;
+}
+
+function jsonErrorOffset(error: unknown): number | undefined {
+  if (!(error instanceof SyntaxError)) return undefined;
+  const match = error.message.match(/position\s+(\d+)/i);
+  if (!match) return undefined;
+  return boundedCount(Number(match[1])) ?? undefined;
+}
+
+function parseFailureStage(rawJson: string): "no_json_span" | "truncated_json" | "json_syntax_error" {
+  const firstBrace = rawJson.indexOf("{");
+  const lastBrace = rawJson.lastIndexOf("}");
+  if (firstBrace === -1) return "no_json_span";
+  if (classifyVlmTruncationReason(rawJson) === "eof") return "truncated_json";
+  if (lastBrace <= firstBrace) return "truncated_json";
+  return "json_syntax_error";
+}
+
+function isMeaningfulObservationValue(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) =>
+      typeof item === "string" &&
+      item.trim().length > 0 &&
+      !OBSERVATION_PLACEHOLDER_VALUES.has(item.trim().toLowerCase()),
+    );
+  }
+  return typeof value === "string" &&
+    value.trim().length > 0 &&
+    !OBSERVATION_PLACEHOLDER_VALUES.has(value);
+}
+
+/**
+ * Whether a raw visual_quality label string is meaningful after the same
+ * snake-case normalization the output pipeline applies.
+ */
+function isMeaningfulVisualQualityLabel(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const normalized = toSnakeCase(value);
+  return normalized.length > 0 &&
+    !OBSERVATION_PLACEHOLDER_VALUES.has(normalized);
+}
+
+/**
+ * Whether the raw visual_quality payload carried at least one valid score or
+ * label under a canonical schema key. Unknown keys are ignored, numeric
+ * scores must be finite and within the schema's 0..1 range, and the
+ * fallback-normalized 0.5 scores are never used as semantic evidence.
+ */
+function hasMeaningfulVisualQualityValues(raw: unknown): boolean {
+  if (!isRecord(raw)) return false;
+  const scoresRaw = isRecord(raw.scores) ? raw.scores : {};
+  for (const key of VISUAL_QUALITY_SCORE_KEYS) {
+    const value = scoresRaw[key];
+    if (
+      typeof value === "number" && Number.isFinite(value) &&
+      value >= 0 && value <= 1
+    ) return true;
+  }
+  const labelsRaw = isRecord(raw.labels) ? raw.labels : {};
+  return VISUAL_QUALITY_LABEL_KEYS.some((key) => {
+    const value = labelsRaw[key];
+    return Array.isArray(value) &&
+      value.some(isMeaningfulVisualQualityLabel);
+  });
+}
+
+/**
+ * Whether a normalized VLM output carries any semantic content at all.
+ * An empty summary/tags/interest_points/quality_flags plus an absent or
+ * placeholder-only editorial_observation/visual_quality conveys nothing and
+ * must not be treated as a successful (cacheable) enrichment result.
+ */
+export function isSemanticallyEmptyVlmOutput(
+  output: VlmNormalizedOutput,
+  raw?: VlmRawResponse,
+): boolean {
+  return output.summary.length === 0 &&
+    output.tags.length === 0 &&
+    output.interest_points.length === 0 &&
+    output.quality_flags.length === 0 &&
+    !hasMeaningfulObservationValues(output.editorial_observation) &&
+    !hasMeaningfulVisualQualityValues(raw?.visual_quality);
+}
+
+function hasMeaningfulObservationValues(
+  observation: VlmNormalizedOutput["editorial_observation"],
+): boolean {
+  if (!observation) return false;
+  return Object.values(observation.values).some(isMeaningfulObservationValue);
+}
+
+// ── Error Classification ───────────────────────────────────────────
+
+/** Fixed grounding-guard codes with no variable content. */
+const SAFE_VLM_ERROR_CODES = new Set([
+  "grounded_vlm_requires_at_least_one_image",
+  "grounded_vlm_empty_candidate_text",
+]);
+
+/**
+ * Exact-match HTTP diagnostic emitted by createGeminiVlmFn: status plus
+ * byte-count/hash only, never the response body.
+ */
+const SAFE_HTTP_ERROR_PATTERN =
+  /^Gemini API error \d+: response_bytes=\d+;response_sha256=[0-9a-f]{16}$/;
+
+const EMPTY_CANDIDATE_ERROR_PREFIX = "grounded_vlm_empty_candidate_text:";
+
+/**
+ * Exact-match check for the empty-candidate code optionally carrying a known
+ * finishReason enum. Unknown suffixes (or trailing content) never match, so
+ * external throws cannot borrow the safe prefix to smuggle a body through.
+ */
+function isSafeEmptyCandidateErrorCode(message: string): boolean {
+  if (!message.startsWith(EMPTY_CANDIDATE_ERROR_PREFIX)) return false;
+  return GEMINI_FINISH_REASONS.has(
+    message.slice(EMPTY_CANDIDATE_ERROR_PREFIX.length),
+  );
+}
+
+/**
+ * Map a thrown VLM call error to a stable, non-secret failure string.
+ * JSON.parse failures collapse to vlm_parse_failed and arbitrary provider /
+ * runtime throws collapse to vlm_call_failed because their messages can quote
+ * raw provider text. Deadline/cancel surfaces through the well-known
+ * AbortError/TimeoutError names and convert to fixed codes; message bodies
+ * are never re-emitted. Only connector-controlled diagnostics with fully
+ * determined shapes (exact codes or the exact HTTP pattern) pass through.
+ */
+function classifyVlmCallError(err: unknown): string {
+  if (!(err instanceof Error)) return VLM_CALL_FAILED_ERROR;
+  if (err instanceof GeminiVlmResponseError) return err.message;
+  if (err.name === "TimeoutError") return VLM_DEADLINE_EXCEEDED_ERROR;
+  if (err.name === "AbortError") return VLM_CANCELLED_ERROR;
+  if (
+    err instanceof SyntaxError ||
+    err.message.includes("No JSON object found")
+  ) {
+    return VLM_PARSE_FAILED_ERROR;
+  }
+  // Variable-suffix guard: keep only the fixed non-secret code, dropping the
+  // offending frame paths.
+  if (err.message.startsWith("grounded_vlm_invalid_image_paths")) {
+    return "grounded_vlm_invalid_image_paths";
+  }
+  if (
+    SAFE_VLM_ERROR_CODES.has(err.message) ||
+    isSafeEmptyCandidateErrorCode(err.message) ||
+    SAFE_HTTP_ERROR_PATTERN.test(err.message)
+  ) {
+    return err.message;
+  }
+  return VLM_CALL_FAILED_ERROR;
+}
+
 /**
  * Attempt to parse a raw JSON string from the VLM into VlmRawResponse.
  * Strips markdown fences and leading/trailing noise.
@@ -595,6 +1186,30 @@ export function buildSegmentPrompt(transcriptContext?: string, contentHint?: str
 }
 
 /**
+ * Build the bounded repair request from validator output only. The original
+ * response, transcript, content hint, and provider diagnostics are excluded
+ * so a repair cannot echo them into the provider request or a receipt.
+ */
+export function buildVlmRepairPrompt(validationErrors: VlmValidationError[] = []): string {
+  const safeErrors = validationErrors.length > 0
+    ? validationErrors
+    : getVlmRequiredPaths().map((pathValue) => ({
+      path: pathValue,
+      code: "missing" as const,
+      kind: "missing" as const,
+      keyword: "required",
+      expected: "required property",
+    }));
+  const uniqueLines = [...new Set(safeErrors.map(formatVlmValidationError))];
+  return [
+    REPAIR_PROMPT_PREFIX,
+    ...uniqueLines.map((line) => `- ${line}`),
+    "Return only the repaired canonical object. Do not change the supplied source/frame identity, frame count, or frame set.",
+    "No markdown, explanation, raw output, or extra properties.",
+  ].join("\n");
+}
+
+/**
  * Enrich a single segment with VLM output.
  * Handles parse retry and gap fallback internally.
  */
@@ -608,24 +1223,104 @@ export async function enrichSegment(
   contentHint?: string,
 ): Promise<VlmEnrichmentResult> {
   const promptHash = computePromptHash();
-
   const prompt = buildSegmentPrompt(transcriptContext, contentHint);
-
+  // Snapshot the caller's grounded frame set once. Every provider attempt,
+  // including repair, receives a fresh array with the same ordered identity.
+  const groundedFramePaths = framePaths.slice();
+  const responseSchema = getVlmProviderResponseSchema();
+  const requestedOutputTokens = computeVlmOutputTokenBudget(
+    groundedFramePaths.length,
+    responseSchema,
+    vlmPolicy.segment_visual_output_tokens_max,
+  );
   let lastError: string | undefined;
+  let lastFinishReason: VlmFinishReason | null = null;
+  let retryReason: VlmRetryReason | null = null;
+  const parseDiagnostics: VlmParseDiagnostic[] = [];
+  let attempt = 0;
+  let repairUsed = false;
+  let repairValidationErrors: VlmValidationError[] = [];
 
-  // Initial call + retry attempts
-  const maxAttempts = 1 + vlmPolicy.parse_retry_max;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  while (true) {
+    let result: VlmCallResult | undefined;
+    let responseDiagnostic: VlmResponseDiagnostic | undefined;
     try {
-      const callPrompt = attempt === 0 ? prompt : `${prompt}\n\n${REPAIR_PROMPT}`;
-      const result = await vlmFn(framePaths, callPrompt, {
+      const callPrompt = attempt === 0
+        ? prompt
+        : buildVlmRepairPrompt(repairValidationErrors);
+      lastFinishReason = null;
+      result = await vlmFn(groundedFramePaths.slice(), callPrompt, {
         model: vlmPolicy.model_alias,
-        maxOutputTokens: vlmPolicy.segment_visual_output_tokens_max,
+        maxOutputTokens: requestedOutputTokens,
         transcriptContext,
+        responseSchema: structuredClone(responseSchema),
       });
+      responseDiagnostic = sanitizeResponseDiagnostic(
+        result.rawJson,
+        requestedOutputTokens,
+        result.response_diagnostic,
+      );
+      lastFinishReason = responseDiagnostic.finish_reason;
+      if (responseDiagnostic.truncation_reason) {
+        throw new GeminiVlmResponseError(
+          VLM_TRUNCATED_RESPONSE_ERROR,
+          "truncated_json",
+          responseDiagnostic,
+        );
+      }
 
       const parsed = parseVlmJson(result.rawJson);
+      const validation = validateVlmGroundingResponse(parsed);
+      if (!validation.valid) {
+        lastError = VLM_SCHEMA_VALIDATION_ERROR;
+        repairValidationErrors = validation.errors;
+        parseDiagnostics.push({
+          attempt_index: attempt,
+          attempt_outcome: "parse_failure",
+          error_code: lastError,
+          parse_stage: "schema_invalid",
+          response_scope: "candidate_text",
+          ...(presentTopLevelKeys(parsed)
+            ? { present_top_level_keys: presentTopLevelKeys(parsed) }
+            : {}),
+          validation_errors: validation.errors,
+          response: responseDiagnostic,
+        });
+        if (shouldRetryVlmParse(vlmPolicy, repairUsed)) {
+          retryReason = "schema_invalid";
+          repairUsed = true;
+          attempt += 1;
+          continue;
+        }
+        break;
+      }
+
       const normalized = normalizeVlmOutput(parsed, srcInUs, srcOutUs);
+
+      // Empty payloads must never be cached as success. Consume the remaining
+      // bounded repair attempt only; if it is still empty, fall through to the
+      // failure result below so the existing gap/coverage path takes over.
+      if (isSemanticallyEmptyVlmOutput(normalized, parsed)) {
+        lastError = VLM_EMPTY_RESPONSE_ERROR;
+        parseDiagnostics.push({
+          attempt_index: attempt,
+          attempt_outcome: "parse_failure",
+          error_code: lastError,
+          parse_stage: "schema_empty",
+          response_scope: "candidate_text",
+          ...(presentTopLevelKeys(parsed)
+            ? { present_top_level_keys: presentTopLevelKeys(parsed) }
+            : {}),
+          response: responseDiagnostic,
+        });
+        if (shouldRetryVlmParse(vlmPolicy, repairUsed)) {
+          retryReason = "schema_empty";
+          repairUsed = true;
+          attempt += 1;
+          continue;
+        }
+        break;
+      }
 
       return {
         success: true,
@@ -633,9 +1328,71 @@ export async function enrichSegment(
         prompt_hash: promptHash,
         model_alias: vlmPolicy.model_alias,
         model_snapshot: vlmPolicy.model_snapshot,
+        requested_output_tokens: requestedOutputTokens,
+        finish_reason: lastFinishReason,
+        attempt_count: attempt + 1,
+        retry_reason: retryReason,
+        ...(parseDiagnostics.some((item) => item.attempt_outcome === "call_failure")
+          ? { parse_diagnostics: parseDiagnostics }
+          : {}),
       };
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      lastError = classifyVlmCallError(err);
+      if (err instanceof GeminiVlmResponseError) {
+        const safeDiagnostic = result
+          ? sanitizeResponseDiagnostic(result.rawJson, requestedOutputTokens, err.responseDiagnostic)
+          : err.responseDiagnostic;
+        lastFinishReason = safeDiagnostic.finish_reason;
+        parseDiagnostics.push({
+          attempt_index: attempt,
+          attempt_outcome: "parse_failure",
+          error_code: lastError,
+          parse_stage: err.parseStage,
+          response_scope: err.responseScope,
+          ...(err.jsonErrorOffset !== undefined
+            ? { json_error_offset: err.jsonErrorOffset }
+            : {}),
+          response: safeDiagnostic,
+        });
+      } else if (lastError === VLM_PARSE_FAILED_ERROR && result) {
+        const offset = jsonErrorOffset(err);
+        const parseStage = parseFailureStage(result.rawJson);
+        const diagnostic = responseDiagnostic ?? sanitizeResponseDiagnostic(
+          result.rawJson,
+          requestedOutputTokens,
+          result.response_diagnostic,
+        );
+        if (parseStage === "truncated_json" || diagnostic.truncation_reason) {
+          lastError = VLM_TRUNCATED_RESPONSE_ERROR;
+        }
+        parseDiagnostics.push({
+          attempt_index: attempt,
+          attempt_outcome: "parse_failure",
+          error_code: lastError,
+          parse_stage: parseStage,
+          response_scope: "candidate_text",
+          ...(offset !== undefined ? { json_error_offset: offset } : {}),
+          response: diagnostic,
+        });
+      } else {
+        parseDiagnostics.push({
+          attempt_index: attempt,
+          attempt_outcome: "call_failure",
+          error_code: lastError,
+        });
+      }
+      if (shouldRetryVlmParse(vlmPolicy, repairUsed)) {
+        retryReason = retryReasonForFailure(
+          lastError,
+          parseDiagnostics[parseDiagnostics.length - 1]?.parse_stage,
+          parseDiagnostics[parseDiagnostics.length - 1]?.response,
+          parseDiagnostics[parseDiagnostics.length - 1]?.attempt_outcome,
+        );
+        repairUsed = true;
+        attempt += 1;
+        continue;
+      }
+      break;
     }
   }
 
@@ -643,10 +1400,40 @@ export async function enrichSegment(
   return {
     success: false,
     error: lastError ?? "vlm_call_failed",
+    ...(parseDiagnostics.length > 0
+      ? { parse_diagnostics: parseDiagnostics }
+      : {}),
     prompt_hash: promptHash,
     model_alias: vlmPolicy.model_alias,
     model_snapshot: vlmPolicy.model_snapshot,
+    requested_output_tokens: requestedOutputTokens,
+    finish_reason: lastFinishReason,
+    attempt_count: attempt + 1,
+    retry_reason: retryReason,
   };
+}
+
+function shouldRetryVlmParse(vlmPolicy: VlmPolicy, repairUsed: boolean): boolean {
+  return !repairUsed && Number.isFinite(vlmPolicy.parse_retry_max) &&
+    vlmPolicy.parse_retry_max > 0;
+}
+
+function retryReasonForFailure(
+  errorCode: string,
+  parseStage: VlmParseStage | undefined,
+  responseDiagnostic: VlmResponseDiagnostic | undefined,
+  attemptOutcome: VlmParseDiagnostic["attempt_outcome"] | undefined,
+): VlmRetryReason {
+  if (responseDiagnostic?.truncation_reason || parseStage === "truncated_json" ||
+    errorCode === VLM_TRUNCATED_RESPONSE_ERROR) {
+    return "truncated_json";
+  }
+  if (parseStage === "no_candidate" || parseStage === "no_text" ||
+    parseStage === "no_json_span" || parseStage === "json_syntax_error" ||
+    parseStage === "schema_invalid" || parseStage === "schema_empty") {
+    return parseStage;
+  }
+  return attemptOutcome === "call_failure" ? "call_failure" : "json_syntax_error";
 }
 
 // ── Role Guess ─────────────────────────────────────────────────────
@@ -748,6 +1535,12 @@ export function createGeminiVlmFn(): VlmFn {
     // gemini-2.0-flash was sunset (404 as of 2026-06). Default to the
     // cost-effective vision tier; analysis-defaults.yaml model_alias overrides.
     const model = options.model || "gemini-2.5-flash-lite";
+    const responseSchema = options.responseSchema ?? getVlmProviderResponseSchema();
+    const outputTokenCap = computeVlmOutputTokenBudget(
+      framePaths.length,
+      responseSchema,
+      options.maxOutputTokens,
+    );
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
@@ -756,27 +1549,99 @@ export function createGeminiVlmFn(): VlmFn {
       body: JSON.stringify({
         contents: [{ parts }],
         generationConfig: {
-          maxOutputTokens: options.maxOutputTokens,
+          maxOutputTokens: outputTokenCap,
           temperature: 0.1,
           responseMimeType: "application/json",
+          responseSchema,
         },
       }),
     });
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Gemini API error ${response.status}: ${body}`);
+      // Never propagate the raw provider body (may echo prompt/secret
+      // material); only stable byte-count/hash diagnostics are recorded.
+      throw new Error(
+        `Gemini API error ${response.status}: response_bytes=${Buffer.byteLength(body)};response_sha256=${createHash("sha256").update(body).digest("hex").slice(0, 16)}`,
+      );
     }
 
-    const data = await response.json() as {
+    const responseBody = await response.text();
+    let data: {
       candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
+        content?: { parts?: Array<Record<string, unknown> & { text?: string }> };
+        finishReason?: string;
       }>;
+      promptFeedback?: { blockReason?: string };
+      usageMetadata?: {
+        candidatesTokenCount?: number;
+        thoughtsTokenCount?: number;
+      };
     };
+    try {
+      data = JSON.parse(responseBody) as typeof data;
+    } catch (error) {
+      throw new GeminiVlmResponseError(
+        VLM_PARSE_FAILED_ERROR,
+        "json_syntax_error",
+        fallbackResponseDiagnostic(responseBody, outputTokenCap, false),
+        "provider_envelope",
+        jsonErrorOffset(error),
+      );
+    }
 
-    const rawJson = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+    const candidate = data.candidates?.[0];
+    const candidateParts = candidate?.content?.parts ?? [];
+    const rawJson = candidateParts[0]?.text ?? "";
+    const finishReason = allowlistedFinishReason(candidate?.finishReason);
+    const blockReason = allowlistedEnum(data.promptFeedback?.blockReason, GEMINI_BLOCK_REASONS);
+    const truncationReason = classifyVlmTruncationReason(rawJson, finishReason);
+    const responseDiagnostic: VlmResponseDiagnostic = {
+      candidate_count: boundedCount(data.candidates?.length ?? 0),
+      finish_reason: finishReason,
+      block_reason: blockReason,
+      blocked: blockReason !== null || finishReason === "SAFETY" ||
+        finishReason === "BLOCKLIST" || finishReason === "PROHIBITED_CONTENT" ||
+        finishReason === "SPII",
+      candidates_token_count: boundedCount(data.usageMetadata?.candidatesTokenCount),
+      thoughts_token_count: boundedCount(data.usageMetadata?.thoughtsTokenCount),
+      ...responseTextMetadata(rawJson, outputTokenCap),
+      part_count: boundedCount(candidateParts.length),
+      text_part_count: boundedCount(
+        candidateParts.filter((part) => typeof part.text === "string").length,
+      ),
+      first_part_kind: firstPartKind(candidateParts[0]),
+      truncation_reason: truncationReason,
+    };
+    if (truncationReason) {
+      throw new GeminiVlmResponseError(
+        VLM_TRUNCATED_RESPONSE_ERROR,
+        "truncated_json",
+        responseDiagnostic,
+      );
+    }
+    if (!candidate) {
+      throw new GeminiVlmResponseError(
+        "grounded_vlm_empty_candidate_text",
+        "no_candidate",
+        responseDiagnostic,
+      );
+    }
+    if (rawJson.trim().length === 0) {
+      // A missing/empty candidate is a failed call, not an empty-but-valid
+      // "{}" payload. Only known finishReason enum values are recorded;
+      // unknown values are omitted rather than echoed into error paths.
+      const suffix = finishReason && finishReason !== "unrecognized"
+        ? `:${finishReason}`
+        : "";
+      throw new GeminiVlmResponseError(
+        `grounded_vlm_empty_candidate_text${suffix}`,
+        "no_text",
+        responseDiagnostic,
+      );
+    }
 
-    return { rawJson };
+    return { rawJson, response_diagnostic: responseDiagnostic };
   };
 }
 
@@ -792,6 +1657,7 @@ export function computeVlmRequestHash(params: {
   frame_count: number;
   sample_timestamps_us?: number[];
   frame_cache_version?: string;
+  requested_output_tokens?: number;
 }): string {
   return computeRequestHash(params as unknown as Record<string, unknown>);
 }

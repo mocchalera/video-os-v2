@@ -1,0 +1,11 @@
+{
+  "project_id": "day3-equivalent-fixture",
+  "artifact_version": "segments-v1",
+  "items": [
+    { "segment_id": "SEG_BODY", "asset_id": "AST_BODY", "src_in_us": 0, "src_out_us": 1600000, "summary": "canonical body", "transcript_excerpt": "", "quality_flags": [], "tags": [] },
+    { "segment_id": "SEG_INTRO", "asset_id": "AST_INTRO", "src_in_us": 0, "src_out_us": 400000, "summary": "intro restore", "transcript_excerpt": "", "quality_flags": [], "tags": [] },
+    { "segment_id": "SEG_CUTAWAY_1", "asset_id": "AST_CUTAWAY_1", "src_in_us": 400000, "src_out_us": 600000, "summary": "first cutaway", "transcript_excerpt": "", "quality_flags": [], "tags": [] },
+    { "segment_id": "SEG_CUTAWAY_2", "asset_id": "AST_CUTAWAY_2", "src_in_us": 600000, "src_out_us": 800000, "summary": "second cutaway", "transcript_excerpt": "", "quality_flags": [], "tags": [] },
+    { "segment_id": "SEG_CUTAWAY_3", "asset_id": "AST_CUTAWAY_3", "src_in_us": 800000, "src_out_us": 1000000, "summary": "third cutaway", "transcript_excerpt": "", "quality_flags": [], "tags": [] }
+  ]
+}

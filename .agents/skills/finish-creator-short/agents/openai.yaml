@@ -1,0 +1,4 @@
+interface:
+  display_name: "クリエイターSNSショート仕上げ"
+  short_description: "挑戦・Vlog・共感創出系の縦型ショートを7-Beat・テンポ包絡・証拠素材・SE同期で仕上げる"
+  default_prompt: "$finish-creator-short を使って、既存の粗編集をクリエイター向け縦型SNSショートへ仕上げてください。"

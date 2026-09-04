@@ -32,6 +32,10 @@ import {
 import { sha256FileHex } from "../runtime/source-content-identity.js";
 import { assertTimelineRenderSupported } from "../runtime/render/media-kind-guard.js";
 import { resolveCanonicalRenderInputs } from "../runtime/render/canonical-render-input.js";
+import {
+  assertRenderMappingFresh,
+  readSourceMappingStamp,
+} from "../runtime/compiler/render-readiness.js";
 import { assertSafeAudioDelayFilterOrder } from "../runtime/render/audio-filter-safety.js";
 
 const execFileAsync = promisify(execFile);
@@ -530,7 +534,15 @@ export function extractCrossfadeTransitions(
     if (!raw) continue;
 
     const transitionType = stringValue(raw.transition_type);
-    if (transitionType !== "crossfade" && transitionType !== "match_cut_soft") continue;
+    // Issue #34 presets dissolve at the boundary in the rough-cut tier too;
+    // the flash/blur styling lives in the exact preview/final chain engine.
+    const dissolves =
+      transitionType === "crossfade" ||
+      transitionType === "match_cut_soft" ||
+      transitionType === "film_crossfade" ||
+      transitionType === "light_leak_flash" ||
+      transitionType === "dreamy_focus_blur";
+    if (!dissolves) continue;
 
     const toClipId = stringValue(raw.to_clip_id);
     if (!toClipId) continue;
@@ -1546,6 +1558,11 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
 
   const timeline = readJson<TimelineDoc>(timelinePath);
   assertTimelineRenderSupported(timeline, { projectDir: projectPath, timelinePath });
+  // Render preflight (Issue #6 P1): the render route must resolve media through
+  // the same source mapping the timeline was compiled against. A relink after
+  // compile fails closed before any ffmpeg process starts. Evaluated before
+  // ensureSourceMap() so legacy projects without a source map keep rendering.
+  assertRenderMappingFresh(projectPath, { timelineMappingHash: readSourceMappingStamp(timelinePath) });
   const fps = getTimelineFps(timeline);
   const sourceMap = ensureSourceMap(projectPath);
   const reuseVideoPath = args.reuseVideoPath

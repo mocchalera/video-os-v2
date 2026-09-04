@@ -537,6 +537,27 @@ describe("Librosa bridge compatibility", () => {
     expect(source).toContain("librosa.feature.rms(y=y)[0]");
     expect(source).not.toMatch(/librosa\.feature\.rms\(y=y,\s*sr=sr\)/);
   });
+
+  it("does not promote an unmeasured Librosa meter/downbeat grid", () => {
+    const source = fs.readFileSync(
+      path.resolve("runtime/media/bgm-analyzer.ts"),
+      "utf-8",
+    );
+    const librosaBridge = source.slice(
+      source.indexOf("export function analyzeViaLibrosa"),
+      source.indexOf("// ── BPM estimation"),
+    );
+    const librosaProjection = source.slice(source.indexOf("function evidenceFromLibrosa"));
+
+    // The Python bridge only measures beats/onset strength; meter/downbeat
+    // identity remains unknown, while the measured beat signal is retained as
+    // the onset collection.
+    expect(librosaBridge).toContain("downbeats = []");
+    expect(librosaBridge).not.toContain("assuming 4/4");
+    expect(librosaProjection).toContain('meter: "unknown"');
+    expect(librosaProjection).toContain("onsets: beats.map");
+    expect(librosaProjection).toContain("downbeats: [],");
+  });
 });
 
 // ── W-09: computeSourceHash fd safety ──────────────────────────────

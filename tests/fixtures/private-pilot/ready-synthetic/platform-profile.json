@@ -1,0 +1,36 @@
+{
+  "version": "platform-safe-zone-profile/v1",
+  "profile_id": "synthetic-platform-profile",
+  "platform": "fixture",
+  "surface": "fixture",
+  "delivery_variant": "metadata-only",
+  "evidence_status": "partial",
+  "source_references": [
+    {
+      "url": "https://www.w3.org/TR/SVG/",
+      "retrieved_at": "2026-08-22",
+      "published_date": null,
+      "owner": "rfa-016-synthetic-fixture",
+      "evidence_kind": "synthetic_fixture",
+      "notes": "Metadata-only profile; not a current device measurement."
+    }
+  ],
+  "measured_at": null,
+  "geometry": {
+    "status": "unknown",
+    "coordinate_system": "unknown",
+    "viewport": { "status": "unknown" },
+    "ui_regions": { "unknown": true, "regions": [] },
+    "safe_regions": { "unknown": true, "regions": [] },
+    "method": "synthetic_fixture",
+    "confidence": "unknown"
+  },
+  "device_evidence": { "status": "unknown" },
+  "screenshot_evidence": { "status": "unknown" },
+  "supersession": { "state": "active" },
+  "fallback": {
+    "mode": "human_platform_preview",
+    "human_preview_required": true,
+    "reason": "Synthetic profile requires explicit human preview."
+  }
+}

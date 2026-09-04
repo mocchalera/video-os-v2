@@ -1,5 +1,8 @@
 id: generic-editorial
 default_policy: generic
+capabilities:
+  visual_model:
+    requirement: optional
 defaults:
   default_transition: "cut"
   active_editing_skills: []

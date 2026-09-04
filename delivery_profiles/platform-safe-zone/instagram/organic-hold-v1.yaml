@@ -1,0 +1,35 @@
+version: platform-safe-zone-profile/v1
+profile_id: instagram-organic-production-hold-v1
+platform: instagram
+surface: organic
+delivery_variant: production-organic
+evidence_status: partial
+source_references:
+  - url: https://www.facebook.com/help/instagram/1038071743007909?locale=en_GB
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: Meta Help Center
+    evidence_kind: official_documentation
+    notes: Supports organic Reels aspect-ratio, frame-rate, and minimum-pixel constraints; does not provide current organic UI coordinates.
+  - url: https://www.facebook.com/business/ads/facebook-instagram-reels-ads
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: Meta for Business
+    evidence_kind: official_documentation
+    notes: Safe-zone checker is documented for ads only and is not transferred to this organic profile.
+measured_at: null
+geometry:
+  status: unknown
+  coordinate_system: unknown
+  viewport: { status: unknown }
+  ui_regions: { unknown: true, regions: [] }
+  safe_regions: { unknown: true, regions: [] }
+  method: unknown
+  confidence: unknown
+device_evidence: { status: unknown }
+screenshot_evidence: { status: unknown }
+supersession: { state: active, reason: Organic device/app/screenshot evidence is unavailable. }
+fallback:
+  mode: human_platform_preview
+  human_preview_required: true
+  reason: Keep geometry unknown and require a current human Instagram organic preview.

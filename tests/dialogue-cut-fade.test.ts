@@ -49,7 +49,9 @@ describe("dialogue cut audio fade", () => {
       { dialogueCutFadeSec: dialogueCutFadeSec(4, false) },
     );
 
-    expect(args).not.toContain("-af");
+    expect(args).toContain("-af");
+    expect(args[args.indexOf("-af") + 1]).not.toContain("afade=");
+    expect(args[args.indexOf("-af") + 1]).toContain("atrim=start=0:end=4");
   });
 
   it("shrinks fade duration for very short clips", () => {

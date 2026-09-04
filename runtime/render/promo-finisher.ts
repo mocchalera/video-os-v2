@@ -13,6 +13,7 @@ import {
   type ExecFileLike,
 } from "./assembler.js";
 import { ASS_BOLD_VIDEO_FONT } from "../../editor/shared/font-contract.js";
+import { escapeAssCaptionText } from "../../editor/shared/caption-text-sanitizer.js";
 import { verifyBundledFont } from "../fonts/bundled-font.js";
 import { assertTimelineRenderSupported } from "./media-kind-guard.js";
 import { assertSourceInputsUnchanged, createSourceInputAttestation } from "./source-input-attestation.js";
@@ -370,7 +371,7 @@ export function buildAssSubtitleFile(
   const events = captions.map((caption) => {
     const start = formatAssTime(caption.in_frame / fps);
     const end = formatAssTime(caption.out_frame / fps);
-    return `Dialogue: 0,${start},${end},Default,,0,0,0,,${escapeAssText(caption.text)}`;
+    return `Dialogue: 0,${start},${end},Default,,0,0,0,,${escapeAssCaptionText(caption.text)}`;
   });
   return [...header, ...events, ""].join("\n");
 }
@@ -976,14 +977,6 @@ function formatAssTime(seconds: number): string {
   const minutes = totalMinutes % 60;
   const hours = Math.floor(totalMinutes / 60);
   return `${hours}:${pad2(minutes)}:${pad2(wholeSeconds)}.${pad2(centiseconds)}`;
-}
-
-function escapeAssText(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/{/g, "\\{")
-    .replace(/}/g, "\\}")
-    .replace(/\n/g, "\\N");
 }
 
 function escapeFfmpegFilterValue(value: string): string {

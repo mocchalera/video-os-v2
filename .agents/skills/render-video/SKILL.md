@@ -27,7 +27,7 @@ metadata:
 - `engine_render` の場合、CLI は `timeline.json` の renderer ownership を解決し、
   通常案件は既存 FFmpeg assembly を維持する。Remotion-owned overlay がある場合だけ
   Remotion、HyperFrames-owned element がある場合だけ透過 HyperFrames composite を使う。
-  `05_timeline/render-report.json` に freshness metadata を書く。
+  package の render receipt は `07_package/logs/render-report.json` に書く。
 - caption が有効なら `07_package/caption_approval.json`、BGM が有効なら `07_package/music_cues.json` が必要。
 - 通常のBGM bedは検証済みBGM Pack／レビュー済みライブラリ音源から選ぶ。Packが空でも案件内スクリプトで代替BGMを生成しない。
 - 手続き生成音を使えるのは、provenanceで `usage_class=simple_sound` と明示された短い単純音だけ。通常BGMの代替にはしない。
@@ -53,7 +53,7 @@ npm run final-render-review-pack -- build \
 ```
 
    冒頭・中盤・終盤、代表的な問いかけ、最長/2行字幕、全章タイトルが自動選択される。
-   選択区間は一回のFFmpeg連結、HyperFrames描画一回、ASS字幕焼き一回で
+   選択区間は一回のFFmpeg連結、登録済み content element の描画一回、ASS字幕焼き一回で
    `06_review/final-render-review-pack/review-reel.mp4` にまとまる。同じ映像・視覚timeline
    projection・caption approval・固定フォントなら再利用する。音声方針だけの変更では
    視覚レビューを無効化しない。
@@ -88,14 +88,24 @@ npm run final-render-checklist -- status --project projects/<project>
 4. Gate 10 と package 前提を読み取り専用preflightで確認する。Studioも同じJSON oracleを使う。
 
 ```bash
-npm run package -- projects/<project> --preflight-only --json
+npm run package -- projects/<project> --preflight-only --repo-sfx-root <repo-sfx-root> --json
 ```
 
    終了コード0かつJSONの`ok: true`でない場合はpackageへ進まない。このコマンドはproject artifactを書き換えない。
 5. `engine_render` path なら先に読み取り専用 preflight を行う。
 
 ```bash
-npm run render-route -- projects/<project>
+npm run render-route -- projects/<project> --json
+```
+
+   `supplied_final` または `external_manual_nle` の場合は、実在する metadata を渡して route receipt を発行する。
+
+```bash
+npm run render-route -- projects/<project> \
+  --route-kind supplied_final \
+  --metadata <route-metadata.json> \
+  --write-receipt projects/<project>/07_package/logs/render-route.json \
+  --json
 ```
 
 6. 表示された route が `timeline.json` の登録済み要素と一致することを確認して
@@ -103,7 +113,7 @@ npm run render-route -- projects/<project>
    engine 選択に使わない。
 
 ```bash
-npm run package -- projects/<project> --source-of-truth engine_render
+npm run package -- projects/<project> --source-of-truth engine_render --repo-sfx-root <repo-sfx-root>
 ```
 
 7. `nle_finishing` path なら supplied final を検証用に渡す。
@@ -152,12 +162,14 @@ npm run publication-preflight -- projects/<project> --platform youtube --visibil
 - `07_package/video/raw_video.mp4`
 - `07_package/audio/raw_dialogue.wav`
 - `07_package/audio/final_mix.wav`
-- `07_package/captions/*.srt` / `*.vtt` 必要な場合のみ
+- `07_package/captions/speech.approved.srt` / `07_package/captions/speech.vtt` (字幕が有効な場合)
 - `07_package/qa-report.json`
 - `07_package/package_manifest.json`
 - `09_output/final.mp4`
-- `05_timeline/assembly.mp4` と `05_timeline/render-report.json` (`engine_render` 自動生成時)
+- `05_timeline/assembly.mp4` (`engine_render` の assembly input/output)
 - `07_package/logs/render-route.json`
+- `07_package/logs/caption-visual-treatment-input.json` (RFA-020 canonical resolved caption visual input, when enabled)
+- `07_package/logs/render-report.json` (timeline/approval/profile/patch/resolved-input hashes, geometry, capability and one-composite receipt)
 - `07_package/logs/audio-mix-report.json`
 
 ## 注意事項
@@ -166,12 +178,28 @@ npm run publication-preflight -- projects/<project> --platform youtube --visibil
 - `--assembly-path` は Remotion-owned element を含む timeline では使わない。描画済みか
   証明できない prebuilt assembly は fail closed になる。
 - project artifact に任意 JSX / HTML を生成しない。Remotion / HyperFrames は
-  allow-list 済み `content-element/v1` template からだけ起動する。
+  allow-list 済み `content-element/v1` template からだけ起動する。speech caption の
+  text/timing/approval は caption runtime と FFmpeg/libass の一系統に残し、visual treatment
+  patch は別 receipt とする。
 - `music_cues.json` がなくても `final_mix.wav` は生成される。no-BGM path もraw dialogueを2-pass MAし、失敗時は未処理音声へ黙ってフォールバックしない。
 - ライブラリ候補が未レビュー／未インストールなら、no-BGMまたは人間レビューで停止する。品質未確認の手続き生成BGMへフォールバックしない。
 - `caption_burn` と `audio_mix` の実行ログは `07_package/logs/*.log` に出る。
-- 字幕有効時は final映像だけでなく `07_package/captions/*.srt` / `*.vtt` と `caption_approval.json` の存在も確認する。
-- BGMありではBGMを基準 -23 LUFSへ正規化してからeditorial gainを適用し、A1 clipの占有区間ではなく実際のdialogue waveformでsidechain duckingする。
+- 字幕有効時は final映像だけでなく `07_package/captions/speech.approved.srt` / `speech.vtt` と
+  `caption_approval.json` の存在も確認する。
+- RFA-020 visual treatment が有効な場合、baseline preview と final/package の route receipt に同一の `resolved_input_hash`、`text_timing_hash`、capability/profile/patch hash が記録され、caption layer は引き続き `ffmpeg-libass` の一系統であることを確認する。未対応の animation/effect は registered fallback、human/NLE handoff、または blocker として receipt に残り、黙ってdropしない。
+- headless review は実在する `scripts/caption-review.ts` の visual route を使う。たとえば status は次で確認する。
+
+```bash
+npx tsx scripts/caption-review.ts visual-status \
+  --project projects/<project> \
+  --typography-policy projects/<project>/04_plan/typography_policy.json \
+  --safe-zone-profile projects/<project>/<profile-path> \
+  --reduced-motion --high-contrast --audio-off --small-screen
+```
+
+  `visual-approve` は既存の人間caption承認と同じ reviewer を要求する。BGMありでは、normalization と
+  editorial gain の target を versioned audio policy から解決し、A1 clipの占有区間ではなく実際の dialogue
+  waveform で sidechain ducking する。
 - `audio-mix-report.json` の `audio_mix_policy_valid` と、実測の `loudness_target_valid` が両方passして初めてMA完了とみなす。
 - FFmpeg graphではsource `atrim`を`adelay`より前に置く。同一input branchの
   `adelay=...,atrim=start=0`は禁止。全体尺のtrimは`amix`後だけに置く。

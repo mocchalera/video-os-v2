@@ -4,15 +4,18 @@
  *
  * All tests use mock VlmFn — no real Gemini API calls.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import {
   getAdaptiveSampleFps,
   computeFrameCount,
+  computeVlmOutputTokenBudget,
   computeSampleTimestamps,
+  classifyVlmTruncationReason,
   adjustFpsForBudget,
+  estimateVlmSchemaOutputTokens,
   toSnakeCase,
   normalizeTags,
   normalizeQualityFlags,
@@ -28,12 +31,18 @@ import {
   buildSegmentPrompt,
   createGeminiVlmFn,
   VLM_CONNECTOR_VERSION,
+  VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX,
+  VLM_TRUNCATED_RESPONSE_ERROR,
   PROMPT_TEMPLATE_ID,
   type VlmFn,
   type VlmPolicy,
   type SamplingPolicy,
   type VlmRawResponse,
 } from "../runtime/connectors/gemini-vlm.js";
+import {
+  getVlmProviderResponseSchema,
+  validateVlmGroundingResponse,
+} from "../runtime/validation/vlm-grounding-response-validator.js";
 import { runPipeline, type PipelineResult } from "../runtime/pipeline/ingest.js";
 
 // ── Schema Validator Setup ──────────────────────────────────────────
@@ -106,6 +115,31 @@ function createMockVlmFn(overrides?: Partial<VlmRawResponse>): VlmFn {
   };
 }
 
+const M1_CONFIDENCE_GROUPS = [
+  "tags",
+  "motion",
+  "framing",
+  "direction",
+  "appearance",
+  "text",
+] as const;
+
+function createM1CanonicalResponse(): VlmRawResponse {
+  return {
+    summary: "A repaired grounded response.",
+    tags: ["grounded_response"],
+    interest_points: [],
+    quality_flags: [],
+    confidence: { summary: 0.9, tags: 0.9, quality_flags: 0.9 },
+    editorial_observation: {
+      motion_type: "static",
+      shot_scale: "medium",
+      text_presence: "absent",
+      confidence: Object.fromEntries(M1_CONFIDENCE_GROUPS.map((group) => [group, 0.9])),
+    },
+  };
+}
+
 function createFailingVlmFn(): VlmFn {
   return async () => {
     throw new Error("API timeout");
@@ -170,6 +204,34 @@ describe("Adaptive Sampling", () => {
     // Short segment under budget: no adjustment
     const noAdj = adjustFpsForBudget(2_000_000, 1, 90, 8192, 258);
     expect(noAdj).toBe(1);
+  });
+});
+
+describe("VLM output token budget", () => {
+  it("is bounded and responds to frame count and schema size", () => {
+    const compactSchema = { type: "object", properties: {} };
+    const compactOneFrame = computeVlmOutputTokenBudget(1, compactSchema, 4096);
+    const compactManyFrames = computeVlmOutputTokenBudget(20, compactSchema, 4096);
+    const canonicalManyFrames = computeVlmOutputTokenBudget(
+      20,
+      getVlmProviderResponseSchema(),
+      4096,
+    );
+
+    expect(estimateVlmSchemaOutputTokens(getVlmProviderResponseSchema())).toBeGreaterThan(0);
+    expect(compactManyFrames).toBeGreaterThan(compactOneFrame);
+    expect(canonicalManyFrames).toBeGreaterThanOrEqual(compactManyFrames);
+    expect(canonicalManyFrames).toBeLessThanOrEqual(VLM_OUTPUT_TOKEN_BUDGET_HARD_MAX);
+    expect(computeVlmOutputTokenBudget(20, getVlmProviderResponseSchema(), 512)).toBe(512);
+  });
+
+  it("classifies MAX_TOKENS and EOF-equivalent output without retaining content", () => {
+    expect(classifyVlmTruncationReason('{"summary":"partial"', null)).toBe("eof");
+    expect(classifyVlmTruncationReason('{"summary":"partial }', null)).toBe("eof");
+    expect(classifyVlmTruncationReason('{"outer":{"inner":1}', null)).toBe("eof");
+    expect(classifyVlmTruncationReason('{"summary":"complete"}', "EOF")).toBe("eof");
+    expect(classifyVlmTruncationReason('{"summary":"complete"}', "MAX_TOKENS")).toBe("max_tokens");
+    expect(classifyVlmTruncationReason('{"summary":"complete"}', "STOP")).toBeNull();
   });
 });
 
@@ -471,9 +533,142 @@ describe("Segment Enrichment", () => {
     expect(result.output!.tags).toContain("walking_person");
     expect(result.prompt_hash).toMatch(/^[0-9a-f]{16}$/);
     expect(result.model_alias).toBe("gemini-2.0-flash");
+    expect(result.requested_output_tokens).toBe(
+      computeVlmOutputTokenBudget(2, getVlmProviderResponseSchema(), 512),
+    );
+    expect(result.finish_reason).toBeNull();
+    expect(result.attempt_count).toBe(1);
+    expect(result.retry_reason).toBeNull();
   });
 
-  it("falls back on API failure after retries", async () => {
+  it("uses one bounded budget for a truncated response and its single repair", async () => {
+    const framePaths = Array.from({ length: 20 }, (_, index) => `/frames/source-${index}.jpg`);
+    const calls: Array<{ framePaths: string[]; maxOutputTokens: number }> = [];
+    const policy = { ...MOCK_VLM_POLICY, segment_visual_output_tokens_max: 4096 };
+    const vlmFn: VlmFn = async (receivedFramePaths, _prompt, options) => {
+      calls.push({ framePaths: [...receivedFramePaths], maxOutputTokens: options.maxOutputTokens });
+      return {
+        rawJson: calls.length === 1
+          ? '{"summary":"truncated'
+          : JSON.stringify(createM1CanonicalResponse()),
+      };
+    };
+
+    const result = await enrichSegment(vlmFn, framePaths, 0, 5_000_000, policy);
+    const expectedBudget = computeVlmOutputTokenBudget(
+      framePaths.length,
+      getVlmProviderResponseSchema(),
+      policy.segment_visual_output_tokens_max,
+    );
+
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call.maxOutputTokens)).toEqual([expectedBudget, expectedBudget]);
+    expect(calls[1].framePaths).toEqual(calls[0].framePaths);
+    expect(result.requested_output_tokens).toBe(expectedBudget);
+    expect(result.finish_reason).toBeNull();
+    expect(result.attempt_count).toBe(2);
+    expect(result.retry_reason).toBe("truncated_json");
+  });
+
+  it("repairs missing nested editorial confidence once while preserving the grounded frame set", async () => {
+    const calls: Array<{
+      framePaths: string[];
+      prompt: string;
+      responseSchema?: Record<string, unknown>;
+    }> = [];
+    const validResponse = createM1CanonicalResponse();
+    const missingNestedConfidence = {
+      ...validResponse,
+      editorial_observation: {},
+      provider_private: "SECRET-RAW-RESPONSE",
+    };
+    const vlmFn: VlmFn = async (framePaths, prompt, options) => {
+      calls.push({ framePaths: [...framePaths], prompt, responseSchema: options.responseSchema });
+      // A provider must not be able to alter the frame identity used by the
+      // bounded repair attempt.
+      framePaths.length = 0;
+      return {
+        rawJson: JSON.stringify(calls.length === 1 ? missingNestedConfidence : validResponse),
+      };
+    };
+
+    const result = await enrichSegment(
+      vlmFn,
+      ["/frames/source-a.jpg", "/frames/source-b.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].framePaths).toEqual(calls[0].framePaths);
+    expect(calls[1].framePaths).toEqual(["/frames/source-a.jpg", "/frames/source-b.jpg"]);
+    expect(calls[0].responseSchema).toEqual(getVlmProviderResponseSchema());
+    expect(calls[1].responseSchema).toEqual(getVlmProviderResponseSchema());
+    for (const group of M1_CONFIDENCE_GROUPS) {
+      expect(calls[1].prompt).toContain(`editorial_observation.confidence.${group}`);
+    }
+    expect(calls[1].prompt).not.toContain("Analyze the following video segment frames");
+    expect(calls[1].prompt).not.toContain("SECRET-RAW-RESPONSE");
+    expect(result.output?.editorial_observation?.confidence).toMatchObject({
+      tags: 0.9,
+      motion: 0.9,
+      framing: 0.9,
+      direction: 0.9,
+      appearance: 0.9,
+      text: 0.9,
+    });
+  });
+
+  it.each([
+    [
+      "enum",
+      "editorial_observation.motion_type",
+      (response: VlmRawResponse) => {
+        (response.editorial_observation as Record<string, unknown>).motion_type = "sideways";
+      },
+    ],
+    [
+      "range",
+      "editorial_observation.confidence.tags",
+      (response: VlmRawResponse) => {
+        ((response.editorial_observation as Record<string, unknown>).confidence as Record<string, unknown>).tags = 1.5;
+      },
+    ],
+    [
+      "type",
+      "editorial_observation.confidence.tags",
+      (response: VlmRawResponse) => {
+        ((response.editorial_observation as Record<string, unknown>).confidence as Record<string, unknown>).tags = "high";
+      },
+    ],
+  ] as const)("does not normalize a persistent %s violation into ready output", async (kind, pathValue, mutate) => {
+    const invalid = createM1CanonicalResponse();
+    mutate(invalid);
+    let calls = 0;
+    const result = await enrichSegment(
+      async () => {
+        calls += 1;
+        return { rawJson: JSON.stringify(invalid) };
+      },
+      ["/frames/source.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(calls).toBe(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_schema_validation_failed");
+    expect(result.output).toBeUndefined();
+    expect(result.parse_diagnostics?.at(-1)?.validation_errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: pathValue, kind })]),
+    );
+  });
+
+  it("collapses arbitrary provider throws to a stable non-secret failure", async () => {
     const vlmFn = createFailingVlmFn();
     const result = await enrichSegment(
       vlmFn,
@@ -484,7 +679,80 @@ describe("Segment Enrichment", () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("API timeout");
+    expect(result.error).toBe("vlm_call_failed");
+    expect(result.error).not.toContain("API timeout");
+  });
+
+  it("converts cancel/abort errors to a fixed non-secret code without the message body", async () => {
+    const vlmFn: VlmFn = async () => {
+      const err = new Error("SECRET_ABORT_BODY");
+      err.name = "AbortError";
+      throw err;
+    };
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_cancelled");
+    expect(result.error).not.toContain("SECRET_ABORT_BODY");
+  });
+
+  it("converts timeout errors to a fixed non-secret code without the message body", async () => {
+    const vlmFn: VlmFn = async () => {
+      const err = new Error("SECRET_TIMEOUT_BODY");
+      err.name = "TimeoutError";
+      throw err;
+    };
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_deadline_exceeded");
+    expect(result.error).not.toContain("SECRET_TIMEOUT_BODY");
+  });
+
+  it("does not let message keywords borrow the deadline/cancel conversion", async () => {
+    const vlmFn: VlmFn = async () => {
+      throw new Error("deadline SECRET_BODY");
+    };
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_call_failed");
+    expect(result.error).not.toContain("SECRET_BODY");
+  });
+
+  it("does not let spoofed guard codes with trailing content pass through", async () => {
+    const vlmFn: VlmFn = async () => {
+      throw new Error("grounded_vlm_empty_candidate_text:SAFETY SECRET_BODY");
+    };
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_call_failed");
+    expect(result.error).not.toContain("SECRET_BODY");
   });
 
   it("falls back on non-JSON response after retries", async () => {
@@ -520,6 +788,293 @@ describe("Segment Enrichment", () => {
     expect(result.output!.interest_points).toHaveLength(1);
     expect(result.output!.interest_points[0].label).toBe("In bounds");
   });
+
+  // ── Empty / semantically-empty responses must not be successes ─────
+
+  it("rejects an empty {} provider response after the bounded repair attempt", async () => {
+    let calls = 0;
+    const vlmFn: VlmFn = async () => {
+      calls += 1;
+      return { rawJson: "{}" };
+    };
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_semantically_empty_response");
+    // Initial call + parse_retry_max(=1) repair — no unbounded retry.
+    expect(calls).toBe(2);
+  });
+
+  it("recovers when the single bounded repair attempt returns valid content", async () => {
+    const payloads = [
+      "{}",
+      JSON.stringify({
+        summary: "A recovered summary.",
+        tags: ["recovered"],
+        interest_points: [],
+        quality_flags: [],
+        confidence: { summary: 0.8, tags: 0.8, quality_flags: 0.5 },
+      }),
+    ];
+    let calls = 0;
+    const vlmFn: VlmFn = async () => ({
+      rawJson: payloads[Math.min(calls++, payloads.length - 1)],
+    });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output!.summary).toBe("A recovered summary.");
+    expect(calls).toBe(2);
+  });
+
+  it("rejects a missing candidate text (empty rawJson) with a stable non-secret error", async () => {
+    const vlmFn: VlmFn = async () => ({ rawJson: "" });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_parse_failed");
+  });
+
+  it("does not leak raw provider bodies through parse failures", async () => {
+    const secretBody = 'SECRET-PROVIDER-PAYLOAD {"partial';
+    const vlmFn: VlmFn = async () => ({ rawJson: secretBody });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(VLM_TRUNCATED_RESPONSE_ERROR);
+    expect(result.error).not.toContain("SECRET-PROVIDER-PAYLOAD");
+  });
+
+  it("treats a whitespace-only summary and blank tags as semantically empty", async () => {
+    const vlmFn: VlmFn = async () => ({
+      rawJson: JSON.stringify({ summary: "   ", tags: ["", "  "] }),
+    });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_semantically_empty_response");
+  });
+
+  it("treats an observation-only response of unknown placeholders as semantically empty", async () => {
+    const vlmFn: VlmFn = async () => ({
+      rawJson: JSON.stringify({
+        editorial_observation: {
+          motion_type: "unknown",
+          shot_scale: "not_applicable",
+          visual_tags: [],
+          confidence: {
+            tags: 0.5,
+            motion: 0.5,
+            framing: 0.5,
+            direction: 0.5,
+            appearance: 0.5,
+            text: 0.5,
+          },
+        },
+      }),
+    });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_semantically_empty_response");
+  });
+
+  it("treats placeholder-only observation arrays as semantically empty", async () => {
+    const vlmFn: VlmFn = async () => ({
+      rawJson: JSON.stringify({
+        editorial_observation: {
+          visual_tags: ["unknown"],
+          dominant_colors: ["not_applicable"],
+          confidence: {
+            tags: 0.5,
+            motion: 0.5,
+            framing: 0.5,
+            direction: 0.5,
+            appearance: 0.5,
+            text: 0.5,
+          },
+        },
+      }),
+    });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_semantically_empty_response");
+  });
+
+  it.each([
+    [
+      "valid-score-only visual_quality",
+      { visual_quality: { scores: { composition_score: 0.9 } } },
+    ],
+    [
+      "valid-label-only visual_quality",
+      { visual_quality: { labels: { motion_tags: ["handheld"] } } },
+    ],
+  ])(
+    "keeps a minimal valid %s response successful",
+    async (_name, payload) => {
+      const vlmFn: VlmFn = async () => ({ rawJson: JSON.stringify(payload) });
+      const result = await enrichSegment(
+        vlmFn,
+        ["frame_1.jpg"],
+        0,
+        5_000_000,
+        MOCK_VLM_POLICY,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.output!.visual_quality).toBeDefined();
+    },
+  );
+
+  it("treats a garbage-only visual_quality payload as semantically empty", async () => {
+    const vlmFn: VlmFn = async () => ({
+      rawJson: JSON.stringify({
+        visual_quality: {
+          scores: { composition_score: "high" },
+          labels: { motion_tags: ["unknown", "not_applicable", ""] },
+        },
+      }),
+    });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_semantically_empty_response");
+  });
+
+  it.each([
+    [
+      "unknown numeric score keys",
+      { visual_quality: { scores: { provider_internal_counter: 1 } } },
+    ],
+    [
+      "unknown label keys",
+      { visual_quality: { labels: { provider_notes: ["SECRET_LABEL"] } } },
+    ],
+    [
+      "placeholder-only canonical labels after snake-case normalization",
+      { visual_quality: { labels: { motion_tags: ["not applicable"] } } },
+    ],
+  ])(
+    "ignores non-canonical or placeholder visual_quality content (%s)",
+    async (_name, payload) => {
+      const vlmFn: VlmFn = async () => ({
+        rawJson: JSON.stringify(payload),
+      });
+      const result = await enrichSegment(
+        vlmFn,
+        ["frame_1.jpg"],
+        0,
+        5_000_000,
+        MOCK_VLM_POLICY,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("vlm_semantically_empty_response");
+      expect(JSON.stringify(result)).not.toContain("SECRET_LABEL");
+    },
+  );
+
+  it("treats out-of-range canonical scores as non-semantic", async () => {
+    const vlmFn: VlmFn = async () => ({
+      rawJson: JSON.stringify({
+        visual_quality: { scores: { composition_score: 42 } },
+      }),
+    });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("vlm_semantically_empty_response");
+  });
+
+  it.each([
+    ["summary-only", { summary: "A person walks a dog." }],
+    ["tags-only", { tags: ["outdoor_scene"] }],
+    ["quality-flags-only", { quality_flags: ["blurry"] }],
+    [
+      "meaningful-observation-only",
+      {
+        editorial_observation: {
+          motion_type: "continuous",
+          confidence: {
+            tags: 0.8,
+            motion: 0.8,
+            framing: 0.8,
+            direction: 0.8,
+            appearance: 0.8,
+            text: 0.8,
+          },
+        },
+      },
+    ],
+  ])("keeps a minimal valid %s response successful", async (_name, payload) => {
+    const vlmFn: VlmFn = async () => ({ rawJson: JSON.stringify(payload) });
+    const result = await enrichSegment(
+      vlmFn,
+      ["frame_1.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBeDefined();
+  });
 });
 
 // ── Unit Tests: Request Hash ────────────────────────────────────────
@@ -550,13 +1105,24 @@ describe("VLM Request Hash", () => {
     });
     expect(h1).not.toBe(h2);
   });
+
+  it("binds the requested output budget when present", () => {
+    const base = {
+      segment_id: "SEG_001",
+      model_snapshot: "snap-1",
+      prompt_hash: "abc123",
+      frame_count: 10,
+    };
+    expect(computeVlmRequestHash({ ...base, requested_output_tokens: 512 }))
+      .not.toBe(computeVlmRequestHash({ ...base, requested_output_tokens: 1024 }));
+  });
 });
 
 // ── Constants ───────────────────────────────────────────────────────
 
 describe("Constants", () => {
   it("has connector version", () => {
-    expect(VLM_CONNECTOR_VERSION).toBe("gemini-vlm-v3.0.0");
+    expect(VLM_CONNECTOR_VERSION).toBe("gemini-vlm-v3.3.0");
   });
 
   it("has prompt template ID", () => {
@@ -575,6 +1141,114 @@ describe("Gemini live connector grounding guard", () => {
     await expect(connector(["relative-frame.jpg"], "prompt", options)).rejects.toThrow(
       "grounded_vlm_invalid_image_paths",
     );
+  });
+});
+
+// ── Unit Tests: Live connector empty-candidate / error hygiene ──────
+
+describe("Gemini live connector response handling", () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.GEMINI_API_KEY;
+  const testFrame = path.resolve(import.meta.dirname, "fixtures/media/test-clip-5s.mp4");
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalApiKey;
+  });
+
+  function stubFetchOnce(payload: unknown, ok = true, status = 200): void {
+    process.env.GEMINI_API_KEY = "test-key";
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(payload), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+  }
+
+  it("throws a stable non-secret error when candidate text is missing", async () => {
+    stubFetchOnce({ candidates: [{ finishReason: "SAFETY" }] });
+    const connector = createGeminiVlmFn();
+
+    await expect(connector([testFrame], "prompt", { model: "m", maxOutputTokens: 1 }))
+      .rejects.toThrow("grounded_vlm_empty_candidate_text:SAFETY");
+  });
+
+  it("omits unknown finishReason values from the empty-candidate error", async () => {
+    stubFetchOnce({ candidates: [{ finishReason: "SECRET_FINISH_REASON" }] });
+    const connector = createGeminiVlmFn();
+
+    await expect(connector([testFrame], "prompt", { model: "m", maxOutputTokens: 1 }))
+      .rejects.toThrow(/^grounded_vlm_empty_candidate_text$/);
+  });
+
+  it.each([
+    ["MAX_TOKENS", "{\"summary\":\"complete\"}"],
+    ["STOP", "{\"summary\":\"partial\""],
+  ] as const)("classifies %s or EOF-equivalent candidate output as truncation", async (finishReason, text) => {
+    stubFetchOnce({
+      candidates: [{ finishReason, content: { parts: [{ text }] } }],
+    });
+    const connector = createGeminiVlmFn();
+
+    await expect(connector([testFrame], "prompt", { model: "m", maxOutputTokens: 1 }))
+      .rejects.toThrow(VLM_TRUNCATED_RESPONSE_ERROR);
+  });
+
+  it("does not include the raw provider error body in HTTP failure messages", async () => {
+    stubFetchOnce({ error: "SECRET-PROVIDER-ERROR-BODY" }, false, 500);
+    const connector = createGeminiVlmFn();
+
+    await expect(connector([testFrame], "prompt", { model: "m", maxOutputTokens: 1 }))
+      .rejects.toThrow(/Gemini API error 500/);
+    await expect(connector([testFrame], "prompt", { model: "m", maxOutputTokens: 1 }))
+      .rejects.not.toThrow(/SECRET-PROVIDER-ERROR-BODY/);
+  });
+
+  it("uses the canonical response schema for structured output and the same validator for text fallback", async () => {
+    const canonical = createM1CanonicalResponse();
+    const frame = path.resolve(import.meta.dirname, "fixtures/media/test-clip-5s.mp4");
+    const schema = getVlmProviderResponseSchema();
+    let requestSchema: Record<string, unknown> | undefined;
+    process.env.GEMINI_API_KEY = "test-key";
+    globalThis.fetch = (async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as {
+        generationConfig: { responseSchema: Record<string, unknown> };
+      };
+      requestSchema = request.generationConfig.responseSchema;
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: JSON.stringify(canonical) }] } }],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const structured = await enrichSegment(
+      createGeminiVlmFn(),
+      [frame],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+    const textFallback = await enrichSegment(
+      async () => ({ rawJson: JSON.stringify(canonical) }),
+      ["/frames/text-fallback.jpg"],
+      0,
+      5_000_000,
+      MOCK_VLM_POLICY,
+    );
+
+    const confidenceSchema = ((schema.properties as Record<string, unknown>)
+      .editorial_observation as Record<string, unknown>);
+    const nestedConfidence = (confidenceSchema.properties as Record<string, unknown>)
+      .confidence as Record<string, unknown>;
+    expect(nestedConfidence.required).toEqual(M1_CONFIDENCE_GROUPS);
+    expect(requestSchema).toEqual(schema);
+    expect(validateVlmGroundingResponse(canonical)).toEqual({ valid: true, errors: [] });
+    expect(structured.success).toBe(true);
+    expect(textFallback.success).toBe(true);
+    expect(structured.output).toEqual(textFallback.output);
   });
 });
 
@@ -683,6 +1357,12 @@ describe("Pipeline: VLM enrichment integration", () => {
       expect(prov.summary.frame_producer_version).toBe("ffmpeg-single-frame-v2");
       expect(prov.summary.source_content_sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(prov.summary.cache_identity).toMatch(/^[0-9a-f]{64}$/);
+      expect(prov.summary.requested_output_tokens).toEqual(expect.any(Number));
+      expect(prov.summary.requested_output_tokens as number).toBeGreaterThan(0);
+      expect(prov.summary.requested_output_tokens as number).toBeLessThanOrEqual(1024);
+      expect(prov.summary.finish_reason).toBeNull();
+      expect(prov.summary.attempt_count).toBe(1);
+      expect(prov.summary.retry_reason).toBeNull();
     }
   });
 
@@ -699,6 +1379,76 @@ describe("Pipeline: VLM enrichment integration", () => {
     expect(vlmGaps).toHaveLength(0);
   });
 });
+
+// ── Integration: empty VLM responses → gap + re-call on next run ────
+
+describe("Pipeline: semantically empty VLM response stays a gap", () => {
+  const tmpDir = path.join(import.meta.dirname, "_tmp_vlm_empty");
+  let firstRunCalls = 0;
+  let secondRunCalls = 0;
+  let first: PipelineResult;
+  let second: PipelineResult;
+
+  beforeAll(async () => {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const emptyVlmFn = (counter: { value: number }): VlmFn => async () => {
+      counter.value += 1;
+      return { rawJson: "{}" };
+    };
+    const firstCounter = { value: 0 };
+    first = await runPipeline({
+      sourceFiles: [TEST_CLIP],
+      projectDir: tmpDir,
+      repoRoot: REPO_ROOT,
+      skipStt: true,
+      vlmFn: emptyVlmFn(firstCounter),
+      skipAppraiser: true,
+    });
+    firstRunCalls = firstCounter.value;
+
+    const secondCounter = { value: 0 };
+    second = await runPipeline({
+      sourceFiles: [TEST_CLIP],
+      projectDir: tmpDir,
+      repoRoot: REPO_ROOT,
+      skipStt: true,
+      vlmFn: emptyVlmFn(secondCounter),
+      skipAppraiser: true,
+    });
+    secondRunCalls = secondCounter.value;
+
+    // Cleanup scheduled
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }, 120_000);
+
+  it("first run records at least one VLM gap for the empty response", () => {
+    expect(firstRunCalls).toBeGreaterThanOrEqual(1);
+    const vlmGaps = first.gapReport.entries.filter((e) => e.stage === "vlm");
+    expect(vlmGaps.length).toBeGreaterThanOrEqual(1);
+    for (const gap of vlmGaps) {
+      expect(gap.issue).toContain("vlm_semantically_empty_response");
+      expect(gap.severity).toBe("warning");
+    }
+  });
+
+  it("first run attaches no ready VLM provenance or confidence to segments", () => {
+    for (const seg of first.segmentsJson.items) {
+      const prov = seg.provenance as Record<string, Record<string, unknown> | undefined>;
+      expect(prov.summary?.stage).not.toBe("vlm");
+      expect(prov.tags?.stage).not.toBe("vlm");
+      const confidence = seg.confidence as Record<string, { status?: string } | undefined>;
+      expect(confidence.tags?.status).not.toBe("ready");
+      expect(confidence.summary?.status).not.toBe("ready");
+    }
+  });
+
+  it("second run does not reuse the failed segment as cache and re-calls the provider", () => {
+    expect(secondRunCalls).toBeGreaterThanOrEqual(1);
+    const vlmGaps = second.gapReport.entries.filter((e) => e.stage === "vlm");
+    expect(vlmGaps.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
 
 // ── Integration: VLM failure → gap report ───────────────────────────
 

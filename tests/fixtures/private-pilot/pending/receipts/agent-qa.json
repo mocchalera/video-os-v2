@@ -1,0 +1,45 @@
+{
+  "version": "private-pilot-gate-receipt/v1",
+  "pilot_id": "PILOT_RFA016_PENDING",
+  "project_id": "rfa-016-pending",
+  "gate": "agent_qa",
+  "requirement": "required",
+  "status": "passed",
+  "decision": "pass",
+  "evidence": {
+    "record_type": "agent_qa",
+    "summary": "Deterministic agent QA checks pass in a metadata-only fixture.",
+    "recorded_at": "2026-08-22T00:00:00Z",
+    "recorded_by": "synthetic-fixture",
+    "artifacts": [
+      { "path": "evidence-agent.json", "sha256": "sha256:a03dabee1714e7a180aef526f5b9a9a4a17ed3a0ef86b2df0a823885c85468af" }
+    ],
+    "checks": [
+      { "id": "schema", "status": "pass", "details": "fixture schema checks pass" },
+      { "id": "timing", "status": "pass", "details": "fixture timing checks pass" },
+      { "id": "caption", "status": "pass", "details": "fixture caption checks pass" },
+      { "id": "safe-zone", "status": "pass", "details": "fixture safe-zone checks pass" },
+      { "id": "audio", "status": "pass", "details": "fixture audio checks pass" },
+      { "id": "SFX", "status": "pass", "details": "fixture SFX checks pass" },
+      { "id": "route", "status": "pass", "details": "fixture route checks pass" },
+      { "id": "accessibility", "status": "pass", "details": "fixture accessibility checks pass" }
+    ]
+  },
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "deterministic-metadata",
+    "captured_at": "2026-08-22T00:00:00Z",
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:1fcb423d2644bba0cf1d7dd177bf7336af5bedefa2f1d1614739bf91dd88f246" },
+      { "path": "evidence-agent.json", "sha256": "sha256:a03dabee1714e7a180aef526f5b9a9a4a17ed3a0ef86b2df0a823885c85468af" }
+    ],
+    "synthetic_fixture": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-08-22T00:00:00Z",
+    "input_fingerprint": "sha256:de19431323dcaf08ae0090a248249c516bf37e5ce59949335630121b5d44b89a",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "reason": "fixture inputs are hash-bound and current"
+  }
+}

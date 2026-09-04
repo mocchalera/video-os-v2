@@ -5,9 +5,26 @@ import * as path from "node:path";
 import { validateArtifact } from "../artifacts/loaders.js";
 import type { ClipOutput, TimelineIR } from "../compiler/types.js";
 import {
+  assertSfxAssetSelectable,
+  assertSfxScopeAuthority,
+  getSfxLibraryHoldReason,
+  loadSfxLibraryManifest,
+  resolveSfxAssetSource,
+  SfxLibraryContractError,
+  type SfxLibraryAsset,
+  type SfxLibraryManifest,
+  type SfxSemanticRole,
+} from "./sfx-library.js";
+import {
   hashSoundDesignDecision,
   type SoundDesignDecision,
 } from "./sound-design-solver.js";
+
+export type {
+  SfxLibraryAsset,
+  SfxLibraryManifest,
+  SfxSemanticRole,
+} from "./sfx-library.js";
 
 export function hashFile(filePath: string): string {
   const hash = createHash("sha256");
@@ -25,57 +42,16 @@ export function hashFile(filePath: string): string {
   return `sha256:${hash.digest("hex")}`;
 }
 
-export type SfxSemanticRole =
-  | "hook_impact"
-  | "transition_accent"
-  | "claim_emphasis"
-  | "achievement_reveal"
-  | "simple_sound";
-
-export interface SfxLibraryAsset {
-  asset_id: string;
-  semantic_roles: SfxSemanticRole[];
-  path: string;
-  content_hash: string;
-  size_bytes: number;
-  duration_us: number;
-  rights: {
-    status: "confirmed";
-    basis: "local_rights_confirmation" | "deterministic_synthesis";
-    usage_scope:
-      | "internal_audition"
-      | "project_render"
-      | "commercial"
-      | "public_release";
-    evidence_ref: string;
-  };
-  provenance: {
-    origin:
-      | "existing_generated_local"
-      | "deterministic_synthesis"
-      | "recorded_local";
-    source_ref: string;
-    generation_id?: string | null;
-    generated_at: string | null;
-  };
-}
-
-export interface SfxLibraryManifest {
-  version: "sfx-library/v1";
-  library_id: string;
-  library_version: string;
-  assets: SfxLibraryAsset[];
-}
-
 export interface ResolvedSfxLibrary {
   manifest_path: string;
   manifest_hash: string;
   library_id: string;
   library_version: string;
+  scope?: "repo_common" | "project_local";
   manifest: SfxLibraryManifest;
   assets: Map<string, {
     asset: SfxLibraryAsset;
-    sourcePath: string;
+    sourcePath?: string;
   }>;
 }
 
@@ -87,6 +63,12 @@ export interface SfxCueAssetPin {
   asset_size_bytes: number;
   rights_evidence_ref: string;
   provenance_ref: string;
+  asset_path?: string;
+  rights_status?: SfxLibraryAsset["rights"]["status"];
+  provenance_status?: SfxLibraryAsset["provenance"]["status"];
+  review_status?: SfxLibraryAsset["review_status"];
+  rights_expires_at?: string | null;
+  permitted_derivatives?: string[];
 }
 
 export interface SfxCue {
@@ -131,6 +113,7 @@ export interface SfxCuesDoc {
     library_id: string;
     library_version: string;
     manifest_hash: string;
+    scope?: "repo_common" | "project_local";
   };
   decision_ref?: {
     path: string;
@@ -170,6 +153,12 @@ export interface ResolvedSfxCue {
     provenance_origin: SfxLibraryAsset["provenance"]["origin"];
     generated_at: string | null;
     generation_id?: string | null;
+    asset_path?: string;
+    rights_status?: SfxLibraryAsset["rights"]["status"];
+    provenance_status?: SfxLibraryAsset["provenance"]["status"];
+    review_status?: SfxLibraryAsset["review_status"];
+    rights_expires_at?: string | null;
+    permitted_derivatives?: string[];
   };
   intent: string;
   decision_pin?: NonNullable<SfxCue["decision_pin"]>;
@@ -188,6 +177,7 @@ export interface ResolvedSfxCuePlan {
     manifest_hash: string;
     library_id: string;
     library_version: string;
+    scope?: "repo_common" | "project_local";
   };
   decision_ref?: SfxCuesDoc["decision_ref"] & {
     resolved_path: string;
@@ -197,6 +187,7 @@ export interface ResolvedSfxCuePlan {
 
 export interface ResolveSfxCuePlanOptions {
   projectDir: string;
+  repoSfxRoot?: string;
   timeline: TimelineIR;
   cuesPath: string;
 }
@@ -205,9 +196,14 @@ export class SfxCueContractError extends Error {
   constructor(
     readonly code:
       | "SFX_CUE_INVALID"
+      | "SFX_LIBRARY_INVALID"
       | "SFX_LIBRARY_MISSING"
       | "SFX_LIBRARY_UNSAFE_PATH"
       | "SFX_LIBRARY_DRIFT"
+      | "SFX_LIBRARY_AMBIGUOUS"
+      | "SFX_ASSET_MISSING"
+      | "SFX_ASSET_UNSELECTABLE"
+      | "SFX_RIGHTS_HOLD"
       | "SFX_DECISION_UNSAFE_PATH"
       | "SFX_DECISION_DRIFT",
     message: string,
@@ -263,6 +259,10 @@ function sfxCueIdFromClip(clip: ClipOutput): string | undefined {
     && typeof (cue as Record<string, unknown>).cue_id === "string"
     ? (cue as Record<string, unknown>).cue_id as string
     : undefined;
+}
+
+function hasFormalSfxCue(clip: ClipOutput): boolean {
+  return Object.prototype.hasOwnProperty.call(clip.metadata ?? {}, "sfx_cue");
 }
 
 function assertEqual(label: string, expected: unknown, actual: unknown): void {
@@ -425,39 +425,10 @@ function resolvePinnedDecision(
   };
 }
 
-function resolveAssetPath(
-  libraryRoot: string,
-  asset: SfxLibraryAsset,
-): string {
-  if (path.isAbsolute(asset.path)) {
-    throw new SfxCueContractError(
-      "SFX_LIBRARY_UNSAFE_PATH",
-      `SFX asset ${asset.asset_id} path must be relative to the library root.`,
-    );
-  }
-  const candidate = path.resolve(libraryRoot, asset.path);
-  if (!isContained(libraryRoot, candidate)) {
-    throw new SfxCueContractError(
-      "SFX_LIBRARY_UNSAFE_PATH",
-      `SFX asset ${asset.asset_id} resolves outside the SFX library root.`,
-    );
-  }
-  requiredFile(candidate, `SFX asset ${asset.asset_id}`);
-  const real = fs.realpathSync(candidate);
-  if (!isContained(libraryRoot, real)) {
-    throw new SfxCueContractError(
-      "SFX_LIBRARY_UNSAFE_PATH",
-      `SFX asset ${asset.asset_id} resolves through a symlink outside the SFX library root.`,
-    );
-  }
-  assertEqual(`${asset.asset_id}.content_hash`, asset.content_hash, hashFile(real));
-  assertEqual(`${asset.asset_id}.size_bytes`, asset.size_bytes, fs.statSync(real).size);
-  return real;
-}
-
 export function resolveSfxLibraryPin(
   projectDir: string,
   pin: SfxCuesDoc["library"],
+  options: { repoSfxRoot?: string } = {},
 ): ResolvedSfxLibrary {
   const manifestPath = requiredFile(
     path.isAbsolute(pin.manifest_path)
@@ -466,13 +437,33 @@ export function resolveSfxLibraryPin(
     "SFX library manifest",
   );
   assertEqual("library.manifest_hash", pin.manifest_hash, hashFile(manifestPath));
-  const manifest = validateArtifact<SfxLibraryManifest>(
-    JSON.parse(fs.readFileSync(manifestPath, "utf8")),
-    "sfx-library.schema.json",
-  );
+  let loaded: ReturnType<typeof loadSfxLibraryManifest>;
+  try {
+    loaded = loadSfxLibraryManifest(manifestPath, { verifyAssets: true });
+  } catch (error) {
+    if (error instanceof SfxLibraryContractError) {
+      throw new SfxCueContractError(error.code, error.message);
+    }
+    throw error;
+  }
+  const manifest = loaded.manifest;
   assertEqual("library_id", pin.library_id, manifest.library_id);
   assertEqual("library_version", pin.library_version, manifest.library_version);
-  const libraryRoot = fs.realpathSync(path.dirname(manifestPath));
+  if (!pin.scope) {
+    throw new SfxCueContractError("SFX_RIGHTS_HOLD", "library.scope is required for formal SFX selection");
+  }
+  assertEqual("library.scope", pin.scope, manifest.scope);
+  try {
+    assertSfxScopeAuthority(loaded, pin.scope, {
+      projectRoot: path.resolve(projectDir),
+      ...(options.repoSfxRoot ? { repoSfxRoot: options.repoSfxRoot } : {}),
+    });
+  } catch (error) {
+    if (error instanceof SfxLibraryContractError) {
+      throw new SfxCueContractError(error.code, error.message);
+    }
+    throw error;
+  }
   const assets: ResolvedSfxLibrary["assets"] = new Map();
   for (const asset of manifest.assets) {
     if (assets.has(asset.asset_id)) {
@@ -481,9 +472,18 @@ export function resolveSfxLibraryPin(
         `SFX library asset_id must be unique: ${asset.asset_id}`,
       );
     }
+    let sourcePath: string | undefined;
+    try {
+      sourcePath = resolveSfxAssetSource(loaded, asset, { allowMissing: true });
+    } catch (error) {
+      if (error instanceof SfxLibraryContractError) {
+        throw new SfxCueContractError(error.code, error.message);
+      }
+      throw error;
+    }
     assets.set(asset.asset_id, {
       asset,
-      sourcePath: resolveAssetPath(libraryRoot, asset),
+      ...(sourcePath ? { sourcePath } : {}),
     });
   }
   return {
@@ -492,6 +492,7 @@ export function resolveSfxLibraryPin(
     library_id: pin.library_id,
     library_version: pin.library_version,
     manifest,
+    ...(manifest.scope ? { scope: manifest.scope } : {}),
     assets,
   };
 }
@@ -536,8 +537,15 @@ export function resolveSfxCuePlan(
   }
   const decisionRef = resolvePinnedDecision(projectDir, doc, timeline);
 
-  const library = resolveSfxLibraryPin(projectDir, doc.library);
+  const library = resolveSfxLibraryPin(projectDir, doc.library, { repoSfxRoot: options.repoSfxRoot });
   const assets = library.assets;
+  const libraryHold = getSfxLibraryHoldReason(library.manifest);
+  if (libraryHold) {
+    throw new SfxCueContractError(
+      "SFX_RIGHTS_HOLD",
+      "SFX library cannot be selected: " + libraryHold,
+    );
+  }
 
   const timelineTail = timelineTailFrame(timeline);
   const cueIds = new Set<string>();
@@ -556,7 +564,22 @@ export function resolveSfxCuePlan(
         `unknown SFX asset: ${cue.asset_id}`,
       );
     }
-    const { asset, sourcePath } = resolvedAsset;
+    const { asset } = resolvedAsset;
+    try {
+      assertSfxAssetSelectable(asset, new Date(), "formal_render");
+    } catch (error) {
+      if (error instanceof SfxLibraryContractError) {
+        throw new SfxCueContractError(error.code, error.message);
+      }
+      throw error;
+    }
+    const sourcePath = resolvedAsset.sourcePath;
+    if (!sourcePath) {
+      throw new SfxCueContractError(
+        "SFX_ASSET_MISSING",
+        "selected SFX asset has no readable local media: " + asset.asset_id,
+      );
+    }
     if (!asset.semantic_roles.includes(cue.semantic_role)) {
       throw new SfxCueContractError(
         "SFX_CUE_INVALID",
@@ -565,7 +588,7 @@ export function resolveSfxCuePlan(
     }
     if (
       cue.source_range.out_us <= cue.source_range.in_us
-      || cue.source_range.out_us > asset.duration_us
+      || cue.source_range.out_us > asset.duration_us!
     ) {
       throw new SfxCueContractError(
         "SFX_CUE_INVALID",
@@ -612,8 +635,21 @@ export function resolveSfxCuePlan(
       ["asset_size_bytes", asset.size_bytes, pin.asset_size_bytes],
       ["rights_evidence_ref", asset.rights.evidence_ref, pin.rights_evidence_ref],
       ["provenance_ref", asset.provenance.source_ref, pin.provenance_ref],
+      ["asset_path", asset.path, pin.asset_path],
+      ["rights_status", asset.rights.status, pin.rights_status],
+      ["provenance_status", asset.provenance.status, pin.provenance_status],
+      ["review_status", asset.review_status, pin.review_status],
+      ["rights_expires_at", asset.rights.expires_at ?? null, pin.rights_expires_at],
+      ["permitted_derivatives", asset.rights.permitted_derivatives, pin.permitted_derivatives],
     ] as Array<[string, unknown, unknown]>) {
-      assertEqual(`${cue.cue_id}.${label}`, expected, actual);
+      if (actual !== undefined) {
+        const equal = Array.isArray(expected)
+          ? JSON.stringify(expected) === JSON.stringify(actual)
+          : expected === actual;
+        if (!equal) {
+          assertEqual(`${cue.cue_id}.${label}`, expected, actual);
+        }
+      }
     }
     return {
       cue_id: cue.cue_id,
@@ -648,6 +684,18 @@ export function resolveSfxCuePlan(
         rights_usage_scope: asset.rights.usage_scope,
         provenance_origin: asset.provenance.origin,
         generated_at: asset.provenance.generated_at,
+        ...(asset.path ? { asset_path: asset.path } : {}),
+        rights_status: asset.rights.status,
+        ...(asset.provenance.status
+          ? { provenance_status: asset.provenance.status }
+          : {}),
+        ...(asset.review_status ? { review_status: asset.review_status } : {}),
+        ...(asset.rights.expires_at !== undefined
+          ? { rights_expires_at: asset.rights.expires_at }
+          : {}),
+        ...(asset.rights.permitted_derivatives
+          ? { permitted_derivatives: [...asset.rights.permitted_derivatives] }
+          : {}),
         ...(asset.provenance.generation_id !== undefined
           ? { generation_id: asset.provenance.generation_id }
           : {}),
@@ -675,6 +723,7 @@ export function resolveSfxCuePlan(
       manifest_hash: doc.library.manifest_hash,
       library_id: doc.library.library_id,
       library_version: doc.library.library_version,
+      ...(library.scope ? { scope: library.scope } : {}),
     },
     ...(decisionRef ? { decision_ref: decisionRef } : {}),
     cues,
@@ -698,9 +747,8 @@ export function projectSfxToTimeline(
   const existing = existingIndex >= 0
     ? result.tracks.audio[existingIndex]
     : undefined;
-  const plannedIds = new Set(plan.cues.map((cue) => cue.cue_id));
   const retained = (existing?.clips ?? []).filter(
-    (clip) => !plannedIds.has(sfxCueIdFromClip(clip) ?? ""),
+    (clip) => !hasFormalSfxCue(clip),
   );
   const projected: ClipOutput[] = plan.cues.map((cue) => ({
     clip_id: `A3_${cue.cue_id}`,
@@ -746,13 +794,32 @@ export function projectSfxToTimeline(
         library_id: plan.library.library_id,
         library_version: plan.library.library_version,
         library_manifest_hash: plan.library.manifest_hash,
+        ...(plan.library.scope ? { library_scope: plan.library.scope } : {}),
         asset_content_hash: cue.asset_pin.asset_content_hash,
         asset_size_bytes: cue.asset_pin.asset_size_bytes,
+        ...(cue.asset_pin.asset_path
+          ? { asset_path: cue.asset_pin.asset_path }
+          : {}),
         rights_evidence_ref: cue.asset_pin.rights_evidence_ref,
+        ...(cue.asset_pin.rights_status
+          ? { rights_status: cue.asset_pin.rights_status }
+          : {}),
         rights_basis: cue.asset_pin.rights_basis,
         rights_usage_scope: cue.asset_pin.rights_usage_scope,
         provenance_ref: cue.asset_pin.provenance_ref,
+        ...(cue.asset_pin.provenance_status
+          ? { provenance_status: cue.asset_pin.provenance_status }
+          : {}),
         provenance_origin: cue.asset_pin.provenance_origin,
+        ...(cue.asset_pin.review_status
+          ? { review_status: cue.asset_pin.review_status }
+          : {}),
+        ...(cue.asset_pin.rights_expires_at !== undefined
+          ? { rights_expires_at: cue.asset_pin.rights_expires_at }
+          : {}),
+        ...(cue.asset_pin.permitted_derivatives
+          ? { permitted_derivatives: [...cue.asset_pin.permitted_derivatives] }
+          : {}),
         generated_at: cue.asset_pin.generated_at,
         ...(cue.asset_pin.generation_id !== undefined
           ? { generation_id: cue.asset_pin.generation_id }

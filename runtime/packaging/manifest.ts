@@ -9,7 +9,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import type { RenderRouteReceipt } from "../render/route-resolver.js";
+import type { RenderRouteEvidence, RenderRouteReceipt } from "../render/route-resolver.js";
+import { captionVisualTreatmentReceiptSummary, type CaptionVisualTreatmentInput } from "../caption/visual-treatment.js";
+import { validateAgainstSchema } from "../commands/shared.js";
+import { hashAudioRenderPlan, type AudioRenderPlan } from "../audio/render-plan.js";
 
 export interface PackageRenderProvenance {
   contract_version: "render-provenance/v1";
@@ -20,6 +23,24 @@ export interface PackageRenderProvenance {
   delivery_execution: RenderRouteReceipt["delivery_execution"];
   inputs: RenderRouteReceipt["inputs"];
   outputs: RenderRouteReceipt["outputs"];
+  route_evidence: NonNullable<RenderRouteReceipt["route_evidence"]>;
+  caption_visual_treatment?: {
+    status: CaptionVisualTreatmentInput["status"];
+    approval_hash: string;
+    visual_treatment_patch_hash: string | null;
+    typography_policy_hash: string;
+    platform_safe_zone_profile_id: string | null;
+    platform_safe_zone_profile_path: string | null;
+    platform_safe_zone_profile_hash: string | null;
+    accessibility: CaptionVisualTreatmentInput["accessibility"] | null;
+    text_timing_hash: string;
+    capability_hash: string;
+    resolved_input_hash: string;
+    applied_caption_ids: string[];
+    degraded_reasons: Array<{ caption_id: string; reason: string }>;
+    blocked_reasons: Array<{ caption_id: string; reason: string }>;
+  };
+  render_report?: { path: string; sha256: string };
 }
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -36,6 +57,8 @@ export interface PackageManifest {
     raw_video?: { path: string; sha256: string };
     raw_dialogue?: { path: string; sha256: string };
     final_mix?: { path: string; sha256: string };
+    mastered_mp3?: { path: string; sha256: string };
+    audio_mix_report?: { path: string; sha256: string };
     captions?: Array<{
       kind: string;
       delivery: string;
@@ -57,6 +80,10 @@ export interface PackageManifest {
     source_inputs_hash?: string;
     source_inputs_attestation_status?: "verified" | "live_only" | "not_applicable";
     source_inputs_freshness_reason?: string;
+    /** New NLE manifests must carry an explicit route receipt. */
+    nle_receipt_required?: true;
+    route_receipt?: { path: string; sha256: string };
+    route_evidence?: RenderRouteEvidence;
     render?: PackageRenderProvenance;
   };
 }
@@ -113,6 +140,16 @@ function artifactEntry(
   };
 }
 
+function planRequiresMasteredMp3(planPath: string | undefined): boolean {
+  if (!planPath || !fs.existsSync(planPath)) return false;
+  try {
+    const plan = JSON.parse(fs.readFileSync(planPath, "utf8")) as Partial<AudioRenderPlan>;
+    return plan.strategy === "music_master" && plan.music_master?.audio_decision === "mastering";
+  } catch {
+    return false;
+  }
+}
+
 // ── Engine Render Manifest ─────────────────────────────────────────
 
 /**
@@ -137,6 +174,10 @@ export function buildEngineRenderManifest(opts: {
   renderRouteReceiptPath: string;
   derivedVideoProvenancePath?: string;
   layoutSnapshotPath?: string;
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput;
+  renderReportPath?: string;
+  /** Persist the canonical plan reference in the render route receipt. */
+  audioRenderPlanPath?: string;
   createdAt?: string;
 }): PackageManifest {
   const { outputDir, captionPolicy } = opts;
@@ -145,6 +186,9 @@ export function buildEngineRenderManifest(opts: {
   ) as RenderRouteReceipt;
   if (routeReceipt.receipt_version !== "render-route-receipt/v3") {
     throw new Error("render_route_receipt_version_invalid");
+  }
+  if (!routeReceipt.route_evidence) {
+    throw new Error("render_route_receipt_evidence_missing");
   }
   const renderProvenance: PackageRenderProvenance = {
     contract_version: "render-provenance/v1",
@@ -158,7 +202,38 @@ export function buildEngineRenderManifest(opts: {
     delivery_execution: routeReceipt.delivery_execution,
     inputs: routeReceipt.inputs,
     outputs: routeReceipt.outputs,
+    route_evidence: routeReceipt.route_evidence,
+    ...(opts.captionVisualTreatmentInput ? {
+      caption_visual_treatment: (() => {
+        const summary = captionVisualTreatmentReceiptSummary(opts.captionVisualTreatmentInput);
+        return {
+          status: summary.status,
+          approval_hash: summary.approval_hash,
+          visual_treatment_patch_hash: summary.visual_treatment_patch_hash,
+          typography_policy_hash: summary.typography_policy_hash,
+          platform_safe_zone_profile_id: summary.platform_safe_zone_profile_id,
+          platform_safe_zone_profile_path: summary.platform_safe_zone_profile_path,
+          platform_safe_zone_profile_hash: summary.platform_safe_zone_profile_hash,
+          accessibility: summary.accessibility,
+          text_timing_hash: summary.text_timing_hash,
+          capability_hash: summary.capability_hash,
+          resolved_input_hash: summary.input_hash,
+          applied_caption_ids: summary.applied_caption_ids,
+          degraded_reasons: summary.degraded_reasons,
+          blocked_reasons: summary.blocked_reasons,
+        };
+      })(),
+    } : {}),
+    ...(opts.renderReportPath && fs.existsSync(opts.renderReportPath)
+      ? { render_report: { path: path.resolve(opts.renderReportPath), sha256: computeSha256(opts.renderReportPath) } }
+      : {}),
   };
+  if (opts.renderReportPath && !fs.existsSync(opts.renderReportPath)) {
+    throw new Error(`Required artifact not found: ${opts.renderReportPath}`);
+  }
+  if (opts.audioRenderPlanPath && !fs.existsSync(opts.audioRenderPlanPath)) {
+    throw new Error(`Required artifact not found: ${opts.audioRenderPlanPath}`);
+  }
 
   // Final video
   const finalVideoPath = opts.finalVideoPath ?? path.join(outputDir, "video", "final.mp4");
@@ -195,6 +270,12 @@ export function buildEngineRenderManifest(opts: {
   );
   const finalMix = artifactEntry(
     path.join(outputDir, "audio", "final_mix.wav"),
+  );
+  const masteredMp3 = planRequiresMasteredMp3(opts.audioRenderPlanPath)
+    ? artifactEntry(path.join(outputDir, "audio", "music_master_320.mp3"))
+    : null;
+  const audioMixReport = artifactEntry(
+    path.join(outputDir, "logs", "audio-mix-report.json"),
   );
 
   // Caption sidecars
@@ -243,14 +324,16 @@ export function buildEngineRenderManifest(opts: {
   if (rawVideo) artifacts.raw_video = rawVideo;
   if (rawDialogue) artifacts.raw_dialogue = rawDialogue;
   if (finalMix) artifacts.final_mix = finalMix;
+  if (masteredMp3) artifacts.mastered_mp3 = masteredMp3;
+  if (audioMixReport) artifacts.audio_mix_report = audioMixReport;
   if (captions.length > 0) artifacts.captions = captions;
 
   return {
     version: derivedVideoProvenance && layoutSnapshot
-      ? "1.2.0"
-      : derivedVideoProvenance
-      ? "1.1.0"
-      : "1.0.0",
+        ? "1.2.0"
+        : derivedVideoProvenance
+          ? "1.1.0"
+          : "1.0.0",
     project_id: opts.projectId,
     source_of_truth: "engine_render",
     base_timeline_version: opts.baseTimelineVersion,
@@ -300,9 +383,14 @@ export function buildNleFinishingManifest(opts: {
   captionPolicy: { source: string; delivery_mode: string };
   finalVideoPath: string;
   qaReportPath: string;
+  audioRenderPlanPath?: string;
+  audioMixReportPath?: string;
+  audioFinalMixPath?: string;
+  audioMasteredMp3Path?: string;
   sidecarPaths?: string[];
   derivedVideoProvenancePath?: string;
   layoutSnapshotPath?: string;
+  routeReceiptPath?: string;
   createdAt?: string;
 }): PackageManifest {
   const { captionPolicy } = opts;
@@ -333,6 +421,96 @@ export function buildNleFinishingManifest(opts: {
     : null;
   if (opts.layoutSnapshotPath && !layoutSnapshot) {
     throw new Error(`Required artifact not found: ${opts.layoutSnapshotPath}`);
+  }
+
+  if (!opts.routeReceiptPath) {
+    throw new Error("nle_route_receipt_required");
+  }
+  const routeReceipt = artifactEntry(opts.routeReceiptPath);
+  if (!routeReceipt) {
+    throw new Error(`Required artifact not found: ${opts.routeReceiptPath}`);
+  }
+  let routeDocument: RenderRouteReceipt;
+  try {
+    routeDocument = JSON.parse(fs.readFileSync(opts.routeReceiptPath, "utf8")) as RenderRouteReceipt;
+  } catch (error) {
+    throw new Error(`nle_route_receipt_invalid_json:${error instanceof Error ? error.message : String(error)}`);
+  }
+  const routeSchema = validateAgainstSchema(routeDocument, "render-route-receipt.schema.json");
+  if (!routeSchema.valid) {
+    throw new Error(`nle_route_receipt_schema_invalid:${routeSchema.errors.join("; ")}`);
+  }
+  const routeEvidence = routeDocument.route_evidence;
+  if (!routeEvidence
+    || (routeEvidence.route_kind !== "supplied_final" && routeEvidence.route_kind !== "external_manual_nle")
+    || routeEvidence.ownership === "canonical"
+    || routeEvidence.canonical_claim
+    || routeDocument.outputs.final_video.sha256 !== finalVideo.sha256) {
+    throw new Error("nle_route_receipt_must_bind_supplied_or_external_final");
+  }
+
+  const audioRenderPlan = opts.audioRenderPlanPath
+    ? artifactEntry(opts.audioRenderPlanPath)
+    : null;
+  if (opts.audioRenderPlanPath && !audioRenderPlan) {
+    throw new Error(`Required artifact not found: ${opts.audioRenderPlanPath}`);
+  }
+  const audioMixReport = opts.audioMixReportPath
+    ? artifactEntry(opts.audioMixReportPath)
+    : null;
+  if (opts.audioMixReportPath && !audioMixReport) {
+    throw new Error(`Required artifact not found: ${opts.audioMixReportPath}`);
+  }
+  if (Boolean(audioRenderPlan) !== Boolean(audioMixReport)) {
+    throw new Error("nle_music_master_receipt_requires_plan_and_audio_mix_report");
+  }
+  const audioFinalMix = opts.audioFinalMixPath
+    ? artifactEntry(opts.audioFinalMixPath)
+    : null;
+  if (opts.audioFinalMixPath && !audioFinalMix) {
+    throw new Error(`Required artifact not found: ${opts.audioFinalMixPath}`);
+  }
+  const audioMasteredMp3 = opts.audioMasteredMp3Path
+    ? artifactEntry(opts.audioMasteredMp3Path)
+    : null;
+  if (opts.audioMasteredMp3Path && !audioMasteredMp3) {
+    throw new Error(`Required artifact not found: ${opts.audioMasteredMp3Path}`);
+  }
+  if (audioRenderPlan && !audioFinalMix) {
+    throw new Error("nle_music_master_receipt_requires_final_mix");
+  }
+  if (audioRenderPlan && audioMixReport) {
+    let planDocument: AudioRenderPlan;
+    let reportDocument: Record<string, unknown>;
+    try {
+      planDocument = JSON.parse(fs.readFileSync(opts.audioRenderPlanPath!, "utf8")) as AudioRenderPlan;
+      reportDocument = JSON.parse(fs.readFileSync(opts.audioMixReportPath!, "utf8")) as Record<string, unknown>;
+    } catch (error) {
+      throw new Error(`nle_music_master_receipt_invalid_json:${error instanceof Error ? error.message : String(error)}`);
+    }
+    const planSchema = validateAgainstSchema(planDocument, "audio-render-plan.schema.json");
+    const reportSchema = validateAgainstSchema(reportDocument, "audio-mix-report.schema.json");
+    const reportMaster = reportDocument.music_master;
+    const reportMeasurements = reportMaster && typeof reportMaster === "object" && !Array.isArray(reportMaster)
+      ? (reportMaster as Record<string, unknown>).measurements
+      : undefined;
+    const reportFinalMux = reportMaster && typeof reportMaster === "object" && !Array.isArray(reportMaster)
+      ? (reportMaster as Record<string, unknown>).final_mux
+      : undefined;
+    const measurementStatus = reportMeasurements && typeof reportMeasurements === "object" && !Array.isArray(reportMeasurements)
+      ? (reportMeasurements as Record<string, unknown>).status
+      : undefined;
+    const finalMuxStatus = reportFinalMux && typeof reportFinalMux === "object" && !Array.isArray(reportFinalMux)
+      ? ((reportFinalMux as Record<string, unknown>).measurements as Record<string, unknown> | undefined)?.status
+      : undefined;
+    if (!planSchema.valid || !reportSchema.valid
+      || planDocument.strategy !== "music_master"
+      || reportDocument.version !== "audio-mix-report/v2"
+      || reportDocument.plan_hash !== hashAudioRenderPlan(planDocument)
+      || measurementStatus !== "measured"
+      || finalMuxStatus !== "measured") {
+      throw new Error("nle_music_master_receipt_must_bind_a_measured_canonical_plan");
+    }
   }
 
   // Caption sidecars
@@ -369,6 +547,9 @@ export function buildNleFinishingManifest(opts: {
   const artifacts: PackageManifest["artifacts"] = {
     final_video: finalVideo,
     qa_report: qaReport,
+    ...(audioFinalMix ? { final_mix: audioFinalMix } : {}),
+    ...(audioMasteredMp3 ? { mastered_mp3: audioMasteredMp3 } : {}),
+    ...(audioMixReport ? { audio_mix_report: audioMixReport } : {}),
     ...(derivedVideoProvenance
       ? { derived_video_provenance: derivedVideoProvenance }
       : {}),
@@ -376,6 +557,24 @@ export function buildNleFinishingManifest(opts: {
   };
 
   if (captions.length > 0) artifacts.captions = captions;
+
+  const render = audioRenderPlan && audioMixReport
+    ? {
+        contract_version: "render-provenance/v1" as const,
+        route_receipt: routeReceipt,
+        renderer_versions: routeDocument.renderer_versions,
+        layer_receipts: routeDocument.layer_receipts,
+        ...(routeDocument.font_receipt ? { font_receipt: routeDocument.font_receipt } : {}),
+        delivery_execution: routeDocument.delivery_execution,
+        inputs: {
+          ...routeDocument.inputs,
+          audio_render_plan: audioRenderPlan,
+          audio_mix_report: audioMixReport,
+        },
+        outputs: routeDocument.outputs,
+        route_evidence: routeEvidence,
+      } satisfies PackageRenderProvenance
+    : undefined;
 
   return {
     version: derivedVideoProvenance && layoutSnapshot
@@ -401,6 +600,10 @@ export function buildNleFinishingManifest(opts: {
         ? { render_defaults_hash: opts.renderDefaultsHash }
         : {}),
       handoff_id: opts.handoffId,
+      nle_receipt_required: true,
+      route_receipt: routeReceipt,
+      route_evidence: routeEvidence,
+      ...(render ? { render } : {}),
     },
   };
 }

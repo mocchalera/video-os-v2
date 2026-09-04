@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-ready-state.schema.json",
+  "type": "object",
+  "required": ["version", "project_id", "review_identity", "generation_id", "status", "artifacts", "qa_receipt", "ask_payload_sha256", "reason"],
+  "properties": {
+    "version": { "const": "review-ready-state/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "review_identity": { "$ref": "#/$defs/hash" },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "status": { "enum": ["pending", "ready", "failed", "stale"] },
+    "artifacts": {
+      "type": "object",
+      "required": ["preview", "qa_receipt", "unanswered_ask"],
+      "properties": { "preview": { "$ref": "#/$defs/freshness" }, "qa_receipt": { "$ref": "#/$defs/freshness" }, "unanswered_ask": { "$ref": "#/$defs/freshness" } },
+      "additionalProperties": false
+    },
+    "qa_receipt": { "anyOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+    "ask_payload_sha256": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "reason": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "freshness": { "enum": ["CURRENT", "STALE"] },
+    "artifact": { "type": "object", "required": ["path", "sha256"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/hash" } }, "additionalProperties": false }
+  }
+}

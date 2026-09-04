@@ -1,0 +1,37 @@
+id: lyric_mv
+default_policy: generic
+capabilities:
+  visual_model:
+    requirement: optional
+defaults:
+  opening_cadence: "music-led opening"
+  middle_cadence: "section-led"
+  ending_cadence: "resolving"
+  default_transition: "crossfade"
+  crossfade_frames: 6
+  caption_policy: manual
+  still_image_intent:
+    min_hold_sec: 2
+    default_hold_sec: 4
+    max_hold_sec: 12
+    motion_mode: static
+    fit_mode: cover
+    background: black
+  lyric_mv_thresholds:
+    background_hold:
+      min_sec: 2
+      target_sec: 4
+      max_sec: 12
+      intentional_long_hold_sec: 8
+    caption_cadence:
+      min_sec: 2
+      target_sec: 3
+      max_sec: 4
+    music_section_cadence:
+      min_sec: 8
+      target_sec: 16
+      max_sec: 32
+    motion_cadence:
+      min_sec: 4
+      target_sec: 8
+      max_sec: 12

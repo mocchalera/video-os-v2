@@ -73,8 +73,14 @@ export interface BlueprintAgreementReport {
   golden_beat_count: number;
   candidate_beat_count: number;
   beat_count_score: number;
+  /** LCS ratio over ordered canonical beat IDs. */
+  beat_id_agreement: number;
   /** LCS ratio over the story_role sequence (null when either side lacks story roles) */
   story_role_agreement: number | null;
+  /** Ordered equality of emotional_valence (null when absent on both sides). */
+  emotional_valence_agreement: number | null;
+  /** Ordered equality of evidence_required (null when absent on both sides). */
+  evidence_required_agreement: number | null;
   /** 1 - mean |duration-share difference| over order-aligned beats */
   duration_share_score: number;
   /** Fraction of equal pacing cadence fields (opening/middle/ending) */
@@ -121,6 +127,11 @@ export interface EvalReport {
   evaluated_at: string;
   /** Who approved the golden — "operator" is human-tier ground truth */
   golden_approved_by: string | null;
+  timeline_identity?: {
+    golden_cut_identity: string;
+    candidate_cut_identity: string;
+    candidate_review_mode: "derived" | "legacy_canonical";
+  };
   stages: EvalStageScores;
   llm_judge?: LlmJudgeReport | null;
   /** Weighted composite of available stage scores, 0..100 */

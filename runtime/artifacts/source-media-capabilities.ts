@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { AssetItem, CanonicalSourceCapabilities } from "../connectors/ffprobe.js";
 import type {
   AudioSemanticRole,
   Candidate,
@@ -13,6 +14,22 @@ import { assertImageSequenceGrounding } from "./image-sequence-grounding.js";
 export interface AssetMediaCapability {
   media_kind: SourceMediaKind;
   source_capabilities: SourceCapabilities;
+}
+
+type AssetCapabilityInput = Pick<AssetItem, "media_kind" | "video_stream" | "audio_stream" | "source_capabilities">;
+
+/**
+ * Resolve the canonical temporal-video fact, retaining a legacy fallback for
+ * artifacts created before source_capabilities was introduced.
+ */
+export function hasTemporalVideo(asset: AssetCapabilityInput): boolean {
+  if (asset.media_kind === "image") return false;
+  // Explicit audio remains non-temporal even when stale metadata claims a
+  // video stream or a temporal-video capability.
+  if (asset.media_kind === "audio") return false;
+  const declared = asset.source_capabilities?.has_temporal_video;
+  if (typeof declared === "boolean") return declared;
+  return Boolean(asset.video_stream);
 }
 
 export class MediaKindPlanningBlockedError extends Error {
@@ -32,23 +49,49 @@ export function readAssetMediaCapabilities(projectDir: string): Map<string, Asse
     const result = new Map<string, AssetMediaCapability>();
     for (const value of parsed.items) {
       if (!value || typeof value !== "object") continue;
-      const asset = value as { asset_id?: unknown; media_kind?: unknown; video_stream?: unknown; audio_stream?: unknown };
+      const asset = value as {
+        asset_id?: unknown;
+        media_kind?: unknown;
+        video_stream?: unknown;
+        audio_stream?: unknown;
+        source_capabilities?: unknown;
+      };
       if (typeof asset.asset_id !== "string" || asset.asset_id.length === 0) continue;
-      const hasVideo = Boolean(asset.video_stream && typeof asset.video_stream === "object");
-      const hasAudio = Boolean(asset.audio_stream && typeof asset.audio_stream === "object");
+      const declared = parseCanonicalSourceCapabilities(asset.source_capabilities);
+      const hasVideo = declared?.has_video ?? Boolean(asset.video_stream && typeof asset.video_stream === "object");
+      const hasAudio = declared?.has_audio ?? Boolean(asset.audio_stream && typeof asset.audio_stream === "object");
       const explicitKind = isSourceMediaKind(asset.media_kind) ? asset.media_kind : undefined;
       const mediaKind = explicitKind ?? (hasVideo ? "video" : hasAudio ? "audio" : "unknown");
+      const hasVisualVideo = mediaKind === "image"
+        ? true
+        : mediaKind === "audio"
+          ? false
+          : declared?.has_temporal_video ?? hasVideo;
       result.set(asset.asset_id, {
         media_kind: mediaKind,
-        source_capabilities: mediaKind === "image"
-          ? { has_video: true, has_audio: false }
-          : { has_video: hasVideo, has_audio: hasAudio },
+        source_capabilities: {
+          has_video: hasVisualVideo,
+          has_audio: mediaKind === "image" ? false : hasAudio,
+        },
       });
     }
     return result;
   } catch {
     return new Map();
   }
+}
+
+function parseCanonicalSourceCapabilities(value: unknown): CanonicalSourceCapabilities | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.has_video !== "boolean"
+    || typeof candidate.has_audio !== "boolean"
+    || typeof candidate.has_temporal_video !== "boolean") return undefined;
+  return {
+    has_video: candidate.has_video,
+    has_audio: candidate.has_audio,
+    has_temporal_video: candidate.has_temporal_video,
+  };
 }
 
 /** Capabilities only for assets that explicitly declare an authoritative media_kind. */

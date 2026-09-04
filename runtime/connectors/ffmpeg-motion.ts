@@ -157,6 +157,26 @@ export function computeMotionSupportScore(
   return maxEnergyInWindow / maxEnergyOverall;
 }
 
+/**
+ * Require the measured peak bin to rise above its immediate measured
+ * neighbours. Relative normalization alone makes a uniform series score 1.
+ */
+export function hasPositiveMotionContrast(
+  bins: MotionBin[],
+  peakTimestampUs: number,
+): boolean {
+  if (bins.length < 2 || !Number.isFinite(peakTimestampUs)) return false;
+  const peakIndex = bins.findIndex((bin) =>
+    peakTimestampUs >= bin.start_us && peakTimestampUs < bin.end_us,
+  );
+  if (peakIndex < 0) return false;
+  const peakEnergy = bins[peakIndex].energy;
+  const neighbours = [bins[peakIndex - 1], bins[peakIndex + 1]]
+    .filter((bin): bin is MotionBin => bin !== undefined);
+  if (!Number.isFinite(peakEnergy) || neighbours.length === 0) return false;
+  return neighbours.every((bin) => Number.isFinite(bin.energy) && peakEnergy > bin.energy);
+}
+
 // ── Stub Motion Analyzer (for testing / when ffmpeg is not available) ──
 
 /**

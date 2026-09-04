@@ -585,15 +585,19 @@ describe("safe OSS public-promotion path", () => {
   });
 
   it("keeps private signing keys absent and production Stage B fail-closed", () => {
+    const scanRoot = fs.realpathSync(tempRoot("public-secret-repository-scan"));
     const tracked = git(path.resolve("."), [
       "ls-files", "--cached", "--others", "--exclude-standard", "-z",
     ]).split("\0").filter(Boolean);
     const marker = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
     for (const relative of tracked) {
-      const absolute = path.resolve(relative);
-      if (fs.lstatSync(absolute).isFile()) {
-        expect(fs.readFileSync(absolute, "utf8"), relative).not.toContain(marker);
-      }
+      const source = path.resolve(relative);
+      const stat = fs.lstatSync(source);
+      if (!stat.isFile()) continue;
+      const snapshot = path.join(scanRoot, relative);
+      fs.mkdirSync(path.dirname(snapshot), { recursive: true });
+      fs.copyFileSync(source, snapshot);
+      expect(fs.readFileSync(snapshot, "utf8"), relative).not.toContain(marker);
     }
     expect(readPublicPromotionTrustConfig().stage_a_authentication).toEqual({
       configured: false,

@@ -9,7 +9,37 @@ export type TransitionType =
   | "j_cut"
   | "l_cut"
   | "match_cut"
-  | "fade_to_black";
+  | "fade_to_black"
+  // Issue #34 semantic presets (true A/B roll overlap engine)
+  | "film_crossfade"
+  | "light_leak_flash"
+  | "dreamy_focus_blur";
+
+/**
+ * Transition types whose rendering requires a physical A/B roll overlap:
+ * clip B extends its head `transition_frames` earlier so the renderer can
+ * blend clip A's tail with clip B's head without changing the program
+ * duration (Gap 0 / Overrun 0). See runtime/compiler/transition-overlap.ts.
+ */
+export const OVERLAP_TRANSITION_TYPES: ReadonlySet<TransitionType> = new Set([
+  "film_crossfade",
+  "light_leak_flash",
+  "dreamy_focus_blur",
+]);
+
+/**
+ * Issue #34 preset duration defaults (seconds). The issue's frame guidance
+ * (film 10–12f / leak 6–8f / blur 12–15f) corresponds to ~30fps; seconds are
+ * canonical and frames derive from the timeline fps.
+ */
+export const TRANSITION_PRESET_DEFAULT_CROSSFADE_SEC: Record<
+  "film_crossfade" | "light_leak_flash" | "dreamy_focus_blur",
+  number
+> = {
+  film_crossfade: 0.35,
+  light_leak_flash: 0.2,
+  dreamy_focus_blur: 0.45,
+};
 
 export type SkillScope = "adjacent_pair" | "scene_span";
 
@@ -383,6 +413,8 @@ export interface TransitionParams {
   };
   beat_snapped?: boolean;
   beat_ref_sec?: number;
+  /** Blend easing law. The A/B roll engine implements linear only. */
+  easing?: "linear";
 }
 
 export interface TimelineTransition {
@@ -395,6 +427,11 @@ export interface TimelineTransition {
   applied_skill_id?: string;
   degraded_from_skill_id?: string | null;
   confidence?: number;
+  metadata?: Record<string, unknown>;
+  fallback?: {
+    type: TransitionType;
+    reason: string;
+  };
 }
 
 // ── BGM Analysis ────────────────────────────────────────────────────
@@ -405,6 +442,15 @@ export interface BgmSection {
   start_sec: number;
   end_sec: number;
   energy: number;
+  /** Whether this cue came from measurement or a generated fallback. */
+  evidence_classification?: "measured" | "synthetic" | "unavailable";
+}
+
+export interface BgmCueEvent {
+  time_sec: number;
+  strength: number;
+  /** Whether this cue came from measurement or a generated fallback. */
+  evidence_classification?: "measured" | "synthetic" | "unavailable";
 }
 
 export interface BgmEditorialArcMap {
@@ -420,6 +466,7 @@ export interface BgmAnalysis {
     asset_id: string;
     path: string;
     source_hash?: string;
+    source_content_sha256?: string;
   };
   bpm: number;
   meter: string;
@@ -427,9 +474,29 @@ export interface BgmAnalysis {
   beats_sec: number[];
   downbeats_sec: number[];
   sections: BgmSection[];
+  /** Measured onset cues, kept separate from the beat projection. */
+  onsets?: BgmCueEvent[];
+  /** Optional measured downbeat cues with per-cue confidence. */
+  downbeats?: BgmCueEvent[];
   editorial_arc_map?: BgmEditorialArcMap[];
   provenance: {
     detector: string;
-    sample_rate_hz: number;
+    /** Processing rate when the backend measured it; omitted when unavailable. */
+    sample_rate_hz?: number;
+    /** Source rate observed before any backend processing/resampling. */
+    input_sample_rate_hz?: number;
+    /** Rate actually used by the backend's analysis operation. */
+    processing_sample_rate_hz?: number;
+    /** Full source-content SHA-256 for canonical analysis artifacts. */
+    source_content_sha256?: string;
+    backend_name?: string;
+    backend_version?: string;
+    hop_length_samples?: number;
+    window_length_samples?: number;
+    time_unit?: "seconds";
+    evidence_classification?: "measured" | "synthetic" | "unavailable";
+    measurement_status?: "complete" | "partial" | "unavailable";
+    tempo_confidence?: number;
+    fallback_used?: boolean;
   };
 }

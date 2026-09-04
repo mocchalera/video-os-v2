@@ -141,14 +141,15 @@
     },
     "editorial_llm": {
       "type": "object",
-      "required": ["runtime", "timeout_ms"],
+      "required": ["runtime", "timeout_ms", "stage_timeout_ms"],
       "additionalProperties": false,
       "properties": {
         "runtime": {
           "type": "string",
           "enum": ["auto", "codex_exec", "claude_cli", "gemini", "deterministic"]
         },
-        "timeout_ms": { "type": "integer", "minimum": 1 }
+        "timeout_ms": { "type": "integer", "minimum": 1 },
+        "stage_timeout_ms": { "type": "integer", "minimum": 1 }
       }
     },
     "marlin": {
@@ -180,6 +181,9 @@
         },
         "chunk_target_us": { "type": "integer", "minimum": 0 },
         "chunk_overlap_us": { "type": "integer", "minimum": 0 },
+        "caption_max_new_tokens_short": { "type": "integer", "minimum": 1 },
+        "caption_max_new_tokens_max": { "type": "integer", "minimum": 1 },
+        "caption_short_source_max_seconds": { "type": "number", "minimum": 0 },
         "default_find_queries": {
           "type": "array",
           "minItems": 1,
@@ -280,6 +284,18 @@
         "appraiser_subject_prominence_reject_below": { "type": "number", "minimum": 0, "maximum": 1 },
         "appraiser_composition_warn_below": { "type": "number", "minimum": 0, "maximum": 1 },
         "appraiser_subject_prominence_warn_below": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "image_qc": {
+      "type": "object",
+      "required": [
+        "approve_at_or_above", "max_regeneration_attempts", "critical_defect_rejects"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "approve_at_or_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "max_regeneration_attempts": { "const": 2 },
+        "critical_defect_rejects": { "type": "boolean" }
       }
     },
     "selection": {

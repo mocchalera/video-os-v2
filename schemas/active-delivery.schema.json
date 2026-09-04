@@ -11,7 +11,8 @@
     "activated_at",
     "approval_intent",
     "inputs",
-    "artifacts"
+    "artifacts",
+    "lyric_delivery"
   ],
   "properties": {
     "version": { "const": "active-delivery/v1" },
@@ -19,6 +20,8 @@
     "generation_id": { "type": "string", "pattern": "^[a-f0-9]{24}$" },
     "generation_path": { "type": "string", "pattern": "^07_package/caption-finalize/generations/[a-f0-9]{24}$" },
     "activated_at": { "type": "string", "format": "date-time" },
+    "lyric_delivery": { "enum": ["present", "absent"] },
+    "lyric_contract": { "$ref": "#/$defs/lyric_contract" },
     "approval_intent": { "$ref": "#/$defs/artifact" },
     "inputs": {
       "type": "object",
@@ -51,14 +54,207 @@
         "package_manifest": { "$ref": "#/$defs/artifact" },
         "preview": { "$ref": "#/$defs/video_artifact" },
         "preview_receipt": { "$ref": "#/$defs/artifact" },
-        "receipt": { "$ref": "#/$defs/artifact" }
+        "receipt": { "$ref": "#/$defs/artifact" },
+        "lyrics_ass": { "$ref": "#/$defs/artifact" },
+        "lyric_plan": { "$ref": "#/$defs/artifact" },
+        "lyric_script": { "$ref": "#/$defs/artifact" }
       },
       "additionalProperties": false
     }
   },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "lyric_delivery": { "const": "present" } }, "required": ["lyric_delivery"] },
+      "then": { "required": ["lyric_contract"] }
+    },
+    {
+      "if": { "properties": { "lyric_delivery": { "const": "absent" } }, "required": ["lyric_delivery"] },
+      "then": {
+        "properties": {
+          "lyric_contract": false,
+          "artifacts": { "not": { "anyOf": [
+            { "required": ["lyrics_ass"] },
+            { "required": ["lyric_plan"] },
+            { "required": ["lyric_script"] }
+          ] } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "artifacts": { "required": ["lyrics_ass"] } }, "required": ["artifacts"] },
+      "then": { "properties": { "artifacts": { "required": ["lyric_plan"] } } }
+    },
+    {
+      "if": { "properties": { "artifacts": { "required": ["lyric_plan"] } }, "required": ["artifacts"] },
+      "then": { "properties": { "artifacts": { "required": ["lyrics_ass"] } } }
+    },
+    {
+      "if": { "properties": { "artifacts": { "required": ["lyric_script"] } }, "required": ["artifacts"] },
+      "then": { "properties": { "artifacts": { "required": ["lyrics_ass", "lyric_plan"] } } }
+    },
+    {
+      "if": {
+        "required": ["lyric_contract"],
+        "properties": { "lyric_contract": {
+          "type": "object",
+          "required": ["source_kind"],
+          "properties": { "source_kind": { "const": "authored_caption_approval" } }
+        } }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "required": ["lyrics_ass", "lyric_plan"],
+            "not": { "required": ["lyric_script"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["lyric_contract"],
+        "properties": { "lyric_contract": { "type": "object" } },
+        "not": { "properties": { "lyric_contract": {
+          "required": ["source_kind"],
+          "properties": { "source_kind": { "const": "authored_caption_approval" } }
+        } } }
+      },
+      "then": {
+        "properties": { "artifacts": { "required": ["lyrics_ass", "lyric_plan", "lyric_script"] } }
+      }
+    }
+  ],
   "$defs": {
     "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "lyric_contract": {
+            "type": "object",
+            "required": [
+                    "canonical_options",
+                    "options_digest",
+                    "reduced_motion",
+                    "tail_sec",
+                    "max_per_char_sec",
+                    "max_hold_sec",
+                    "faces"
+            ],
+            "properties": {
+                    "source_kind": {
+                            "enum": ["lrc_script", "authored_caption_approval"]
+                    },
+                    "script_sha256": {
+                            "$ref": "#/$defs/sha256"
+                    },
+                    "authority": {
+                            "$ref": "#/$defs/lyric_authority"
+                    },
+                    "canonical_options": {
+                            "type": "object",
+                            "required": ["reducedMotion", "sections", "staccatoMaxHoldSec", "staccatoMaxPerCharSec", "tailSec", "videoDurationSec", "positioning"],
+                            "properties": {
+                                    "reducedMotion": { "type": "boolean" },
+                                    "sections": { "type": "array" },
+                                    "staccatoMaxHoldSec": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+                                    "staccatoMaxPerCharSec": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+                                    "tailSec": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+                                    "videoDurationSec": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+                                    "positioning": { "enum": ["poster_boundary_cross", "bottom_center"] }
+                            },
+                            "additionalProperties": false
+                    },
+                    "options_digest": {
+                            "$ref": "#/$defs/sha256"
+                    },
+                    "reduced_motion": {
+                            "type": "boolean"
+                    },
+                    "tail_sec": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                    },
+                    "max_per_char_sec": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                    },
+                    "max_hold_sec": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                    },
+                    "video_duration_sec": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                    },
+                    "faces": {
+                            "type": "array",
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "items": {
+                                    "type": "object",
+                                    "required": [
+                                            "role",
+                                            "family",
+                                            "postscript_name",
+                                            "face_index",
+                                            "font_path",
+                                            "font_sha256"
+                                    ],
+                                    "properties": {
+                                            "role": {
+                                                    "enum": [
+                                                            "verse",
+                                                            "chorus",
+                                                            "punk"
+                                                    ]
+                                            },
+                                            "family": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                            },
+                                            "postscript_name": {
+                                                    "type": "string"
+                                            },
+                                            "face_index": {
+                                                    "type": "integer",
+                                                    "minimum": -1
+                                            },
+                                            "font_path": {
+                                                    "type": "string"
+                                            },
+                                            "font_sha256": {
+                                                    "type": "string"
+                                            }
+                                    },
+                                    "additionalProperties": false
+                            }
+                    }
+            },
+            "additionalProperties": false,
+            "allOf": [
+                    {
+                            "if": { "properties": { "source_kind": { "const": "authored_caption_approval" } }, "required": ["source_kind"] },
+                            "then": {
+                                    "required": ["authority"],
+                                    "properties": { "script_sha256": false }
+                            }
+                    },
+                    {
+                            "if": { "not": { "properties": { "source_kind": { "const": "authored_caption_approval" } }, "required": ["source_kind"] } },
+                            "then": { "required": ["script_sha256"] }
+                    }
+            ]
+    },
+    "lyric_authority": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "approval_sha256", "timeline_sha256", "text_authority_sha256", "timing_authority_sha256"],
+            "properties": {
+                    "kind": { "const": "authored_caption_approval" },
+                    "approval_sha256": { "$ref": "#/$defs/sha256" },
+                    "timeline_sha256": { "$ref": "#/$defs/sha256" },
+                    "text_authority_sha256": { "$ref": "#/$defs/sha256" },
+                    "timing_authority_sha256": { "$ref": "#/$defs/sha256" }
+            }
+    },
     "artifact": {
       "type": "object",
       "required": ["path", "sha256"],

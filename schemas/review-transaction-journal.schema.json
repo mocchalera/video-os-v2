@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-transaction-journal.schema.json",
+  "type": "object",
+  "required": ["version", "transaction_id", "project_id", "generation_id", "review_identity", "status", "targets"],
+  "properties": {
+    "version": { "const": "review-transaction-journal/v1" },
+    "transaction_id": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "review_identity": { "$ref": "#/$defs/hash" },
+    "status": { "const": "prepared" },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["target", "temp", "sha256"],
+        "properties": {
+          "target": { "$ref": "#/$defs/path" },
+          "temp": { "$ref": "#/$defs/path" },
+          "sha256": { "$ref": "#/$defs/hash" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" }
+  }
+}

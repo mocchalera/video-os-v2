@@ -1,0 +1,135 @@
+version: audio-delivery-profile/v1
+profile_id: audio-fixture-verified-internal-v1
+profile_version: v1
+platform: fixture
+surface: fixture
+release_scope: internal
+delivery_variant: synthetic-encoded
+status: verified
+source_references:
+  - url: https://example.com/video-os/audio-fixture-policy
+    title: Video OS synthetic audio delivery fixture policy
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: Video OS maintainers
+    evidence_kind: synthetic_fixture
+    notes: Generic internal fixture values; not a platform requirement.
+retrieved_at: '2026-08-21'
+owner: Video OS maintainers
+verification:
+  owner: Video OS maintainers
+  verified_at: '2026-08-21T00:00:00Z'
+  review_due_at: '2099-01-01T00:00:00Z'
+supersession:
+  state: active
+assumptions:
+  - Values are internal fixture targets for encoded-result tests only.
+  - Platform normalization and platform transcoding are unknown and not simulated.
+dialogue_processing:
+  authority_track: A1
+  conflict_policy: dialogue_first
+  finishing_engine: existing_dialogue_finishing
+  optional_stages:
+    - high_pass_when_policy_requests_it
+    - measured_loudnorm_pass
+  single_mastering_owner: shared_audio_render_plan
+  single_mastering_stage: after_mix
+  max_mastering_passes: 1
+measurement_requirements:
+  encoded_result_required: true
+  method:
+    loudness: ffmpeg loudnorm pass 1 on encoded result
+    true_peak: ffmpeg loudnorm input_tp on encoded result
+    format: ffprobe stream and container inspection
+    duration: ffprobe stream duration
+    av_sync: ffprobe audio/video duration and start-time comparison
+  integrated_loudness:
+    status: verified
+    value: -16
+    unit: LUFS
+    basis: internal_target
+    notes: Fixture target, not a platform-required value.
+  short_term_loudness:
+    status: unknown
+    unit: LUFS
+    basis: unknown
+    notes: Existing loudnorm parser does not emit a short-term value.
+  lra:
+    status: verified
+    value: 7
+    unit: LU
+    basis: internal_target
+  true_peak:
+    status: verified
+    value: -1.5
+    unit: dBTP
+    basis: internal_target
+  voice_intelligibility:
+    status: not_claimed
+    basis: unknown
+    proxies:
+      - encoded loudness and true-peak measurements only
+      - mono fold-down command completion
+    human_required: true
+    notes: No automated claim that speech sounds good.
+  diagnostics:
+    clipping: optional astats diagnostic when explicitly requested
+    silence: requires an explicit review threshold
+    dropout: not asserted by the fixture
+    channel: ffprobe channel count and layout
+    phase: not asserted by the fixture
+encoding_requirements:
+  container:
+    status: verified
+    value: mp4
+    basis: internal_target
+  codec:
+    status: verified
+    value: aac
+    basis: internal_target
+  sample_rate_hz:
+    status: verified
+    value: 48000
+    unit: Hz
+    basis: internal_target
+  channels:
+    status: verified
+    value: 2
+    basis: internal_target
+  true_peak_margin_dbtp:
+    status: verified
+    value: 1.5
+    unit: dB
+    basis: internal_target
+  encode_preview:
+    status: not_run
+    method: local synthetic encode fixture
+    human_required: true
+playback_evidence:
+  stereo:
+    status: verified
+    method: ffprobe channel inspection and synthetic decode
+    human_required: true
+    fixture_ref: tests/fixtures/audio
+  mono_fold_down:
+    status: verified
+    method: ffmpeg pan mono synthetic fixture
+    human_required: true
+    fixture_ref: tests/fixtures/audio
+  mobile_fixture:
+    status: unknown
+    method: no device fixture registered
+    human_required: true
+normalization:
+  status: unknown
+  assumption: Platform normalization is not applied or simulated by this internal fixture.
+human_preview:
+  required: true
+  gates:
+    - human_audition
+    - mono_mobile_playback
+  status: pending
+fallback:
+  on_missing_tool: fail_open
+  on_stale_or_unknown: human_hold
+  reason: Synthetic fixture results never establish platform behavior.

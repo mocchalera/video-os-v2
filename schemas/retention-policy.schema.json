@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "retention-policy.schema.json",
+  "title": "Short-form retention policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "policy_id", "modes", "degrade_order", "measurements", "audio_editing", "tempo", "truth_guards", "qa"],
+  "properties": {
+    "version": { "const": "retention-policy/v1" },
+    "policy_id": { "type": "string", "minLength": 1 },
+    "modes": {
+      "type": "object", "additionalProperties": false, "required": ["off", "standard", "aggressive", "credibility_first"],
+      "properties": {
+        "off": { "$ref": "#/$defs/mode" }, "standard": { "$ref": "#/$defs/mode" }, "aggressive": { "$ref": "#/$defs/mode" }, "credibility_first": { "$ref": "#/$defs/mode" }
+      }
+    },
+    "degrade_order": {
+      "const": ["aggressive", "standard", "credibility_first", "off"]
+    },
+    "measurements": {
+      "type": "object", "additionalProperties": false,
+      "required": ["promise", "source_evidence", "payoff", "readability", "audibility", "accessibility", "policy", "fatigue"],
+      "properties": {
+        "promise": { "type": "boolean" }, "source_evidence": { "type": "boolean" }, "payoff": { "type": "boolean" },
+        "readability": { "type": "boolean" }, "audibility": { "type": "boolean" }, "accessibility": { "type": "boolean" }, "policy": { "type": "boolean" }, "fatigue": { "type": "boolean" }
+      }
+    },
+    "audio_editing": {
+      "type": "object", "additionalProperties": false, "required": ["preserve_phoneme", "preserve_word_onset", "preserve_conjunction", "preserve_causal_bridge", "offset_map_required"],
+      "properties": {
+        "preserve_phoneme": { "type": "boolean" }, "preserve_word_onset": { "type": "boolean" }, "preserve_conjunction": { "type": "boolean" }, "preserve_causal_bridge": { "type": "boolean" }, "offset_map_required": { "type": "boolean" }
+      }
+    },
+    "tempo": {
+      "type": "object", "additionalProperties": false, "required": ["envelope_required", "meaningful_visual_refresh_required", "pause_allowed", "sfx_per_cut_forbidden"],
+      "properties": {
+        "envelope_required": { "type": "boolean" }, "meaningful_visual_refresh_required": { "type": "boolean" }, "pause_allowed": { "type": "boolean" }, "sfx_per_cut_forbidden": { "type": "boolean" }
+      }
+    },
+    "truth_guards": {
+      "type": "object", "additionalProperties": false, "required": ["clickbait_forbidden", "false_spoiler_forbidden", "fabricated_evidence_forbidden"],
+      "properties": { "clickbait_forbidden": { "type": "boolean" }, "false_spoiler_forbidden": { "type": "boolean" }, "fabricated_evidence_forbidden": { "type": "boolean" } }
+    },
+    "qa": {
+      "type": "object", "additionalProperties": false,
+      "required": ["short_form_max_duration_sec", "minimum_refresh_duration_sec", "hook_max_start_sec", "hook_max_start_frames", "full_payoff_latest_start_ratio", "minimum_beat_duration_frames", "visual_refresh_max_gap_sec", "title_max_display_units", "cta_latest_start_ratio", "cta_min_hold_sec"],
+      "properties": {
+        "short_form_max_duration_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "minimum_refresh_duration_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "hook_max_start_sec": { "type": ["number", "null"], "minimum": 0 },
+        "hook_max_start_frames": { "type": ["number", "null"], "minimum": 0 },
+        "full_payoff_latest_start_ratio": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "minimum_beat_duration_frames": { "type": ["number", "null"], "minimum": 0 },
+        "visual_refresh_max_gap_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "title_max_display_units": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "cta_latest_start_ratio": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "cta_min_hold_sec": { "type": ["number", "null"], "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "mode": {
+      "type": "object", "additionalProperties": false, "required": ["enabled", "requires_source_evidence", "requires_payoff", "allows_reorder"],
+      "properties": { "enabled": { "type": "boolean" }, "requires_source_evidence": { "type": "boolean" }, "requires_payoff": { "type": "boolean" }, "allows_reorder": { "type": "boolean" } }
+    }
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "platform-safe-zone-profile.schema.json",
+  "title": "Platform safe-zone profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "profile_id", "platform", "surface", "delivery_variant", "evidence_status", "source_references", "measured_at", "geometry", "device_evidence", "screenshot_evidence", "supersession", "fallback"],
+  "properties": {
+    "version": { "const": "platform-safe-zone-profile/v1" },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "platform": { "enum": ["instagram", "tiktok", "youtube_shorts", "fixture"] },
+    "surface": { "enum": ["organic", "ads", "fixture"] },
+    "delivery_variant": { "type": "string", "minLength": 1 },
+    "evidence_status": { "enum": ["verified", "partial", "unavailable", "stale"] },
+    "source_references": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["url", "retrieved_at", "published_date", "owner", "evidence_kind"],
+        "properties": {
+          "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+          "retrieved_at": { "type": "string", "format": "date" },
+          "published_date": { "type": ["string", "null"], "format": "date" },
+          "owner": { "type": "string", "minLength": 1 },
+          "evidence_kind": { "enum": ["official_documentation", "current_measurement", "synthetic_fixture", "decision_hold"] },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "measured_at": { "type": ["string", "null"], "format": "date-time" },
+    "geometry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "coordinate_system", "viewport", "ui_regions", "safe_regions", "method", "confidence"],
+      "properties": {
+        "status": { "enum": ["verified", "unknown", "stale"] },
+        "coordinate_system": { "enum": ["normalized_top_left", "pixel_top_left", "unknown"] },
+        "viewport": {
+          "type": "object", "additionalProperties": false, "required": ["status"],
+          "properties": {
+            "status": { "enum": ["verified", "unknown", "stale"] },
+            "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 },
+            "pixel_density": { "type": "number", "exclusiveMinimum": 0 }, "output_width": { "type": "integer", "minimum": 1 }, "output_height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "ui_regions": { "$ref": "#/$defs/regionSet" },
+        "safe_regions": { "$ref": "#/$defs/regionSet" },
+        "method": { "enum": ["measured_screenshot", "synthetic_fixture", "unknown"] },
+        "confidence": { "enum": ["high", "medium", "low", "unknown"] }
+      }
+    },
+    "device_evidence": {
+      "type": "object", "additionalProperties": false, "required": ["status"],
+      "properties": {
+        "status": { "enum": ["verified", "unknown", "stale"] },
+        "device": { "type": "string", "minLength": 1 }, "os": { "type": "string", "minLength": 1 },
+        "app_version": { "type": "string", "minLength": 1 }, "app_build": { "type": "string", "minLength": 1 },
+        "locale": { "type": "string", "minLength": 1 }, "notch_or_insets": { "type": "string", "minLength": 1 }
+      }
+    },
+    "screenshot_evidence": {
+      "type": "object", "additionalProperties": false, "required": ["status"],
+      "properties": {
+        "status": { "enum": ["verified", "unknown", "stale"] },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "format": { "enum": ["png", "webp", "tiff", "svg", "unknown"] }
+      }
+    },
+    "supersession": {
+      "type": "object", "additionalProperties": false, "required": ["state"],
+      "properties": { "state": { "enum": ["active", "stale", "superseded", "deprecated"] }, "superseded_by": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 } }
+    },
+    "fallback": {
+      "type": "object", "additionalProperties": false, "required": ["mode", "human_preview_required", "reason"],
+      "properties": {
+        "mode": { "enum": ["safe_identity_layout", "human_platform_preview", "hold"] },
+        "human_preview_required": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "rect": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "regionSet": {
+      "type": "object", "additionalProperties": false, "required": ["unknown", "regions"],
+      "properties": {
+        "unknown": { "type": "boolean" },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "kind", "rect", "method", "confidence"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 }, "kind": { "enum": ["ui", "safe", "caption", "content", "profile_overlay"] },
+              "rect": { "$ref": "#/$defs/rect" }, "method": { "type": "string", "minLength": 1 }, "confidence": { "enum": ["high", "medium", "low"] }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "evidence_status": { "const": "verified" }, "surface": { "not": { "const": "fixture" } } },
+        "required": ["evidence_status", "surface"]
+      },
+      "then": {
+        "required": ["measured_at"],
+        "properties": {
+          "measured_at": { "type": "string", "format": "date-time" },
+          "source_references": {
+            "contains": { "type": "object", "required": ["evidence_kind"], "properties": { "evidence_kind": { "const": "current_measurement" } } }
+          },
+          "geometry": {
+            "properties": {
+              "status": { "const": "verified" },
+              "coordinate_system": { "not": { "const": "unknown" } },
+              "viewport": {
+                "required": ["width", "height", "pixel_density", "output_width", "output_height"],
+                "properties": { "status": { "const": "verified" } }
+              },
+              "ui_regions": { "properties": { "unknown": { "const": false }, "regions": { "minItems": 1 } } },
+              "safe_regions": { "properties": { "unknown": { "const": false }, "regions": { "minItems": 1 } } },
+              "method": { "enum": ["measured_screenshot", "synthetic_fixture"] },
+              "confidence": { "not": { "const": "unknown" } }
+            }
+          },
+          "device_evidence": {
+            "properties": { "status": { "const": "verified" } },
+            "required": ["device", "os", "app_version", "app_build", "locale"]
+          },
+          "screenshot_evidence": {
+            "required": ["path", "sha256", "format"],
+            "properties": {
+              "status": { "const": "verified" },
+              "path": { "type": "string", "minLength": 1 },
+              "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+              "format": { "enum": ["png", "tiff"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "surface": { "enum": ["organic", "ads"] } }
+      },
+      "then": {
+        "properties": {
+          "geometry": {
+            "if": { "properties": { "status": { "const": "verified" } } },
+            "then": { "properties": { "method": { "const": "measured_screenshot" } } }
+          }
+        }
+      }
+    }
+  ]
+}

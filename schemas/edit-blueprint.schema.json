@@ -161,18 +161,105 @@
     },
     "longform_plan": {
       "$ref": "#/$defs/longformPlan"
-    }
+    },
+    "policy_refs": {
+      "$ref": "#/$defs/blueprintPolicyRefs"
+    },
+    "visual_intents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/registeredVisualIntent" }
+    },
+    "hook_sequence": {
+      "$ref": "#/$defs/blueprintSequence"
+    },
+    "body_sequence": {
+      "$ref": "#/$defs/blueprintSequence"
+    },
+    "hook": {
+      "$ref": "#/$defs/blueprintSequence"
+    },
+    "body": {
+      "$ref": "#/$defs/blueprintSequence"
+    },
+    "timeline_operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/timelineOperation" }
+    },
+    "audio_mix_policy": { "$ref": "#/$defs/primaryAudioMixPolicy" }
   },
   "$defs": {
     "stillImageCandidateIntent": {
       "type": "object",
       "properties": {
         "hold_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "hold": { "$ref": "#/$defs/stillHoldIntent" },
         "min_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
         "max_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
         "motion_mode": { "type": "string", "enum": ["static", "subtle_ken_burns"] },
-        "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+        "source_still_id": { "type": "string", "minLength": 1 },
+        "still_instance_id": { "type": "string", "minLength": 1 },
+        "reuse": { "type": "string", "enum": ["unique", "intentional"] },
+        "long_hold_reason": { "type": "string", "minLength": 1 },
+        "camera_motion": {
+          "type": "object",
+          "required": ["preset"],
+          "properties": {
+            "preset": { "type": "string", "enum": ["push_in", "pull_out", "horizontal_tracking", "tilt_down", "diagonal_drift", "pan_zoom"] },
+            "easing": { "type": "string", "enum": ["smoothstep", "linear"] },
+            "intensity": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+            "transform": { "$ref": "#/$defs/stillTransform" },
+            "parallax": { "$ref": "#/$defs/stillParallax" }
+          },
+          "additionalProperties": false
+        },
+        "ken_burns": { "$ref": "#/$defs/stillCameraMotionIntent" },
+        "parallax": { "$ref": "#/$defs/stillParallax" },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "composition": { "type": "string", "enum": ["fit", "vertical_blur_backdrop"] },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover", "full_bleed"] },
         "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+      },
+      "additionalProperties": false
+    },
+    "primaryAudioMixPolicy": {
+      "type": "object",
+      "required": ["policy", "mode", "authority", "reason"],
+      "properties": {
+        "policy": { "const": "primary-audio-mix/v1" },
+        "mode": { "type": "string", "enum": ["selective_authorization"] },
+        "authority": { "type": "string", "enum": ["blueprint", "human_golden_order", "operator"] },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "timelineOperation": {
+      "type": "object",
+      "required": [
+        "operation_id",
+        "type",
+        "track_id",
+        "start_frame",
+        "duration_frames",
+        "authority",
+        "reason"
+      ],
+      "properties": {
+        "operation_id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "enum": ["gap", "hold", "freeze", "ambient_continuation"] },
+        "track_id": { "type": "string", "minLength": 1 },
+        "start_frame": { "type": "integer", "minimum": 0 },
+        "duration_frames": { "type": "integer", "minimum": 1 },
+        "authority": { "type": "string", "enum": ["blueprint", "human_golden_order", "operator", "compiler"] },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "freezeFrameHoldIntent": {
+      "type": "object",
+      "required": ["source_time_us"],
+      "properties": {
+        "source_time_us": { "type": "integer", "minimum": 0 },
+        "hold_frames": { "type": "integer", "minimum": 1 }
       },
       "additionalProperties": false
     },
@@ -189,8 +276,77 @@
         "motion_mode": { "const": "static" },
         "requested_motion_mode": { "const": "subtle_ken_burns" },
         "motion_status": { "const": "pending_EYE-070C2B" },
-        "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+        "camera_motion": { "$ref": "#/$defs/stillCameraMotionIntent" },
+        "ken_burns": { "$ref": "#/$defs/stillCameraMotionIntent" },
+        "parallax": { "$ref": "#/$defs/stillParallax" },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover", "full_bleed"] },
         "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+      },
+      "additionalProperties": false
+    },
+    "stillHoldIntent": {
+      "type": "object",
+      "required": ["unit"],
+      "properties": {
+        "unit": { "type": "string", "enum": ["frames", "seconds", "beats", "section_boundary"] },
+        "value": { "type": "number", "exclusiveMinimum": 0 },
+        "section_id": { "type": "string", "minLength": 1 },
+        "boundary": { "type": "string", "enum": ["start", "end"] },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "stillTransform": {
+      "type": "object",
+      "properties": {
+        "crop": {
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "pan": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": -1, "maximum": 1 }, "y": { "type": "number", "minimum": -1, "maximum": 1 } },
+          "additionalProperties": false
+        },
+        "zoom": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "anchor": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "additionalProperties": false
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "stillParallax": {
+      "type": "object",
+      "required": ["amount", "axis"],
+      "properties": {
+        "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.25 },
+        "axis": { "type": "string", "enum": ["horizontal", "vertical", "both"] }
+      },
+      "additionalProperties": false
+    },
+    "stillCameraMotionIntent": {
+      "type": "object",
+      "required": ["preset"],
+      "properties": {
+        "preset": { "type": "string", "enum": ["push_in", "pull_out", "horizontal_tracking", "tilt_down", "diagonal_drift", "pan_zoom"] },
+        "easing": { "type": "string", "enum": ["smoothstep", "linear"] },
+        "intensity": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "parallax": { "$ref": "#/$defs/stillParallax" }
       },
       "additionalProperties": false
     },
@@ -324,10 +480,23 @@
                 "type": "string",
                 "enum": ["success", "failed", "skipped"]
               },
-              "message": { "type": "string" }
+              "message": { "type": "string" },
+              "error_kind": {
+                "type": "string",
+                "enum": [
+                  "transport_timeout",
+                  "transport_error",
+                  "json_parse",
+                  "schema_validation"
+                ]
+              }
             },
             "additionalProperties": false
           }
+        },
+        "author": {
+          "type": "string",
+          "enum": ["llm", "deterministic_fallback", "human", "agent_evidence_synthesis"]
         },
         "fallback_warnings": {
           "type": "array",
@@ -383,7 +552,32 @@
         },
         "story_role": {
           "type": "string",
-          "enum": ["hook", "setup", "experience", "closing"]
+          "enum": [
+            "hook",
+            "identity",
+            "setup",
+            "struggle",
+            "turning_point",
+            "crisis",
+            "recovery",
+            "philosophy",
+            "goal",
+            "vulnerability",
+            "payoff",
+            "cta",
+            "closing",
+            "experience"
+          ]
+        },
+        "emotional_valence": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0,
+          "description": "Optional provisional emotional position for future curve audits. No audit gate is enforced by this schema."
+        },
+        "evidence_required": {
+          "type": "boolean",
+          "description": "Optional declaration that this beat requires source-grounded evidence. No evidence audit gate is enforced by this schema."
         },
         "audio_story_role": {
           "$ref": "#/$defs/audioStoryRole"
@@ -412,11 +606,16 @@
               "type": "array",
               "items": { "type": "string" }
             },
-            "still_image": { "$ref": "#/$defs/stillImageCandidateIntent" }
+            "still_image": { "$ref": "#/$defs/stillImageCandidateIntent" },
+            "freeze_frame_hold": { "$ref": "#/$defs/freezeFrameHoldIntent" }
           },
           "allOf": [
             {
               "if": { "required": ["still_image"] },
+              "then": { "required": ["primary_candidate_ref"] }
+            },
+            {
+              "if": { "required": ["freeze_frame_hold"] },
               "then": { "required": ["primary_candidate_ref"] }
             }
           ],
@@ -467,11 +666,11 @@
         },
         "transition_in": {
           "type": "string",
-          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut"]
+          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut", "film_crossfade", "light_leak_flash", "dreamy_focus_blur"]
         },
         "transition_out": {
           "type": "string",
-          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut"]
+          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut", "film_crossfade", "light_leak_flash", "dreamy_focus_blur"]
         },
         "rhythm": {
           "type": "string",
@@ -831,6 +1030,273 @@
         "max_duration_sec": { "type": ["number", "null"], "minimum": 0 },
         "hard_gate": { "type": "boolean" },
         "protect_vlm_peaks": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "blueprintPolicyReference": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["ref"],
+          "properties": {
+            "ref": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 },
+            "source_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "profile_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "blueprintPolicyRefs": {
+      "type": "object",
+      "properties": {
+        "composition_policy_ref": { "$ref": "#/$defs/blueprintPolicyReference" },
+        "vertical_composition_policy_ref": { "$ref": "#/$defs/blueprintPolicyReference" },
+        "retention_policy_ref": { "$ref": "#/$defs/blueprintPolicyReference" },
+        "caption_policy_ref": { "$ref": "#/$defs/blueprintPolicyReference" },
+        "platform_safe_zone_profile_ref": { "$ref": "#/$defs/blueprintPolicyReference" },
+        "audio_delivery_profile_ref": { "$ref": "#/$defs/blueprintPolicyReference" },
+        "sfx_library_ref": { "$ref": "#/$defs/blueprintPolicyReference" }
+      },
+      "additionalProperties": false
+    },
+    "registeredVisualIntent": {
+      "type": "object",
+      "required": ["intent_id", "policy", "mode", "framing_mode", "reason", "source_evidence"],
+      "properties": {
+        "intent_id": { "type": "string", "minLength": 1 },
+        "policy": { "const": "registered-visual-intent/v1" },
+        "mode": { "type": "string", "enum": ["continuous_transform", "discrete_cut"] },
+        "framing_mode": { "type": "string", "enum": ["wide", "punch", "hold"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "target": { "$ref": "#/$defs/visualIntentRef" },
+        "from": { "$ref": "#/$defs/visualIntentRef" },
+        "to": { "$ref": "#/$defs/visualIntentRef" },
+        "transform": { "$ref": "#/$defs/visualTransform" },
+        "framing_input": { "$ref": "#/$defs/framingInput" },
+        "reframe_candidate_ref": { "type": "string", "minLength": 1 },
+        "reframe_candidate_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "source_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sourceEvidencePin" }
+        },
+        "climax": { "$ref": "#/$defs/visualClimax" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "degraded": { "type": "boolean" },
+        "degrade_reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "continuous_transform" } }, "required": ["mode"] },
+          "then": {
+            "required": ["target"],
+            "not": { "anyOf": [{ "required": ["from"] }, { "required": ["to"] }] }
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "discrete_cut" } }, "required": ["mode"] },
+          "then": {
+            "required": ["from", "to", "climax"],
+            "not": { "required": ["target"] }
+          }
+        },
+        {
+          "if": { "required": ["reframe_candidate_ref"] },
+          "then": {
+            "required": ["reframe_candidate_hash"],
+            "not": { "anyOf": [{ "required": ["framing_input"] }, { "required": ["transform"] }] }
+          }
+        },
+        {
+          "if": { "required": ["reframe_candidate_hash"] },
+          "then": { "required": ["reframe_candidate_ref"] }
+        },
+        {
+          "if": { "not": { "required": ["reframe_candidate_ref"] } },
+          "then": { "required": ["framing_input"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "framingInput": {
+      "type": "object",
+      "required": ["observations", "output"],
+      "properties": {
+        "observations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/framingObservation" }
+        },
+        "output": { "$ref": "#/$defs/framingOutput" }
+      },
+      "additionalProperties": false
+    },
+    "framingObservation": {
+      "type": "object",
+      "properties": {
+        "time_us": { "type": "number" },
+        "time_seconds": { "type": "number" },
+        "person": { "$ref": "#/$defs/framingBox" },
+        "head": { "$ref": "#/$defs/framingBox" },
+        "hands": { "type": "array", "items": { "$ref": "#/$defs/framingPoint" } }
+      },
+      "additionalProperties": false
+    },
+    "framingBox": {
+      "type": "object",
+      "required": ["x", "y", "width", "height", "confidence"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "yaw_radians": { "type": "number" },
+        "eye_x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "eye_y": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "framingPoint": {
+      "type": "object",
+      "required": ["x", "y", "confidence"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "framingOutput": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "visualIntentRef": {
+      "type": "object",
+      "oneOf": [
+        { "required": ["clip_id"], "not": { "anyOf": [{ "required": ["candidate_ref"] }, { "required": ["segment_id"] }] } },
+        { "required": ["candidate_ref"], "not": { "anyOf": [{ "required": ["clip_id"] }, { "required": ["segment_id"] }] } },
+        { "required": ["segment_id"], "not": { "anyOf": [{ "required": ["clip_id"] }, { "required": ["candidate_ref"] }] } }
+      ],
+      "properties": {
+        "clip_id": { "type": "string", "minLength": 1 },
+        "candidate_ref": { "type": "string", "minLength": 1 },
+        "segment_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "visualTransform": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "zoom": { "type": "number", "minimum": 0.1, "maximum": 8 },
+        "crop": {
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0 },
+            "y": { "type": "number", "minimum": 0 },
+            "width": { "type": "number", "exclusiveMinimum": 0 },
+            "height": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceEvidencePin": {
+      "type": "object",
+      "required": ["asset_id", "segment_id", "source_content_hash", "source_range"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "segment_id": { "type": "string", "minLength": 1 },
+        "source_content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "source_range": {
+          "type": "object",
+          "required": ["src_in_us", "src_out_us"],
+          "properties": {
+            "src_in_us": { "type": "integer", "minimum": 0 },
+            "src_out_us": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "source_fingerprint": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "visualClimax": {
+      "type": "object",
+      "required": ["basis", "evidence_refs"],
+      "properties": {
+        "basis": { "type": "string", "enum": ["person_size", "composition", "meaning"] },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "blueprintSequence": {
+      "type": "object",
+      "required": ["sequence_id", "shots"],
+      "properties": {
+        "sequence_id": { "type": "string", "minLength": 1 },
+        "locked": { "type": "boolean" },
+        "lock_revision": { "type": "integer", "minimum": 0 },
+        "shots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/blueprintShot" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "blueprintShot": {
+      "type": "object",
+      "required": ["shot_id"],
+      "properties": {
+        "shot_id": { "type": "string", "minLength": 1 },
+        "beat_id": { "type": "string", "minLength": 1 },
+        "scene_type": { "type": "string", "minLength": 1 },
+        "shot_anchor": { "$ref": "#/$defs/blueprintShotAnchor" },
+        "candidate_ref": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        { "required": ["shot_anchor"], "not": { "required": ["candidate_ref"] } },
+        { "required": ["candidate_ref"], "not": { "required": ["shot_anchor"] } }
+      ],
+      "additionalProperties": false
+    },
+    "blueprintShotAnchor": {
+      "type": "object",
+      "required": ["anchor_id", "asset_id", "source_content_hash", "segment_id", "src_in_us", "src_out_us"],
+      "properties": {
+        "anchor_id": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "source_content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "segment_id": { "type": "string", "minLength": 1 },
+        "src_in_us": { "type": "integer", "minimum": 0 },
+        "src_out_us": { "type": "integer", "minimum": 1 },
+        "transcript_item_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "source_start_us": { "type": "integer", "minimum": 0 },
+        "source_end_us": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false
     },

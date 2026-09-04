@@ -22,10 +22,11 @@ import {
   initCommand,
   isCommandError,
   draftAndPromote,
+  validateAgainstSchema,
   type CommandContext,
   type CommandError,
 } from "./shared.js";
-import type { ProjectState } from "../state/reconcile.js";
+import type { ProjectState, ProjectStateDoc } from "../state/reconcile.js";
 import type { TimelineIR } from "../artifacts/types.js";
 import {
   generateCaptionSource,
@@ -54,6 +55,7 @@ import {
   type ClipContext,
   type TimingRemapResult,
 } from "../caption/word-remap.js";
+import { buildTimelineOffsetMapFromTimeline } from "../compiler/timeline-offset-engine.js";
 import { getLayoutPolicy, checkCps } from "../caption/line-breaker.js";
 import {
   loadProjectCaptionGlossary,
@@ -71,8 +73,23 @@ import {
   validateFinalCaptionInvariants,
   type FinalCaptionInvariantIssue,
 } from "../caption/final-invariants.js";
+import { projectCaptionEntry } from "../caption/projection.js";
+import {
+  buildAuthoredCaptionArtifacts,
+  buildAuthoredCaptionApproval,
+  buildAuthoredProjectionReceipt,
+  hashAuthoredTextAuthority,
+  hashAuthoredTimingAuthority,
+  readAuthoredCaptionStatus,
+  serializeAuthoredJson,
+  sha256Bytes,
+  authoredReviewIsCurrent,
+  type AuthoredCaptionPreview,
+} from "../caption/authored-lyrics.js";
 
 // ── Types ────────────────────────────────────────────────────────
+
+const V2_CAPTION_DRAFT_VERSION = "caption-draft/v2";
 
 export interface CaptionCommandResult {
   success: boolean;
@@ -85,9 +102,17 @@ export interface CaptionCommandResult {
   captionApproval?: CaptionApproval;
   /** @deprecated Use approveCaptions() for timeline projection. Always undefined from captionCommand(). */
   timelineUpdated?: boolean;
+  /** Authored route preview; approval remains a separate explicit command. */
+  authoredPreview?: AuthoredCaptionPreview;
 }
 
 export interface CaptionCommandOptions {
+  /** Explicit source override for the public authored-lyrics route. */
+  source?: CaptionPolicy["source"];
+  /** Authored lyric body file; required when source is authored. */
+  lyricsPath?: string;
+  /** Deterministic timing evidence/plan; required when source is authored. */
+  timingPlanPath?: string;
   overlayInputs?: TextOverlayInput[];
   /** @deprecated No longer used — captionCommand always produces draft only. Use approveCaptions() for approval. */
   draftOnly?: boolean;
@@ -124,6 +149,7 @@ export interface ApproveCaptionsResult {
   error?: CommandError;
   captionApproval?: CaptionApproval;
   timelineUpdated?: boolean;
+  authoredPreview?: AuthoredCaptionPreview;
 }
 
 // ── Command ─────────────────────────────────────────────────────
@@ -140,7 +166,9 @@ export function captionCommand(
   projectDir: string,
   options?: CaptionCommandOptions,
 ): CaptionCommandResult | Promise<CaptionCommandResult> {
-  const allowedStates: ProjectState[] = ["approved", "critique_ready", "packaged"];
+  const allowedStates: ProjectState[] = options?.source === "authored"
+    ? ["blueprint_ready", "timeline_drafted", "approved", "critique_ready", "packaged"]
+    : ["approved", "critique_ready", "packaged"];
   const ctx = initCommand(projectDir, "caption", allowedStates);
   if (isCommandError(ctx)) {
     return { success: false, error: ctx };
@@ -168,7 +196,14 @@ export function captionCommand(
     ? parseYaml(fs.readFileSync(briefPath, "utf-8"))
     : {};
 
-  const captionPolicy = blueprint.caption_policy;
+  const captionPolicy = blueprint.caption_policy ?? (options?.source === "authored"
+    ? {
+        language: "en",
+        delivery_mode: "burn_in",
+        source: "authored" as const,
+        styling_class: "default",
+      }
+    : undefined);
   if (!captionPolicy) {
     return {
       success: false,
@@ -191,6 +226,62 @@ export function captionCommand(
     };
   }
   const timeline: TimelineIR = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+  const timelineOffsetMap = buildTimelineOffsetMapFromTimeline(timeline);
+
+  // Issue #41 is an explicit public route. It bypasses transcript editorial
+  // generation entirely so STT/music evidence can never become body text.
+  if (options?.source === "authored") {
+    if (!options.lyricsPath || !options.timingPlanPath) {
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: "authored captions require --lyrics PATH and --timing-plan PATH",
+        },
+      };
+    }
+    try {
+      const projectId = doc.project_id || timeline.project_id || "unknown";
+      const baseTimelineVersion = timeline.version || "1";
+      const authoredPolicy: CaptionPolicy = { ...captionPolicy, source: "authored" };
+      const artifacts = buildAuthoredCaptionArtifacts({
+        projectDir: absDir,
+        lyricsPath: options.lyricsPath,
+        timingPlanPath: options.timingPlanPath,
+        timeline,
+        captionPolicy: authoredPolicy,
+        projectId,
+        baseTimelineVersion,
+        baseTimelineHash: sha256Bytes(fs.readFileSync(timelinePath)),
+        nextCommand: `npm run caption -- approve --project ${absDir} --approved-by <human>`,
+        maxCps: resolvedCaptionMaxCps(authoredPolicy),
+      });
+      assertCaptionDraftSchema(artifacts.captionDraft);
+      const sourceSchema = validateAgainstSchema(artifacts.captionSource, "authored-caption-source.schema.json");
+      if (!sourceSchema.valid) throw new Error(`authored caption source schema validation failed: ${sourceSchema.errors.join("; ")}`);
+      const previewSchema = validateAgainstSchema(artifacts.preview, "authored-caption-preview.schema.json");
+      if (!previewSchema.valid) throw new Error(`authored caption preview schema validation failed: ${previewSchema.errors.join("; ")}`);
+      const packageDir = path.join(absDir, "07_package");
+      fs.mkdirSync(packageDir, { recursive: true });
+      atomicWriteJson(path.join(packageDir, "caption_source.json"), artifacts.captionSource);
+      atomicWriteJson(path.join(packageDir, "caption_draft.json"), artifacts.captionDraft);
+      atomicWriteJson(path.join(packageDir, "caption_preview.json"), artifacts.preview);
+      return {
+        success: true,
+        captionSource: artifacts.captionSource,
+        captionDraft: artifacts.captionDraft,
+        authoredPreview: artifacts.preview,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
 
   // 3. Read transcripts if source=transcript
   const transcripts = new Map<string, TranscriptArtifact>();
@@ -217,7 +308,7 @@ export function captionCommand(
     options?.glossarySources,
   );
 
-  const captionSource = generateCaptionSource(
+  const generatedCaptionSource = generateCaptionSource(
     timeline,
     transcripts,
     captionPolicy,
@@ -232,8 +323,16 @@ export function captionCommand(
       minCaptionDurationMs: captionPolicy.styling_class === "longform-event" ? 400 : undefined,
       operatorCorrections: glossarySources.operatorCorrections,
       protectedTerms: buildGlossary(glossarySources),
+      timelineOffsetMap,
     },
   );
+  // The production command always wires the canonical Offset Engine. Keep the
+  // direct segmenter API's 1.0 legacy output untouched, but mark this generated
+  // draft path as v2 so its provenance contract is enforced end-to-end.
+  const captionSource: CaptionSource = {
+    ...generatedCaptionSource,
+    version: V2_CAPTION_DRAFT_VERSION,
+  };
 
   // 5. Add text overlays if provided
   const overlayInputs = planSocialHookOverlay({
@@ -274,6 +373,7 @@ export function captionCommand(
     timeline,
     transcripts,
   );
+  assertCaptionDraftSchema(draft);
   fs.writeFileSync(
     path.join(packageDir, "caption_draft.json"),
     JSON.stringify(draft, null, 2),
@@ -342,15 +442,17 @@ export function retimeCaptionDraft(projectDir: string): CaptionRetimeResult {
       timeline.sequence.fps_num / timeline.sequence.fps_den,
       draft.caption_policy.language,
     );
+    const finalDraft = ensureV2CaptionTiming(finalized.draft, timeline);
+    assertCaptionDraftSchema(finalDraft);
     applyReadinessGate(
-      finalized.draft,
+      finalDraft,
       draft.caption_policy,
       timingResult.report,
       timeline.sequence.fps_num / timeline.sequence.fps_den,
       finalized.issues,
     );
 
-    atomicWriteJson(draftPath, finalized.draft);
+    atomicWriteJson(draftPath, finalDraft);
     if (timingResult.report) {
       atomicWriteJson(
         path.join(absDir, "07_package", "caption_timing_report.json"),
@@ -359,7 +461,7 @@ export function retimeCaptionDraft(projectDir: string): CaptionRetimeResult {
     }
     return {
       success: true,
-      captionDraft: finalized.draft,
+      captionDraft: finalDraft,
       captionTimingReport: timingResult.report,
     };
   } catch (error) {
@@ -379,6 +481,11 @@ function atomicWriteJson(filePath: string, value: unknown): void {
   fs.renameSync(tempPath, filePath);
 }
 
+function assertCaptionDraftSchema(draft: CaptionDraft): void {
+  const result = validateAgainstSchema(draft, "caption-draft.schema.json");
+  if (!result.valid) throw new Error(`caption_draft schema validation failed: ${result.errors.join("; ")}`);
+}
+
 // ── Separate approval command (human-only) ──────────────────────
 
 /**
@@ -389,7 +496,28 @@ export function approveCaptions(
   projectDir: string,
   options: ApproveCaptionsOptions,
 ): ApproveCaptionsResult {
-  const allowedStates: ProjectState[] = ["approved", "critique_ready", "packaged"];
+  // Authored captions are approved before review, while the legacy transcript
+  // route retains its existing post-review state contract. The early probe is
+  // read-only and only chooses the command's state allowlist.
+  const projectRoot = path.resolve(projectDir);
+  let authoredRoute = false;
+  try {
+    const blueprintPath = path.join(projectRoot, "04_plan/edit_blueprint.yaml");
+    if (fs.existsSync(blueprintPath)) {
+      const blueprint = parseYaml(fs.readFileSync(blueprintPath, "utf-8")) as { caption_policy?: { source?: string } };
+      authoredRoute = blueprint.caption_policy?.source === "authored";
+    }
+    const draftPath = path.join(projectRoot, "07_package/caption_draft.json");
+    if (fs.existsSync(draftPath)) {
+      const draft = JSON.parse(fs.readFileSync(draftPath, "utf-8")) as CaptionDraft;
+      authoredRoute = authoredRoute || !!draft.text_authority || !!draft.timing_authority;
+    }
+  } catch {
+    // initCommand below returns the canonical validation/state error.
+  }
+  const allowedStates: ProjectState[] = authoredRoute
+    ? ["blueprint_ready", "timeline_drafted", "approved", "critique_ready", "packaged"]
+    : ["approved", "critique_ready", "packaged"];
   const ctx = initCommand(projectDir, "caption-approve", allowedStates);
   if (isCommandError(ctx)) {
     return { success: false, error: ctx };
@@ -410,6 +538,16 @@ export function approveCaptions(
     };
   }
   const draft: CaptionDraft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
+  const draftSchema = validateAgainstSchema(draft, "caption-draft.schema.json");
+  if (!draftSchema.valid) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Caption draft validation failed: ${draftSchema.errors.join("; ")}`,
+      },
+    };
+  }
   const timelinePath = path.join(absDir, "05_timeline/timeline.json");
   if (!fs.existsSync(timelinePath)) {
     return {
@@ -442,6 +580,8 @@ export function approveCaptions(
     };
   }
 
+  const authored = !!draft.text_authority && !!draft.timing_authority;
+
   // Reject if draft is not ready for approval
   if (draft.draft_status !== "ready_for_human_approval") {
     return {
@@ -466,25 +606,20 @@ export function approveCaptions(
   }
   const captionSource: CaptionSource = JSON.parse(fs.readFileSync(sourcePath, "utf-8"));
 
+  if (authored || captionSource.caption_policy.source === "authored") {
+    return approveAuthoredCaptions(absDir, doc, draft, captionSource, approvalTimeline, options);
+  }
+
   const approvedBy = options.approvedBy;
   const approvedAt = options.approvedAt || new Date().toISOString();
 
   // Build approval from draft entries
   const approvalSource: CaptionSource = {
     ...captionSource,
-    speech_captions: draft.speech_captions.map((entry) => ({
-      caption_id: entry.caption_id,
-      asset_id: entry.asset_id,
-      segment_id: entry.segment_id,
+    speech_captions: draft.speech_captions.map((entry) => projectCaptionEntry({
+      ...entry,
       timeline_in_frame: entry.timing?.timelineInFrame ?? entry.timeline_in_frame,
       timeline_duration_frames: entry.timing?.timelineDurationFrames ?? entry.timeline_duration_frames,
-      text: entry.text,
-      transcript_ref: entry.transcript_ref,
-      transcript_item_ids: entry.transcript_item_ids,
-      source: entry.source,
-      styling_class: entry.styling_class,
-      metrics: entry.metrics,
-      ...(entry.reveal_timing ? { reveal_timing: entry.reveal_timing } : {}),
     })),
   };
 
@@ -530,6 +665,182 @@ export function approveCaptions(
   };
 }
 
+function approveAuthoredCaptions(
+  absDir: string,
+  doc: Pick<ProjectStateDoc, "current_state" | "approval_record">,
+  draft: CaptionDraft,
+  captionSource: CaptionSource,
+  approvalTimeline: TimelineIR,
+  options: ApproveCaptionsOptions,
+): ApproveCaptionsResult {
+  if (authoredReviewIsCurrent(absDir)) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "caption projection rejected: current review-ready artifacts would become stale",
+      },
+    };
+  }
+  if ((doc.current_state === "approved" || doc.current_state === "packaged") &&
+    (doc.approval_record?.status === "clean" || doc.approval_record?.status === "creative_override")) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `caption projection rejected: current review approval (${doc.approval_record.status}) would become stale`,
+      },
+    };
+  }
+  if (!draft.text_authority || !draft.timing_authority || !captionSource.text_authority || !captionSource.timing_authority) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "authored caption source/draft must carry separate text_authority and timing_authority",
+      },
+    };
+  }
+  if (hashAuthoredTextAuthority(draft.text_authority) !== hashAuthoredTextAuthority(captionSource.text_authority) ||
+    hashAuthoredTimingAuthority(draft.timing_authority) !== hashAuthoredTimingAuthority(captionSource.timing_authority)) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "caption_source.json and caption_draft.json authority hashes differ; regenerate the authored draft",
+      },
+    };
+  }
+  const authoredLines = draft.text_authority.lines.filter((line) => line.text.length > 0);
+  const authoredEntries = [...draft.speech_captions].sort((left, right) =>
+    (left.line_id ?? "").localeCompare(right.line_id ?? ""));
+  if (authoredEntries.length !== authoredLines.length || authoredLines.some((line, index) => {
+    const entry = authoredEntries[index];
+    return !entry || entry.line_id !== line.line_id || entry.cue_id !== `AC_${String(line.line_number).padStart(4, "0")}` || entry.text !== line.text;
+  })) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "authored caption draft text differs from the authored lyric body; authored text cannot be machine-edited",
+      },
+    };
+  }
+
+  const resolveInput = (storedPath: string): string => path.isAbsolute(storedPath) ? storedPath : path.resolve(absDir, storedPath);
+  try {
+    const currentTextHash = sha256Bytes(fs.readFileSync(resolveInput(draft.text_authority.source_path)));
+    const currentTimingHash = sha256Bytes(fs.readFileSync(resolveInput(draft.timing_authority.source_path)));
+    if (currentTextHash !== draft.text_authority.source_sha256 || currentTimingHash !== draft.timing_authority.source_sha256) {
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: currentTextHash !== draft.text_authority.source_sha256
+            ? "authored lyric bytes changed since draft; regenerate before approval"
+            : "timing plan bytes changed since draft; regenerate before approval",
+        },
+      };
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `authored source inputs could not be re-read: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    };
+  }
+
+  const approvedAt = options.approvedAt || new Date().toISOString();
+  const approval = buildAuthoredCaptionApproval(captionSource, draft, options.approvedBy, approvedAt);
+  const approvalHash = sha256Bytes(serializeAuthoredJson(approval));
+  const fps = approvalTimeline.sequence.fps_num / approvalTimeline.sequence.fps_den;
+  const projectedTimeline = projectCaptionsToTimeline(approvalTimeline, approval, fps) as TimelineIR;
+  const projectedTimelineHash = sha256Bytes(serializeAuthoredJson(projectedTimeline));
+  const previewPath = path.join(absDir, "07_package/caption_preview.json");
+  const preview = fs.existsSync(previewPath)
+    ? JSON.parse(fs.readFileSync(previewPath, "utf-8")) as AuthoredCaptionPreview
+    : undefined;
+  const currentBaseTimelineHash = sha256Bytes(fs.readFileSync(path.join(absDir, "05_timeline/timeline.json")));
+  if (!preview ||
+    preview.base_timeline_hash !== currentBaseTimelineHash ||
+    preview.projected_timeline_hash !== projectedTimelineHash ||
+    hashAuthoredTextAuthority(preview.text_authority) !== hashAuthoredTextAuthority(draft.text_authority) ||
+    hashAuthoredTimingAuthority(preview.timing_authority) !== hashAuthoredTimingAuthority(draft.timing_authority)) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "authored caption approval requires a current preapproval preview; regenerate the draft preview",
+      },
+    };
+  }
+  const receipt = buildAuthoredProjectionReceipt(
+    draft.project_id,
+    preview.base_timeline_hash,
+    projectedTimelineHash,
+    approval,
+    approvalHash,
+  );
+  const approvalSchema = validateAgainstSchema(approval, "caption-approval.schema.json");
+  if (!approvalSchema.valid) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Authored caption approval validation failed: ${approvalSchema.errors.join("; ")}`,
+      },
+    };
+  }
+  const receiptSchema = validateAgainstSchema(receipt, "authored-caption-projection.schema.json");
+  if (!receiptSchema.valid) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Authored caption projection receipt validation failed: ${receiptSchema.errors.join("; ")}`,
+      },
+    };
+  }
+
+  const promoteResult = draftAndPromote(absDir, [
+    {
+      relativePath: "07_package/caption_approval.json",
+      schemaFile: "caption-approval.schema.json",
+      content: approval,
+      format: "json",
+    },
+    {
+      relativePath: "05_timeline/timeline.json",
+      schemaFile: "timeline-ir.schema.json",
+      content: projectedTimeline,
+      format: "json",
+    },
+    {
+      relativePath: "07_package/caption_projection_receipt.json",
+      schemaFile: "authored-caption-projection.schema.json",
+      content: receipt,
+      format: "json",
+    },
+  ]);
+  if (!promoteResult.success) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Authored caption approval/projection failed: ${promoteResult.errors.join("; ")}`,
+      },
+    };
+  }
+  return {
+    success: true,
+    captionApproval: approval,
+    timelineUpdated: true,
+    authoredPreview: preview,
+  };
+}
+
 // ── Internal helpers ─────────────────────────────────────────────
 
 async function runEditorialAndFinishDraft(
@@ -559,10 +870,12 @@ async function runEditorialAndFinishDraft(
     timeline.sequence.fps_num / timeline.sequence.fps_den,
     captionPolicy.language,
   );
+  const finalDraft = ensureV2CaptionTiming(finalized.draft, timeline);
+  assertCaptionDraftSchema(finalDraft);
 
   // Apply readiness gate
   applyReadinessGate(
-    finalized.draft,
+    finalDraft,
     captionPolicy,
     timingResult.report,
     timeline.sequence.fps_num / timeline.sequence.fps_den,
@@ -572,7 +885,7 @@ async function runEditorialAndFinishDraft(
   // Write draft and report
   fs.writeFileSync(
     path.join(packageDir, "caption_draft.json"),
-    JSON.stringify(finalized.draft, null, 2),
+    JSON.stringify(finalDraft, null, 2),
     "utf-8",
   );
   fs.writeFileSync(
@@ -591,7 +904,7 @@ async function runEditorialAndFinishDraft(
   return {
     success: true,
     captionSource,
-    captionDraft: finalized.draft,
+    captionDraft: finalDraft,
     editorialReport: report,
     captionTimingReport: timingResult.report,
   };
@@ -633,15 +946,26 @@ export function applyCaptionWordTiming(
     return draft;
   }
 
+  const offsetMap = buildTimelineOffsetMapFromTimeline(timeline);
+
   // Build clip contexts from timeline
   const clips: ClipContext[] = [];
-  const allTracks = [
-    ...(timeline.tracks?.video ?? []),
-    ...(timeline.tracks?.audio ?? []),
-  ];
-  for (const track of allTracks) {
+  const audioTracks = timeline.tracks?.audio ?? [];
+  const hasCanonicalA1 = audioTracks.some(
+    (track) => track.track_id === "A1" && (track.clips?.length ?? 0) > 0,
+  );
+  const timingTracks = hasCanonicalA1
+    ? audioTracks.filter((track) => track.track_id === "A1")
+    : [
+        ...(timeline.tracks?.video ?? []),
+        ...audioTracks,
+      ];
+  for (const track of timingTracks) {
     for (const clip of track.clips ?? []) {
-      if (clip.role === "A1" || clip.role === "dialogue") {
+      // Compiler timelines identify dialogue authority by the canonical A1
+      // track while individual clips retain their editorial role (commonly
+      // "nat_sound"). Legacy timelines without A1 still use clip roles.
+      if (hasCanonicalA1 || clip.role === "A1" || clip.role === "dialogue") {
         clips.push({
           clipId: clip.clip_id,
           assetId: clip.asset_id,
@@ -649,6 +973,8 @@ export function applyCaptionWordTiming(
           srcOutUs: clip.src_out_us ?? (clip.src_in_us ?? 0) + 1_000_000,
           timelineInFrame: clip.timeline_in_frame,
           timelineDurationFrames: clip.timeline_duration_frames,
+          segmentId: clip.segment_id,
+          trackId: track.track_id,
         });
       }
     }
@@ -665,14 +991,15 @@ export function applyCaptionWordTiming(
     timelineDurationFrames: entry.timeline_duration_frames,
   }));
 
-  const timingResults = batchWordRemap(captionInputs, clips, itemsWithWords, fps);
+  const timingResults = batchWordRemap(captionInputs, clips, itemsWithWords, fps, offsetMap);
 
   // Apply timing results to draft entries
   const timedEntries = draft.speech_captions.map((entry) => {
     const timing = timingResults.get(entry.caption_id);
     if (!timing) return entry;
 
-    const preservedWordTiming = timing.timingSource === "clip_item_remap"
+    const timingFallback = timing.timingSource === "clip_item_remap" || timing.timingSource === "offset_map_fallback";
+    const preservedWordTiming = timingFallback
       && entry.timing?.sourceWordRefs?.length
       ? entry.timing
       : undefined;
@@ -682,13 +1009,22 @@ export function applyCaptionWordTiming(
       timeline_in_frame: timing.timelineInFrame,
       timeline_duration_frames: timing.timelineDurationFrames,
       timing: {
-        source: preservedWordTiming?.source ?? timing.timingSource,
+        // Keep the v1 source label for exact word-aligned projections while
+        // exposing the v2 authority and offset-map fingerprint below. This
+        // preserves existing artifact consumers without weakening A1 timing
+        // authority or allowing the legacy clip remap to win.
+        source: preservedWordTiming?.source
+          ?? (timing.timingSource === "offset_map" ? "word_remap" : timing.timingSource),
         confidence: preservedWordTiming?.confidence ?? timing.timingConfidence,
         sourceWordRefs: preservedWordTiming?.sourceWordRefs ?? timing.sourceWordRefs,
         triggeredFallback: preservedWordTiming?.triggeredFallback
-          ?? timing.timingSource === "clip_item_remap",
+          ?? timingFallback,
         timelineInFrame: timing.timelineInFrame,
         timelineDurationFrames: timing.timelineDurationFrames,
+        clipMapRefs: timing.clipMapRefs,
+        authority: timing.authority,
+        offsetMapFingerprint: timing.offsetMapFingerprint ?? offsetMap.fingerprint,
+        stale: false,
       },
     };
   });
@@ -706,6 +1042,7 @@ export function applyCaptionSemanticTimingPhase(
   captionPolicy: CaptionPolicy,
   timeline: TimelineIR,
   transcripts: Map<string, TranscriptArtifact>,
+  offsetMap = buildTimelineOffsetMapFromTimeline(timeline),
 ): { draft: CaptionDraft; report?: CaptionTimingReport } {
   const semanticTiming = captionPolicy.semantic_timing
     ?? { mode: captionPolicy.source === "transcript" ? "speech_sync" as const : "off" as const };
@@ -748,6 +1085,7 @@ export function applyCaptionSemanticTimingPhase(
     transcriptItems,
     clips,
     fps,
+    offsetMap,
   });
   return {
     draft: { ...draft, speech_captions: result.captions },
@@ -879,15 +1217,39 @@ function buildPassthroughDraft(
     timeline.sequence.fps_num / timeline.sequence.fps_den,
     captionPolicy.language,
   );
+  const finalDraft = ensureV2CaptionTiming(finalized.draft, timeline);
 
   // Apply readiness gate
   applyReadinessGate(
-    finalized.draft,
+    finalDraft,
     captionPolicy,
     timingResult.report,
     timeline.sequence.fps_num / timeline.sequence.fps_den,
     finalized.issues,
   );
 
-  return { draft: finalized.draft, timingReport: timingResult.report };
+  return { draft: finalDraft, timingReport: timingResult.report };
+}
+
+function ensureV2CaptionTiming(draft: CaptionDraft, timeline: TimelineIR): CaptionDraft {
+  if (draft.version !== V2_CAPTION_DRAFT_VERSION) return draft;
+  const offsetMap = buildTimelineOffsetMapFromTimeline(timeline);
+  return {
+    ...draft,
+    speech_captions: draft.speech_captions.map((entry) => ({
+      ...entry,
+      timing: {
+        source: entry.timing?.source ?? "offset_map_fallback",
+        confidence: entry.timing?.confidence ?? 0,
+        sourceWordRefs: entry.timing?.sourceWordRefs ?? [],
+        clipMapRefs: entry.timing?.clipMapRefs ?? [],
+        authority: entry.timing?.authority ?? offsetMap.dialogue_authority,
+        offsetMapFingerprint: entry.timing?.offsetMapFingerprint ?? offsetMap.fingerprint,
+        stale: entry.timing?.stale ?? false,
+        triggeredFallback: entry.timing?.triggeredFallback ?? true,
+        timelineInFrame: entry.timing?.timelineInFrame ?? entry.timeline_in_frame,
+        timelineDurationFrames: entry.timing?.timelineDurationFrames ?? entry.timeline_duration_frames,
+      },
+    })),
+  };
 }

@@ -26,12 +26,12 @@ metadata:
 - `runtime/commands/review.ts` の preflight / promote / state transition と整合すること
 - `/review` preflight は deterministic に以下を行う
   1. compile
-  2. placeholder `05_timeline/review.mp4` の生成
+  2. `05_timeline/preview-first30s.mp4` の best-effort 生成
   3. `05_timeline/review-qc-summary.json` の生成
   4. roughcut critique
   5. patch safety guard
 - `06_review/human_notes.yaml` がある場合は `schemas/human-notes.schema.json` に合わせて読むこと
-- current repo の `review.mp4` は実レンダではなく JSON stub。直接視聴ベースの断定は避け、timeline / QC からの推論であることを明示すること
+- preview 生成が degraded / skip された場合は、直接視聴ベースの断定を避け、timeline / QC からの推論であることを明示すること
 - compile gate / planning gate / timeline schema validation が preflight で落ちた場合、これは critic の `FATAL` 判定ではなく command failure (`GATE_CHECK_FAILED`) として止まる
 
 ## 評価の優先順
@@ -79,8 +79,8 @@ craft 上のトレードオフは Walter Murch の Rule of Six で並べる。
 ### Step 2: preflight の成否と artifact を確認する
 
 - 現在の `05_timeline/timeline.json` を正とする
-- `05_timeline/review.mp4` と `05_timeline/review-qc-summary.json` を確認する
-- `review.mp4` が placeholder の場合は、`summary_judgment.rationale` や `details` で inference ベースの評価であることを曖昧にしない
+- `05_timeline/preview-first30s.mp4` と `05_timeline/review-qc-summary.json` を確認する
+- preview が生成されていない場合は、`summary_judgment.rationale` や `details` で inference ベースの評価であることを曖昧にしない
 
 ### Step 3: factual mismatch を先に切る
 
@@ -184,7 +184,7 @@ safe に直せない場合:
 - `06_review/review_metrics.json`
 - `06_review/review_report.yaml`
 - `06_review/review_patch.json`
-- `05_timeline/review.mp4`
+- `05_timeline/preview-first30s.mp4`
 - `05_timeline/review-qc-summary.json`
 
 ## 注意事項

@@ -5,6 +5,7 @@ import * as path from "node:path";
 import type { AssetItem } from "../runtime/connectors/ffprobe.js";
 import type { AssetSttResult } from "../runtime/connectors/openai-stt.js";
 import type { AssetsJson } from "../runtime/pipeline/pipeline-types.js";
+import { sha256FileHex } from "../runtime/source-content-identity.js";
 import {
   assertAudioStoryGraphResult,
   predictAudioStoryGraphStatus,
@@ -127,6 +128,7 @@ describe("audio analysis artifact contracts", () => {
     fs.writeFileSync(sourceFile, "audio");
     fs.symlinkSync(sourceFile, aliasFile);
     const asset = audioAsset("AST_BGM");
+    asset.source_content_sha256 = sha256FileHex(sourceFile);
     const assetsJson: AssetsJson = {
       project_id: "audio-project",
       artifact_version: "2.0.0",

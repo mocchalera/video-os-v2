@@ -8,6 +8,7 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
     public let markers: [TimelineMarker]
     public let transitions: [TimelineTransition]
     public let sourceHash: String?
+    public let hookLock: TimelineHookLock?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -16,6 +17,15 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
         case tracks
         case markers
         case transitions
+        case provenance
+    }
+
+    private struct TimelineProvenance: Decodable {
+        let hookLock: TimelineHookLock?
+
+        enum CodingKeys: String, CodingKey {
+            case hookLock = "hook_lock"
+        }
     }
 
     public init(from decoder: Decoder) throws {
@@ -26,6 +36,7 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
         tracks = try container.decode(TimelineTrackCollection.self, forKey: .tracks)
         markers = try container.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
         transitions = try container.decodeIfPresent([TimelineTransition].self, forKey: .transitions) ?? []
+        hookLock = try container.decodeIfPresent(TimelineProvenance.self, forKey: .provenance)?.hookLock
         sourceHash = nil
     }
 
@@ -36,7 +47,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
         tracks: TimelineTrackCollection,
         markers: [TimelineMarker],
         transitions: [TimelineTransition] = [],
-        sourceHash: String? = nil
+        sourceHash: String? = nil,
+        hookLock: TimelineHookLock? = nil
     ) {
         self.version = version
         self.projectID = projectID
@@ -45,6 +57,7 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
         self.markers = markers
         self.transitions = transitions
         self.sourceHash = sourceHash
+        self.hookLock = hookLock
     }
 
     public var displayTracks: [TimelineTrack] {
@@ -91,7 +104,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             tracks: updatedTracks,
             markers: markers,
             transitions: updatedTransitions,
-            sourceHash: sourceHash
+            sourceHash: sourceHash,
+            hookLock: hookLock
         )
     }
 
@@ -149,7 +163,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             tracks: updatedTracks,
             markers: markers,
             transitions: transitions,
-            sourceHash: sourceHash
+            sourceHash: sourceHash,
+            hookLock: hookLock
         )
     }
 
@@ -208,7 +223,9 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
                 trackID: transition.trackID,
                 transitionType: transition.transitionType,
                 transitionFrames: transition.transitionFrames,
-                appliedSkillID: transition.appliedSkillID
+                appliedSkillID: transition.appliedSkillID,
+                transitionParams: transition.transitionParams,
+                metadata: transition.metadata
             )
         }
 
@@ -219,7 +236,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             tracks: updatedTracks,
             markers: markers,
             transitions: updatedTransitions,
-            sourceHash: sourceHash
+            sourceHash: sourceHash,
+            hookLock: hookLock
         )
     }
 
@@ -243,7 +261,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
                 tracks: tracks,
                 markers: markers,
                 transitions: updatedTransitions,
-                sourceHash: sourceHash
+                sourceHash: sourceHash,
+                hookLock: hookLock
             )
         }
         let transition = TimelineTransition(
@@ -276,7 +295,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             tracks: tracks,
             markers: markers,
             transitions: updatedTransitions,
-            sourceHash: sourceHash
+            sourceHash: sourceHash,
+            hookLock: hookLock
         )
     }
 
@@ -303,7 +323,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             tracks: updatedTracks,
             markers: markers,
             transitions: transitions,
-            sourceHash: sourceHash
+            sourceHash: sourceHash,
+            hookLock: hookLock
         )
     }
 
@@ -338,7 +359,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             ),
             markers: markers,
             transitions: updatedTransitions,
-            sourceHash: sourceHash
+            sourceHash: sourceHash,
+            hookLock: hookLock
         )
     }
 
@@ -360,7 +382,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             tracks: updatedTracks,
             markers: markers,
             transitions: transitions,
-            sourceHash: sourceHash
+            sourceHash: sourceHash,
+            hookLock: hookLock
         )
     }
 
@@ -621,7 +644,8 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
             tracks: document.tracks,
             markers: document.markers,
             transitions: document.transitions,
-            sourceHash: ProjectPlaybackContractStatusReader.fileHash16(data)
+            sourceHash: ProjectPlaybackContractStatusReader.fileHash16(data),
+            hookLock: document.hookLock
         )
     }
 }
@@ -1086,6 +1110,8 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
     public let qualityFlags: [String]
     public let candidateRef: String?
     public let captions: [TimelineCaptionOverlay]
+    /** Canonical clip metadata emitted by the compiler, including visual framing. */
+    public let metadata: [String: JSONValue]
 
     enum CodingKeys: String, CodingKey {
         case id = "clip_id"
@@ -1103,6 +1129,7 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
         case qualityFlags = "quality_flags"
         case candidateRef = "candidate_ref"
         case captions
+        case metadata
     }
 
     public init(from decoder: Decoder) throws {
@@ -1122,6 +1149,7 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
         qualityFlags = try container.decodeIfPresent([String].self, forKey: .qualityFlags) ?? []
         candidateRef = try container.decodeIfPresent(String.self, forKey: .candidateRef)
         captions = try container.decodeIfPresent([TimelineCaptionOverlay].self, forKey: .captions) ?? []
+        metadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .metadata) ?? [:]
     }
 
     public init(
@@ -1139,7 +1167,8 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
         fallbackSegmentIDs: [String],
         qualityFlags: [String],
         candidateRef: String?,
-        captions: [TimelineCaptionOverlay] = []
+        captions: [TimelineCaptionOverlay] = [],
+        metadata: [String: JSONValue] = [:]
     ) {
         self.id = id
         self.segmentID = segmentID
@@ -1156,6 +1185,7 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
         self.qualityFlags = qualityFlags
         self.candidateRef = candidateRef
         self.captions = captions
+        self.metadata = metadata
     }
 
     public var timelineOutFrame: Int {
@@ -1203,7 +1233,8 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
                     toTimelineInFrame: timelineInFrame,
                     timelineOutFrame: timelineInFrame + resolvedDurationFrames
                 )
-            }
+            },
+            metadata: metadata
         )
     }
 
@@ -1223,7 +1254,8 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
             fallbackSegmentIDs: fallbackSegmentIDs,
             qualityFlags: qualityFlags,
             candidateRef: candidateRef,
-            captions: captions
+            captions: captions,
+            metadata: metadata
         )
     }
 
@@ -1263,7 +1295,8 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
             candidateRef: candidateRef,
             captions: captions.compactMap {
                 $0.clipped(toTimelineInFrame: timelineInFrame, timelineOutFrame: splitFrame)
-            }
+            },
+            metadata: metadata
         )
         let right = TimelineClip(
             id: rightClipID,
@@ -1282,7 +1315,8 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
             candidateRef: candidateRef,
             captions: captions.compactMap {
                 $0.clipped(toTimelineInFrame: splitFrame, timelineOutFrame: timelineOutFrame)
-            }
+            },
+            metadata: metadata
         )
         return (left, right)
     }
@@ -1308,8 +1342,24 @@ public struct TimelineClip: Decodable, Identifiable, Equatable, Sendable {
             beatID: beatID,
             fallbackSegmentIDs: [],
             qualityFlags: [],
-            candidateRef: candidate.id
+            candidateRef: candidate.id,
+            metadata: metadata
         )
+    }
+
+    /// Existing Studio review/render consumers use ReviewVisualTransform. The
+    /// canonical timeline metadata is the only source here; this is a decode
+    /// adapter, not a second framing contract.
+    public var visualTransform: ReviewVisualTransform? {
+        let keys = ["zoom", "crop", "position"]
+        let values = metadata.filter { keys.contains($0.key) }
+        guard !values.isEmpty,
+              let data = try? JSONEncoder().encode(JSONValue.object(values)),
+              let transform = try? JSONDecoder().decode(ReviewVisualTransform.self, from: data),
+              transform.isValid else {
+            return nil
+        }
+        return transform
     }
 
     public var captionText: String? {
@@ -1378,6 +1428,8 @@ public struct TimelineTransition: Decodable, Identifiable, Equatable, Sendable {
     public let transitionType: String
     public let transitionFrames: Int?
     public let appliedSkillID: String?
+    public let transitionParams: [String: JSONValue]?
+    public let metadata: [String: JSONValue]?
 
     enum CodingKeys: String, CodingKey {
         case id = "transition_id"
@@ -1387,6 +1439,8 @@ public struct TimelineTransition: Decodable, Identifiable, Equatable, Sendable {
         case transitionType = "transition_type"
         case transitionFrames = "transition_frames"
         case appliedSkillID = "applied_skill_id"
+        case transitionParams = "transition_params"
+        case metadata
     }
 
     public init(
@@ -1396,7 +1450,9 @@ public struct TimelineTransition: Decodable, Identifiable, Equatable, Sendable {
         trackID: String,
         transitionType: String,
         transitionFrames: Int?,
-        appliedSkillID: String?
+        appliedSkillID: String?,
+        transitionParams: [String: JSONValue]? = nil,
+        metadata: [String: JSONValue]? = nil
     ) {
         self.id = id
         self.fromClipID = fromClipID
@@ -1405,6 +1461,8 @@ public struct TimelineTransition: Decodable, Identifiable, Equatable, Sendable {
         self.transitionType = transitionType
         self.transitionFrames = transitionFrames
         self.appliedSkillID = appliedSkillID
+        self.transitionParams = transitionParams
+        self.metadata = metadata
     }
 
     public static func stableID(trackID: String, fromClipID: String, toClipID: String) -> String {

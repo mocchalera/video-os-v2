@@ -17,9 +17,17 @@ interface WorkflowJob {
   steps?: WorkflowStep[];
 }
 
-const workflow = parseYaml(
-  fs.readFileSync(path.resolve(".github/workflows/ci.yml"), "utf8"),
-) as { jobs?: Record<string, WorkflowJob> };
+interface Workflow {
+  jobs?: Record<string, WorkflowJob>;
+}
+
+function readWorkflow(relativePath: string): Workflow {
+  return parseYaml(fs.readFileSync(path.resolve(relativePath), "utf8")) as Workflow;
+}
+
+const fastWorkflow = readWorkflow(".github/workflows/ci.yml");
+const fullWorkflow = readWorkflow(".github/workflows/full-integration.yml");
+const studioWorkflow = readWorkflow(".github/workflows/macos-studio.yml");
 const packageJson = JSON.parse(
   fs.readFileSync(path.resolve("package.json"), "utf8"),
 ) as { packageManager?: string; scripts?: Record<string, string> };
@@ -53,7 +61,16 @@ describe("CI toolchain pin contract", () => {
   });
 
   it("pins every Linux job and every setup-node invocation", () => {
-    const jobs = Object.entries(workflow.jobs ?? {});
+    const workflowEntries: Array<[string, Workflow]> = [
+      ["fast", fastWorkflow],
+      ["full", fullWorkflow],
+    ];
+    const jobs = workflowEntries.flatMap(([workflowName, workflow]) =>
+      Object.entries(workflow.jobs ?? {}).map(([jobName, job]) => [
+        `${workflowName}:${jobName}`,
+        job,
+      ] as const),
+    );
     const setupNodeJobs = jobs.filter(([, job]) =>
       job.steps?.some((step) => step.uses === "actions/setup-node@v4")
     );
@@ -76,8 +93,8 @@ describe("CI toolchain pin contract", () => {
     }
   });
 
-  it("applies the hash-guarded upstream Vitest worker RPC fix", () => {
-    const patchStep = workflow.jobs?.["node-runtime"]?.steps?.find(
+  it("applies the hash-guarded upstream Vitest worker RPC fix in full integration", () => {
+    const patchStep = fullWorkflow.jobs?.["full-integration"]?.steps?.find(
       (step) => step.name === "Backport Vitest worker RPC fix",
     );
     expect(patchStep?.run).toContain('vitestPackage.version !== "3.2.4"');
@@ -90,9 +107,9 @@ describe("CI toolchain pin contract", () => {
     );
   });
 
-  it("bounds the required CI unit lane across two complete shards", () => {
-    const unitStep = workflow.jobs?.["node-runtime"]?.steps?.find(
-      (step) => step.name === "Run tests",
+  it("bounds the full Node unit lane across two complete shards", () => {
+    const unitStep = fullWorkflow.jobs?.["full-integration"]?.steps?.find(
+      (step) => step.name === "Run full Node test suite",
     );
     expect(packageJson.scripts?.test).toBe("vitest run --maxWorkers=4");
     expect(unitStep?.run?.match(/npm test --/g)).toHaveLength(2);
@@ -108,6 +125,30 @@ describe("CI toolchain pin contract", () => {
       "--testTimeout=30000",
       "--testTimeout=30000",
     ]);
+
+    const editorServerSpawnTests = [
+      "tests/editor-server-hook-lock.test.ts",
+      "tests/editor-server-project-health-redaction.test.ts",
+      "tests/editor-server-source-map-route-redaction.test.ts",
+    ];
+    const expectedExcludes = editorServerSpawnTests.map(
+      (testFile) => `--exclude ${testFile}`,
+    );
+    expect(unitStep?.run?.match(/--exclude \S+/g)).toEqual([
+      ...expectedExcludes,
+      ...expectedExcludes,
+    ]);
+
+    for (const testFile of editorServerSpawnTests) {
+      expect(fs.existsSync(path.resolve(testFile)), testFile).toBe(true);
+    }
+    expect(packageJson.scripts?.["test:editor-server-integration"]).toBe(
+      `vitest run ${editorServerSpawnTests.join(" ")}`,
+    );
+    const integrationStep = fullWorkflow.jobs?.["full-integration"]?.steps?.find(
+      (step) => step.name === "Run editor-server integration tests",
+    );
+    expect(integrationStep?.run).toBe("npm run test:editor-server-integration");
   });
 
   it("keeps split public-projection tests in default CI and full-verify discovery", () => {
@@ -128,7 +169,7 @@ describe("CI toolchain pin contract", () => {
   });
 
   it("fails closed unless macos-studio uses Xcode 15.4 and Apple Swift 5.10", () => {
-    const macosStudio = workflow.jobs?.["macos-studio"];
+    const macosStudio = fullWorkflow.jobs?.["macos-studio"];
     const assertion = macosStudio?.steps?.find(
       (step) => step.name === "Assert Xcode and Swift versions",
     );
@@ -142,9 +183,14 @@ describe("CI toolchain pin contract", () => {
     expect(assertion?.run).toContain("Xcode 15.4");
     expect(assertion?.run).toContain("Build version 15F31d");
     expect(assertion?.run).toContain("^Apple Swift version 5\\.10 ");
+
+    const filteredStudio = studioWorkflow.jobs?.["studio-product-gate"];
+    expect(filteredStudio?.["runs-on"]).toBe("macos-14");
+    expect(filteredStudio?.env?.DEVELOPER_DIR)
+      .toBe("/Applications/Xcode_15.4.app/Contents/Developer");
   });
 
-  it("pins the same fail-closed ffmpeg/ffprobe source for node-runtime and render-integration", () => {
+  it("pins the fail-closed ffmpeg/ffprobe source in the consolidated full job", () => {
     const resolverPath = path.resolve("scripts/ci-resolve-media-toolchain.sh");
     const resolver = fs.readFileSync(resolverPath, "utf8");
     const lockfile = JSON.parse(
@@ -153,24 +199,18 @@ describe("CI toolchain pin contract", () => {
       packages?: Record<string, { version?: string; integrity?: string }>;
     };
     const compositor = lockfile.packages?.["node_modules/@remotion/compositor-linux-x64-gnu"];
-    const mediaJobs = ["node-runtime", "render-integration"] as const;
-    const resolveSteps = mediaJobs.map((jobName) => {
-      const job = workflow.jobs?.[jobName];
-      const npmCiIndex = job?.steps?.findIndex((step) => step.run === "npm ci") ?? -1;
-      const resolveIndex = job?.steps?.findIndex(
-        (step) => step.name === "Resolve pinned media toolchain",
-      ) ?? -1;
-      const step = job?.steps?.[resolveIndex];
+    const job = fullWorkflow.jobs?.["full-integration"];
+    const npmCiIndex = job?.steps?.findIndex((step) => step.run === "npm ci") ?? -1;
+    const resolveIndex = job?.steps?.findIndex(
+      (step) => step.name === "Resolve pinned media toolchain",
+    ) ?? -1;
+    const step = job?.steps?.[resolveIndex];
 
-      expect(step?.run, jobName).toBe("bash scripts/ci-resolve-media-toolchain.sh");
-      expect(npmCiIndex, jobName).toBeGreaterThanOrEqual(0);
-      expect(resolveIndex, jobName).toBeGreaterThan(npmCiIndex);
-      expect(JSON.stringify(job), jobName).not.toContain("apt-get");
-      expect(JSON.stringify(job), jobName).not.toContain("Using preinstalled ffmpeg/ffprobe");
-      return step?.run;
-    });
-
-    expect(resolveSteps[0]).toBe(resolveSteps[1]);
+    expect(step?.run).toBe("bash scripts/ci-resolve-media-toolchain.sh");
+    expect(npmCiIndex).toBeGreaterThanOrEqual(0);
+    expect(resolveIndex).toBeGreaterThan(npmCiIndex);
+    expect(JSON.stringify(job)).not.toContain("apt-get");
+    expect(JSON.stringify(job)).not.toContain("Using preinstalled ffmpeg/ffprobe");
     expect(compositor?.version).toBe("4.0.452");
     expect(compositor?.integrity).toBe(
       "sha512-W/obco3o/vqdqtbXlAm3m6m9ZjA9LGGeJkEjT3+6ar2jkOSLi2S6qIhz9Y/ewi5cN2hKaFV1rlEwVGNqfEia+w==",
@@ -182,12 +222,15 @@ describe("CI toolchain pin contract", () => {
     expect(resolver).toContain(
       "PINNED_COMPOSITOR_PATH='node_modules/@remotion/compositor-linux-x64-gnu'",
     );
-    expect(resolver).toContain("PINNED_FFMPEG_VERSION='n8.1.2-44-g7c533d0f86'");
+    expect(resolver).toContain("PINNED_FFMPEG_VERSION='6.0.1'");
     expect(resolver).toContain(
-      "PINNED_FFMPEG_URL='https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-18-15-03/ffmpeg-n8.1.2-44-g7c533d0f86-linux64-gpl-8.1.tar.xz'",
+      "PINNED_FFMPEG_URL='https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz'",
     );
     expect(resolver).toContain(
-      "PINNED_FFMPEG_SHA256='03ccc8a1cb534b97c2bc43f322ddb1b7c23bd325abb7e4c31aa37f4b4c0e648f'",
+      "PINNED_FFMPEG_SHA256='28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5'",
+    );
+    expect(resolver).toContain(
+      'expected_banner="$(basename "${dest}") version ${PINNED_FFMPEG_VERSION}-static "',
     );
     const brokerSource = fs.readFileSync(
       path.resolve("runtime/handoff/premiere-preflight-process-broker.ts"),
@@ -201,24 +244,29 @@ describe("CI toolchain pin contract", () => {
     expect(resolver).toContain('sudo rm -f "${dest}"');
     expect(resolver).toContain('sudo cp "${src}" "${dest}"');
     expect(resolver).toContain('installed ${dest} digest ${dest_sha} != verified tarball bytes ${src_sha}');
-    expect(resolver).toContain('broker which path discovered');
+    expect(resolver).toContain("broker which path discovered");
     expect(resolver).toContain('PATH="${BROKER_SEARCH_PATH}" /usr/bin/which');
     expect(resolver).toContain("fail_closed");
     expect(resolver).toContain("actual_sha256");
+    expect(resolver).not.toContain("BtbN");
+    expect(resolver).not.toContain("autobuild-");
+    expect(resolver).not.toContain("n8.1.2");
     expect(resolver).not.toContain("apt-get");
     expect(resolver).not.toContain("Using preinstalled ffmpeg/ffprobe");
     expect(resolver).not.toMatch(/command -v ffmpeg && command -v ffprobe/);
   });
 
-  it("keeps Studio contract verification beneath product-gate", () => {
-    const productGateNeeds = workflow.jobs?.["product-gate"]?.needs ?? [];
-    const enforcingJobs = Object.entries(workflow.jobs ?? {})
-      .filter(([, job]) =>
-        job.steps?.some((step) => step.run === "npm run verify:studio-contracts")
-      )
-      .map(([jobName]) => jobName);
+  it("keeps Studio contract verification in both product lanes", () => {
+    const lanes: Array<[string, Workflow]> = [
+      ["fast", fastWorkflow],
+      ["full", fullWorkflow],
+    ];
+    const enforcement = lanes.flatMap(([workflowName, workflow]) =>
+      Object.entries(workflow.jobs ?? {})
+        .filter(([, job]) => job.steps?.some((step) => step.run === "npm run verify:studio-contracts"))
+        .map(([jobName]) => `${workflowName}:${jobName}`),
+    );
 
-    expect(enforcingJobs).toHaveLength(1);
-    expect(productGateNeeds).toEqual(expect.arrayContaining(enforcingJobs));
+    expect(enforcement).toEqual(["fast:product-gate", "full:full-integration"]);
   });
 });

@@ -454,7 +454,158 @@
       ],
       "warnings": [],
       "errors": []
-    }
+    },
+    "rhythm_sync": {
+      "version": "1",
+      "mode": "auto",
+      "search_window_sec": 1.5,
+      "max_shift_frames": 12,
+      "parity_max_offset_frames": 2,
+      "parity_gate": "enforce",
+      "min_cue_confidence": 0.6,
+      "fps_num": 24,
+      "fps_den": 1,
+      "evidence_provenance": {
+        "binding": "unbound",
+        "binding_failures": [
+          "bgm_artifact_missing_or_not_ready"
+        ],
+        "transcripts": [
+          {
+            "path": "03_analysis/transcripts/TR_AST_001.json",
+            "sha256": "dc36aabdf7e7f810585c23c45039c7f5b0ca233ce7e6dc97d8b0fca2f4910d58",
+            "binding": "bound",
+            "failures": []
+          },
+          {
+            "path": "03_analysis/transcripts/TR_AST_004.json",
+            "sha256": "bd068459e943b91f3c7da009a458c8c37c6e0360459207c3449bb31439eff3ed",
+            "binding": "bound",
+            "failures": []
+          },
+          {
+            "path": "03_analysis/transcripts/TR_AST_005.json",
+            "sha256": "d5a8c8d8b66ec56d5f1b2c2eedea1ce7fb010f0d791be297c0f64b0378e835a4",
+            "binding": "bound",
+            "failures": []
+          }
+        ]
+      },
+      "sources": {
+        "bgm_analysis": false,
+        "word_timestamps": false,
+        "beat_count": 0,
+        "word_count": 0,
+        "section_count": 0,
+        "authored_lyric": false,
+        "authored_lyric_count": 0
+      },
+      "enabled": false,
+      "status": "degraded",
+      "disabled_reason": "no_rhythm_events",
+      "degraded_reasons": [
+        "bgm_analysis_missing_or_not_ready"
+      ],
+      "snaps": [],
+      "parity": {
+        "status": "degraded",
+        "max_offset_frames": 2,
+        "sections": []
+      },
+      "integrity": {
+        "gap_frames": 0,
+        "overrun_frames": 0,
+        "boundary_count": 0,
+        "verified": false
+      },
+      "counts": {
+        "snapped": 0,
+        "hard_snapped": 0,
+        "section_snapped": 0,
+        "unchanged": 0,
+        "skipped": 0,
+        "skipped_speech_protected": 0,
+        "skipped_still_image": 0,
+        "skipped_min_duration": 0,
+        "skipped_source_range": 0,
+        "skipped_max_shift": 0,
+        "skipped_no_event": 0,
+        "skipped_locked_boundary": 0,
+        "skipped_neighbor_collision": 0
+      }
+    },
+    "av_sync": {
+      "policy": "same-source-talk-exact/v1",
+      "checked_pairs": 7,
+      "synchronized_clip_ids": []
+    },
+    "audio_render_projection": {
+      "version": "audio-render-projection/v1",
+      "lane_semantics": {
+        "A1": "dialogue_and_natural_sound",
+        "A2": "music_bgm",
+        "A3": "texture_ambient_and_sfx"
+      },
+      "dialogue_authority": "A1",
+      "conflict_policy": "dialogue_first",
+      "picture_dialogue_caption_timing_immutable": true,
+      "audio_displacement_frames": 0,
+      "source_refs": [
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0008",
+          "asset_id": "AST_005",
+          "timeline_in_frame": 0,
+          "timeline_duration_frames": 96
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0009",
+          "asset_id": "AST_001",
+          "timeline_in_frame": 96,
+          "timeline_duration_frames": 111
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0010",
+          "asset_id": "AST_001",
+          "timeline_in_frame": 207,
+          "timeline_duration_frames": 105
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0011",
+          "asset_id": "AST_004",
+          "timeline_in_frame": 312,
+          "timeline_duration_frames": 140
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0012",
+          "asset_id": "AST_004",
+          "timeline_in_frame": 452,
+          "timeline_duration_frames": 100
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0013",
+          "asset_id": "AST_005",
+          "timeline_in_frame": 552,
+          "timeline_duration_frames": 116
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0014",
+          "asset_id": "AST_005",
+          "timeline_in_frame": 668,
+          "timeline_duration_frames": 52
+        }
+      ],
+      "audio_policy_mode": "ducking",
+      "audio_policy_source": "global_default",
+      "a1_loudnorm": true
+    },
+    "source_mapping_hash": "4f53cda18c2baa0c"
   },
   "provenance": {
     "brief_path": "01_intent/creative_brief.yaml",
@@ -478,6 +629,69 @@
       "mode": "off",
       "source": "global_default"
     },
-    "compiler_defaults_hash": "344092492159de21"
+    "compiler_defaults_hash": "4a4b0adc1fe82549",
+    "audio_render_projection": {
+      "version": "audio-render-projection/v1",
+      "lane_semantics": {
+        "A1": "dialogue_and_natural_sound",
+        "A2": "music_bgm",
+        "A3": "texture_ambient_and_sfx"
+      },
+      "dialogue_authority": "A1",
+      "conflict_policy": "dialogue_first",
+      "picture_dialogue_caption_timing_immutable": true,
+      "audio_displacement_frames": 0,
+      "source_refs": [
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0008",
+          "asset_id": "AST_005",
+          "timeline_in_frame": 0,
+          "timeline_duration_frames": 96
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0009",
+          "asset_id": "AST_001",
+          "timeline_in_frame": 96,
+          "timeline_duration_frames": 111
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0010",
+          "asset_id": "AST_001",
+          "timeline_in_frame": 207,
+          "timeline_duration_frames": 105
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0011",
+          "asset_id": "AST_004",
+          "timeline_in_frame": 312,
+          "timeline_duration_frames": 140
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0012",
+          "asset_id": "AST_004",
+          "timeline_in_frame": 452,
+          "timeline_duration_frames": 100
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0013",
+          "asset_id": "AST_005",
+          "timeline_in_frame": 552,
+          "timeline_duration_frames": 116
+        },
+        {
+          "track_id": "A1",
+          "clip_id": "ACL_0014",
+          "asset_id": "AST_005",
+          "timeline_in_frame": 668,
+          "timeline_duration_frames": 52
+        }
+      ]
+    }
   }
 }

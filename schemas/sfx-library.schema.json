@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/schemas/sfx-library.schema.json",
   "title": "Video OS SFX Library",
-  "description": "A local, versioned SFX library with hash-bound assets and explicit rights/provenance evidence.",
+  "description": "Versioned repository-common or project-local SFX metadata. Rights and provenance are evidence records, not legal conclusions.",
   "type": "object",
   "required": ["version", "library_id", "library_version", "assets"],
   "additionalProperties": false,
@@ -10,6 +10,17 @@
     "version": { "const": "sfx-library/v1" },
     "library_id": { "$ref": "#/$defs/stableId" },
     "library_version": { "type": "string", "minLength": 1 },
+    "scope": { "enum": ["repo_common", "project_local"] },
+    "owner": { "type": ["string", "null"], "minLength": 1 },
+    "source_uri": { "type": ["string", "null"], "minLength": 1 },
+    "created_at": {
+      "anyOf": [
+        { "type": "string", "format": "date-time" },
+        { "type": "null" }
+      ]
+    },
+    "review_status": { "$ref": "#/$defs/reviewStatus" },
+    "superseded_by": { "type": ["string", "null"], "minLength": 1 },
     "assets": {
       "type": "array",
       "minItems": 1,
@@ -22,7 +33,7 @@
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
     },
     "hash": {
-      "type": "string",
+      "type": ["string", "null"],
       "pattern": "^sha256:[a-f0-9]{64}$"
     },
     "opaqueRef": {
@@ -34,17 +45,41 @@
       "minLength": 1,
       "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F]).+$"
     },
+    "reviewStatus": {
+      "enum": ["approved", "pending", "rejected", "unreviewed", "hold"]
+    },
+    "rightsStatus": {
+      "enum": ["confirmed", "cleared", "unknown", "expired", "ambiguous", "blocked", "hold"]
+    },
+    "provenanceStatus": {
+      "enum": ["verified", "unknown", "ambiguous", "hold"]
+    },
+    "usageScope": {
+      "enum": ["internal_audition", "project_render", "commercial", "public_release"]
+    },
     "asset": {
       "type": "object",
       "required": [
         "asset_id",
         "semantic_roles",
-        "path",
         "content_hash",
         "size_bytes",
         "duration_us",
         "rights",
         "provenance"
+      ],
+      "allOf": [
+        {
+          "anyOf": [
+            { "required": ["path"] },
+            {
+              "required": ["source_uri"],
+              "properties": {
+                "source_uri": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        }
       ],
       "additionalProperties": false,
       "properties": {
@@ -53,27 +88,80 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/semanticRole" }
+          "items": {
+            "enum": [
+              "hook_impact",
+              "transition_accent",
+              "claim_emphasis",
+              "achievement_reveal",
+              "simple_sound"
+            ]
+          }
         },
         "path": { "$ref": "#/$defs/safeRelativePath" },
+        "source_uri": { "type": ["string", "null"], "minLength": 1 },
         "content_hash": { "$ref": "#/$defs/hash" },
-        "size_bytes": { "type": "integer", "minimum": 1 },
-        "duration_us": { "type": "integer", "minimum": 1 },
+        "size_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "duration_us": { "type": ["integer", "null"], "minimum": 1 },
+        "format": { "type": ["string", "null"], "minLength": 1 },
+        "sample_rate_hz": { "type": ["integer", "null"], "minimum": 1 },
+        "channels": { "type": ["integer", "null"], "minimum": 1 },
+        "decode_status": {
+          "enum": ["decoded", "unavailable", "failed", "unknown"]
+        },
+        "category": { "type": "string", "minLength": 1 },
+        "semantic_intent": { "type": "string", "minLength": 1 },
         "rights": {
           "type": "object",
           "required": ["status", "basis", "usage_scope", "evidence_ref"],
           "additionalProperties": false,
           "properties": {
-            "status": { "const": "confirmed" },
+            "status": { "$ref": "#/$defs/rightsStatus" },
             "basis": {
-              "type": "string",
-              "enum": ["local_rights_confirmation", "deterministic_synthesis"]
+              "enum": [
+                "local_rights_confirmation",
+                "deterministic_synthesis",
+                "licensed",
+                "operator_declared",
+                "unknown"
+              ]
             },
             "usage_scope": {
-              "type": "string",
-              "enum": ["internal_audition", "project_render", "commercial", "public_release"]
+              "oneOf": [
+                { "$ref": "#/$defs/usageScope" },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "$ref": "#/$defs/usageScope" }
+                }
+              ]
             },
-            "evidence_ref": { "$ref": "#/$defs/opaqueRef" }
+            "evidence_ref": {
+              "oneOf": [
+                { "$ref": "#/$defs/opaqueRef" },
+                { "type": "null" }
+              ]
+            },
+            "owner": { "type": ["string", "null"], "minLength": 1 },
+            "permitted_derivatives": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "verified_at": {
+              "anyOf": [
+                { "type": "string", "format": "date-time" },
+                { "type": "null" }
+              ]
+            },
+            "expires_at": {
+              "anyOf": [
+                { "type": "string", "format": "date-time" },
+                { "type": "null" }
+              ]
+            },
+            "status_reason": { "type": "string", "minLength": 1 }
           }
         },
         "provenance": {
@@ -82,30 +170,59 @@
           "additionalProperties": false,
           "properties": {
             "origin": {
-              "type": "string",
-              "enum": ["existing_generated_local", "deterministic_synthesis", "recorded_local"]
+              "enum": [
+                "existing_generated_local",
+                "deterministic_synthesis",
+                "recorded_local",
+                "licensed_local",
+                "unknown"
+              ]
             },
-            "source_ref": { "$ref": "#/$defs/opaqueRef" },
+            "source_ref": {
+              "oneOf": [
+                { "$ref": "#/$defs/opaqueRef" },
+                { "type": "null" }
+              ]
+            },
             "generation_id": { "type": ["string", "null"], "minLength": 1 },
             "generated_at": {
               "anyOf": [
                 { "type": "string", "format": "date-time" },
                 { "type": "null" }
               ]
+            },
+            "status": { "$ref": "#/$defs/provenanceStatus" },
+            "owner": { "type": ["string", "null"], "minLength": 1 },
+            "acquisition_ref": {
+              "oneOf": [
+                { "$ref": "#/$defs/opaqueRef" },
+                { "type": "null" }
+              ]
+            },
+            "evidence_ref": {
+              "oneOf": [
+                { "$ref": "#/$defs/opaqueRef" },
+                { "type": "null" }
+              ]
             }
           }
-        }
+        },
+        "review_status": { "$ref": "#/$defs/reviewStatus" },
+        "reviewer_ref": {
+          "oneOf": [
+            { "$ref": "#/$defs/opaqueRef" },
+            { "type": "null" }
+          ]
+        },
+        "reviewed_at": {
+          "anyOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ]
+        },
+        "supersedes": { "type": ["string", "null"], "minLength": 1 },
+        "superseded_by": { "type": ["string", "null"], "minLength": 1 }
       }
-    },
-    "semanticRole": {
-      "type": "string",
-      "enum": [
-        "hook_impact",
-        "transition_accent",
-        "claim_emphasis",
-        "achievement_reveal",
-        "simple_sound"
-      ]
     }
   }
 }

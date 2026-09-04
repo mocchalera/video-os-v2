@@ -15,7 +15,7 @@ import {
   readAssetMediaCapabilities,
 } from "../runtime/artifacts/source-media-capabilities.js";
 import { ImageSequenceGroundingError } from "../runtime/artifacts/image-sequence-grounding.js";
-import { compile } from "../runtime/compiler/index.js";
+import { runCanonicalCompile } from "../runtime/compiler/index.js";
 import { MEDIA_KIND_REGISTRY } from "../runtime/media/media-kind-registry.js";
 import { discoverRequestedSources } from "../runtime/media/source-discovery.js";
 import { runPipeline, SourceReadinessError } from "../runtime/pipeline/ingest.js";
@@ -388,7 +388,7 @@ describe("EYE-070C1 still-image analysis lane", () => {
     expect(reduced.segments.items[0].editorial_observation?.warnings.join(" ")).toContain("normalized_frame_missing_or_empty");
   });
 
-  it("allows image planning capability but blocks ungrounded image compilation while preserving legacy fallback", () => {
+  it("allows image planning capability but blocks ungrounded image compilation while preserving legacy fallback", async () => {
     const projectDir = tempDir("planning-block");
     fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
     fs.writeFileSync(path.join(projectDir, "03_analysis", "assets.json"), JSON.stringify({
@@ -416,7 +416,8 @@ describe("EYE-070C1 still-image analysis lane", () => {
       { candidates: [imageCandidate as never] },
       [{ segment_id: "SEG_IMAGE", transcript_excerpt: "" }],
     )).not.toThrow();
-    expect(() => compile({ projectPath: projectDir, createdAt: "2026-01-01T00:00:00.000Z" })).toThrow(/still_image_grounding_invalid/);
+    await expect(runCanonicalCompile({ projectPath: projectDir, createdAt: "2026-01-01T00:00:00.000Z" }))
+      .rejects.toThrow(/image_qc_gate_blocked/);
 
     fs.writeFileSync(path.join(projectDir, "03_analysis", "assets.json"), JSON.stringify({
       items: [{ asset_id: "AST_LEGACY", video_stream: { codec_name: "h264" } }],

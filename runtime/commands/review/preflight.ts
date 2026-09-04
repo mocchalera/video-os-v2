@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { compile, type CompileResult } from "../../compiler/index.js";
+import { runCanonicalCompile, type CompileResult } from "../../compiler/index.js";
 import { loadSourceMap } from "../../media/source-map.js";
 import { generateTimelineOverview } from "../../preview/timeline-overview.js";
 import { renderPreviewSegment } from "../../preview/segment-renderer.js";
@@ -57,7 +57,7 @@ export async function runReviewPreflight(
   const steps: ReviewPreflightStep[] = [];
   const gapReport: string[] = [];
 
-  const compileResult = compile({
+  const compileResult = await runCanonicalCompile({
     projectPath: projectDir,
     createdAt,
   });

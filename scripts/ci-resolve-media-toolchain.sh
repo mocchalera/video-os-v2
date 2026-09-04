@@ -10,7 +10,7 @@
 # cannot be the PATH toolchain. This script still fail-closes if the
 # lockfile/install pin drifts.
 #
-# PATH toolchain: digest-pinned BtbN linux64 GPL static build.
+# PATH toolchain: digest-pinned, versioned Linux x86_64 static build.
 
 set -euo pipefail
 
@@ -19,9 +19,9 @@ PINNED_COMPOSITOR_VERSION='4.0.452'
 PINNED_COMPOSITOR_INTEGRITY='sha512-W/obco3o/vqdqtbXlAm3m6m9ZjA9LGGeJkEjT3+6ar2jkOSLi2S6qIhz9Y/ewi5cN2hKaFV1rlEwVGNqfEia+w=='
 PINNED_COMPOSITOR_PATH='node_modules/@remotion/compositor-linux-x64-gnu'
 
-PINNED_FFMPEG_VERSION='n8.1.2-44-g7c533d0f86'
-PINNED_FFMPEG_URL='https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-18-15-03/ffmpeg-n8.1.2-44-g7c533d0f86-linux64-gpl-8.1.tar.xz'
-PINNED_FFMPEG_SHA256='03ccc8a1cb534b97c2bc43f322ddb1b7c23bd325abb7e4c31aa37f4b4c0e648f'
+PINNED_FFMPEG_VERSION='6.0.1'
+PINNED_FFMPEG_URL='https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz'
+PINNED_FFMPEG_SHA256='28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5'
 BROKER_SEARCH_PATH='/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 BROKER_INSTALL_DIR='/usr/local/bin'
 
@@ -108,7 +108,7 @@ fi
 install_verified_binary() {
   local src="$1"
   local dest="$2"
-  local src_sha dest_sha nlink banner discovered
+  local src_sha dest_sha nlink banner discovered expected_banner
   src_sha="$(sha256sum "${src}" | awk '{print $1}')"
   if [ -z "${src_sha}" ]; then
     fail_closed "could not hash verified ${src}"
@@ -143,8 +143,9 @@ install_verified_binary() {
     fail_closed "installed ${dest} digest ${dest_sha} != verified tarball bytes ${src_sha}"
   fi
   banner="$("${dest}" -version | sed -n '1p')"
+  expected_banner="$(basename "${dest}") version ${PINNED_FFMPEG_VERSION}-static "
   case "${banner}" in
-    *"n8.1.2"*) ;;
+    "${expected_banner}"*) ;;
     *) fail_closed "unexpected installed banner for ${dest}: ${banner}" ;;
   esac
   discovered="$(PATH="${BROKER_SEARCH_PATH}" /usr/bin/which "$(basename "${dest}")" || true)"

@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audio-delivery-profile.schema.json",
+  "title": "Video OS audio delivery profile",
+  "description": "Evidence-backed audio delivery constraints. Unknown platform values are represented explicitly and never promoted to platform requirements.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "profile_id",
+    "profile_version",
+    "platform",
+    "surface",
+    "release_scope",
+    "delivery_variant",
+    "status",
+    "source_references",
+    "retrieved_at",
+    "owner",
+    "verification",
+    "supersession",
+    "assumptions",
+    "dialogue_processing",
+    "measurement_requirements",
+    "encoding_requirements",
+    "playback_evidence",
+    "normalization",
+    "human_preview",
+    "fallback"
+  ],
+  "properties": {
+    "version": { "const": "audio-delivery-profile/v1" },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "profile_version": { "type": "string", "minLength": 1 },
+    "platform": { "type": "string", "minLength": 1 },
+    "surface": { "type": "string", "minLength": 1 },
+    "release_scope": { "enum": ["organic", "ads", "internal"] },
+    "delivery_variant": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["verified", "partial", "unknown", "stale", "hold", "superseded"] },
+    "source_references": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/sourceReference" }
+    },
+    "published_at": { "type": ["string", "null"], "format": "date" },
+    "retrieved_at": { "type": "string", "format": "date" },
+    "owner": { "type": "string", "minLength": 1 },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "verified_at", "review_due_at"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1 },
+        "verified_at": { "type": ["string", "null"], "format": "date-time" },
+        "review_due_at": { "type": ["string", "null"], "format": "date-time" },
+        "notes": { "type": "string" }
+      }
+    },
+    "supersession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["active", "superseded", "deprecated"] },
+        "superseded_by": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "dialogue_processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_track",
+        "conflict_policy",
+        "finishing_engine",
+        "optional_stages",
+        "single_mastering_owner",
+        "single_mastering_stage",
+        "max_mastering_passes"
+      ],
+      "properties": {
+        "authority_track": { "const": "A1" },
+        "conflict_policy": { "const": "dialogue_first" },
+        "finishing_engine": { "const": "existing_dialogue_finishing" },
+        "optional_stages": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "single_mastering_owner": { "type": "string", "minLength": 1 },
+        "single_mastering_stage": { "const": "after_mix" },
+        "max_mastering_passes": { "const": 1 },
+        "notes": { "type": "string" }
+      }
+    },
+    "measurement_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encoded_result_required",
+        "method",
+        "integrated_loudness",
+        "short_term_loudness",
+        "lra",
+        "true_peak",
+        "voice_intelligibility",
+        "diagnostics"
+      ],
+      "properties": {
+        "encoded_result_required": { "type": "boolean" },
+        "method": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["loudness", "true_peak", "format", "duration", "av_sync"],
+          "properties": {
+            "loudness": { "type": "string", "minLength": 1 },
+            "true_peak": { "type": "string", "minLength": 1 },
+            "format": { "type": "string", "minLength": 1 },
+            "duration": { "type": "string", "minLength": 1 },
+            "av_sync": { "type": "string", "minLength": 1 }
+          }
+        },
+        "integrated_loudness": { "$ref": "#/$defs/numericEvidence" },
+        "short_term_loudness": { "$ref": "#/$defs/numericEvidence" },
+        "lra": { "$ref": "#/$defs/numericEvidence" },
+        "true_peak": { "$ref": "#/$defs/numericEvidence" },
+        "voice_intelligibility": { "$ref": "#/$defs/voiceEvidence" },
+        "diagnostics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clipping", "silence", "dropout", "channel", "phase"],
+          "properties": {
+            "clipping": { "type": "string", "minLength": 1 },
+            "silence": { "type": "string", "minLength": 1 },
+            "dropout": { "type": "string", "minLength": 1 },
+            "channel": { "type": "string", "minLength": 1 },
+            "phase": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "encoding_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["container", "codec", "sample_rate_hz", "channels", "true_peak_margin_dbtp", "encode_preview"],
+      "properties": {
+        "container": { "$ref": "#/$defs/textEvidence" },
+        "codec": { "$ref": "#/$defs/textEvidence" },
+        "sample_rate_hz": { "$ref": "#/$defs/integerEvidence" },
+        "channels": { "$ref": "#/$defs/integerEvidence" },
+        "true_peak_margin_dbtp": { "$ref": "#/$defs/numericEvidence" },
+        "true_peak_processing_target_dbtp": { "$ref": "#/$defs/numericEvidence" },
+        "encode_preview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "method", "human_required"],
+          "properties": {
+            "status": { "enum": ["verified", "partial", "unknown", "stale", "not_run"] },
+            "method": { "type": "string", "minLength": 1 },
+            "human_required": { "type": "boolean" },
+            "record_ref": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "playback_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stereo", "mono_fold_down", "mobile_fixture"],
+      "properties": {
+        "stereo": { "$ref": "#/$defs/playbackEvidence" },
+        "mono_fold_down": { "$ref": "#/$defs/playbackEvidence" },
+        "mobile_fixture": { "$ref": "#/$defs/playbackEvidence" }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "assumption"],
+      "properties": {
+        "status": { "enum": ["not_applied", "simulated", "observed", "unknown"] },
+        "assumption": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "human_preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "gates", "status"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "gates": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "status": { "enum": ["pending", "accepted", "rejected", "not_recorded"] },
+        "record_ref": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on_missing_tool", "on_stale_or_unknown", "reason"],
+      "properties": {
+        "on_missing_tool": { "enum": ["fail_open", "hold"] },
+        "on_stale_or_unknown": { "const": "human_hold" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "title", "retrieved_at", "published_date", "owner", "evidence_kind"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "title": { "type": "string", "minLength": 1 },
+        "retrieved_at": { "type": "string", "format": "date" },
+        "published_date": { "type": ["string", "null"], "format": "date" },
+        "owner": { "type": "string", "minLength": 1 },
+        "evidence_kind": { "enum": ["official_documentation", "primary_source", "internal_policy", "synthetic_fixture", "decision_hold"] },
+        "notes": { "type": "string" }
+      }
+    },
+    "numericEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "basis"],
+      "properties": {
+        "status": { "enum": ["verified", "partial", "unknown", "stale", "hold"] },
+        "value": { "type": "number" },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1 },
+        "basis": { "enum": ["official_source", "primary_source", "internal_target", "synthetic_fixture", "unknown"] },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    },
+    "integerEvidence": {
+      "allOf": [
+        { "$ref": "#/$defs/numericEvidence" },
+        { "type": "object", "properties": { "value": { "type": "integer" }, "minimum": { "type": "integer" }, "maximum": { "type": "integer" } } }
+      ]
+    },
+    "textEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "basis"],
+      "properties": {
+        "status": { "enum": ["verified", "partial", "unknown", "stale", "hold"] },
+        "value": { "type": "string", "minLength": 1 },
+        "basis": { "enum": ["official_source", "primary_source", "internal_target", "synthetic_fixture", "unknown"] },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    },
+    "voiceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "basis", "proxies", "human_required"],
+      "properties": {
+        "status": { "enum": ["verified", "partial", "unknown", "stale", "hold", "not_claimed"] },
+        "basis": { "enum": ["official_source", "primary_source", "internal_target", "synthetic_fixture", "unknown"] },
+        "proxies": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "target": { "type": "string", "minLength": 1 },
+        "human_required": { "type": "boolean" },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    },
+    "playbackEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "method", "human_required"],
+      "properties": {
+        "status": { "enum": ["verified", "partial", "unknown", "stale", "not_run"] },
+        "method": { "type": "string", "minLength": 1 },
+        "human_required": { "type": "boolean" },
+        "fixture_ref": { "type": "string", "minLength": 1 },
+        "record_ref": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

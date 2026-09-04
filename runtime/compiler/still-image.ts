@@ -16,11 +16,33 @@ export function setStillImageHoldFrames(
   if (clip.media_kind === "image") {
     if (!clip.still_image) throw new Error(`still_image_metadata_missing:${clip.clip_id}`);
     clip.still_image.hold_frames = duration;
+    if (clip.still_image.hold_resolution) {
+      clip.still_image.hold_resolution = {
+        ...clip.still_image.hold_resolution,
+        resolved_frames: duration,
+        status: duration === clip.still_image.hold_resolution.requested_frames
+          ? "resolved"
+          : "clamped",
+      };
+    }
+    if (clip.still_image.camera_motion) {
+      clip.still_image.camera_motion = {
+        ...clip.still_image.camera_motion,
+        frame_count: duration,
+      };
+    }
+    if (clip.still_image.ken_burns) {
+      clip.still_image.ken_burns = {
+        ...clip.still_image.ken_burns,
+        frame_count: duration,
+      };
+    }
     if (duration !== previousDuration) clip.still_image.policy_clamp = clamp;
   }
 }
 
 export function assertStillImageTimelineTruth(clips: TimelineClip[]): void {
+  const instanceIds = new Set<string>();
   for (const clip of clips) {
     if (clip.media_kind !== "image") continue;
     if (!clip.still_image) throw new Error(`still_image_metadata_missing:${clip.clip_id}`);
@@ -33,6 +55,18 @@ export function assertStillImageTimelineTruth(clips: TimelineClip[]): void {
     if (clip.still_image.hold_frames < clip.still_image.min_hold_frames ||
       clip.still_image.hold_frames > clip.still_image.max_hold_frames) {
       throw new Error(`still_image_hold_out_of_policy:${clip.clip_id}`);
+    }
+    if (clip.still_image.still_instance_id) {
+      if (instanceIds.has(clip.still_image.still_instance_id)) {
+        throw new Error(`still_image_instance_identity_duplicate:${clip.still_image.still_instance_id}`);
+      }
+      instanceIds.add(clip.still_image.still_instance_id);
+    }
+    if (clip.still_image.camera_motion && clip.still_image.camera_motion.frame_count !== clip.still_image.hold_frames) {
+      throw new Error(`still_image_motion_hold_mismatch:${clip.clip_id}`);
+    }
+    if (clip.still_image.ken_burns && clip.still_image.ken_burns.frame_count !== clip.still_image.hold_frames) {
+      throw new Error(`still_image_ken_burns_hold_mismatch:${clip.clip_id}`);
     }
   }
 }

@@ -19,7 +19,17 @@ import {
   masterAudio,
   type LoudnormMeasurement,
   type MasteringDefaults,
+  type EncodedAudioMeasurement,
 } from "./mastering.js";
+import type {
+  MusicMasterAudioPlan,
+  MusicMasterProcessingGraph,
+} from "./render-plan.js";
+import type {
+  MusicMasterMvpAudioEvidence,
+  MusicMasterMvpExecutionGraph,
+  MusicMasterMvpMeasurement,
+} from "./music-master-mvp.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -33,12 +43,77 @@ export interface MixOptions {
   masteringDefaults?: MasteringDefaults;
 }
 
+export interface MusicMasterAudioReceipt {
+  role: "music_master";
+  audio_decision: "preserve" | "mastering";
+  source: MusicMasterAudioPlan["source"];
+  input_audio_hash: string;
+  output_audio_hash: string;
+  source_bytes_preserved: boolean;
+  processing_graph: MusicMasterProcessingGraph;
+  codec: {
+    input: string;
+    output: string;
+    operation: "stream_copy" | "reencode";
+  };
+  /** Required for audio_decision=mastering; absent on preserve receipts. */
+  mastering?: {
+    version: "music-master-mvp-receipt/v1";
+    plan_hash: string;
+    policy_hash: string;
+    execution_graph: MusicMasterMvpExecutionGraph;
+    pass1: MusicMasterMvpMeasurement;
+    pass2: MusicMasterMvpMeasurement;
+    mp3: MusicMasterMvpMeasurement;
+    deliverables: {
+      wav24: MusicMasterMvpAudioEvidence & { path: string };
+      mp3_320: MusicMasterMvpAudioEvidence & { path: string };
+    };
+    human_approval: {
+      stereo_width: "pending";
+      tonal_balance: "pending";
+      lyric_clarity: "pending";
+      automated_quality_claim: "not_allowed";
+    };
+  };
+  /** Actual video-container mux evidence; omitted until final mux completes. */
+  final_mux?: {
+    operation: "stream_copy" | "reencode";
+    codec: string | null;
+    output_audio_hash: string | null;
+    output_container_hash: string | null;
+    measurements: {
+      status: "measured" | "degraded" | "hold";
+      delta: {
+        integrated_lufs_db: number | null;
+        lra_lu: number | null;
+        true_peak_dbtp: number | null;
+      };
+      tolerance: MusicMasterAudioPlan["measurement_tolerance"];
+      reason: string;
+    };
+  };
+  measurements: {
+    status: "measured" | "degraded" | "hold";
+    input: LoudnormMeasurement | null;
+    output: LoudnormMeasurement | null;
+    delta: {
+      integrated_lufs_db: number | null;
+      lra_lu: number | null;
+      true_peak_dbtp: number | null;
+    };
+    tolerance: MusicMasterAudioPlan["measurement_tolerance"];
+    reason: string;
+  };
+}
+
 export interface AudioMixReport {
   version: "audio-mix-report/v1" | "audio-mix-report/v2";
   project_id?: string;
   plan_hash?: string;
   has_bgm: boolean;
   has_sfx?: boolean;
+  sfx_hold?: { code: string; reason: string };
   strategy:
     | "dialogue_only_mastering_v1"
     | "original_passthrough_v1"
@@ -61,6 +136,11 @@ export interface AudioMixReport {
       content_hash: string;
       size_bytes: number;
     }>;
+    music_master?: {
+      asset_id: string;
+      content_hash: string;
+      size_bytes: number;
+    };
     sfx_sources?: Array<{
       cue_id: string;
       asset_id: string;
@@ -74,10 +154,30 @@ export interface AudioMixReport {
     sample_rate_hz: number;
     channels: number;
   };
+  /** Machine evidence from the encoded result; distinct from human audition. */
+  encoded_result?: EncodedAudioMeasurement;
+  audio_delivery_profile?: {
+    profile_id: string;
+    profile_version: string;
+    platform: string;
+    surface: string;
+    release_scope: "organic" | "ads" | "internal";
+    delivery_variant: string;
+    path: string;
+    source_hash: string;
+    profile_hash: string;
+    content_hash: string;
+    selection_status: "verified" | "human_hold";
+    freshness: "current" | "stale" | "unknown";
+    human_preview_required: boolean;
+  };
+  scene_audio_policy?: object;
+  audio_measurement_requirements?: object;
+  music_master?: MusicMasterAudioReceipt;
   stems?: Array<{
     stem_id: string;
-    role: "dialogue" | "music" | "sfx";
-    source_track_id: "A1" | "A2" | "A3";
+    role: "dialogue" | "music" | "ambient" | "sfx" | "music_master";
+    source_track_id: "A1" | "A2" | "A3" | "music_master";
     content_hash: string;
     size_bytes: number;
     finish_applied: boolean;
@@ -115,10 +215,16 @@ export interface AudioMixReport {
       rights_evidence_ref: string;
       provenance_ref: string;
       rights_basis: string;
-      rights_usage_scope: string;
+      rights_usage_scope: string | string[];
       provenance_origin: string;
       generated_at: string | null;
       generation_id?: string | null;
+      asset_path?: string;
+      rights_status?: string;
+      provenance_status?: string;
+      review_status?: string;
+      rights_expires_at?: string | null;
+      permitted_derivatives?: string[];
     };
     decision_pin?: {
       candidate_id: string;
@@ -208,14 +314,17 @@ export interface AudioMixReport {
     loudness_target_lufs: number;
     lra_target: number;
     true_peak_target_dbtp: number;
-    premaster_measurement: LoudnormMeasurement;
-    output_measurement?: LoudnormMeasurement;
+    premaster_measurement: LoudnormMeasurement | null;
+    output_measurement?: LoudnormMeasurement | null;
+    owner?: "shared_audio_render_plan" | "legacy_mixer" | "unknown";
+    stage?: "after_mix" | "not_applied" | "legacy_route" | "unknown";
+    applied_processing?: string[];
   };
   bgm_reference_mastering?: {
     loudness_target_lufs: number;
     lra_target: number;
     true_peak_target_dbtp: number;
-    source_measurement: LoudnormMeasurement;
+    source_measurement: LoudnormMeasurement | null;
   };
   sidechain?: {
     detector: "dialogue_waveform_rms";

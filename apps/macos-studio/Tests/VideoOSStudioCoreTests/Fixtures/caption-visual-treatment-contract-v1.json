@@ -1,0 +1,110 @@
+{
+  "version": "caption-visual-treatment-studio-contract/v1",
+  "verified_profile": {
+    "version": "platform-safe-zone-profile/v1",
+    "profile_id": "studio-fixture-verified-v1",
+    "platform": "fixture",
+    "surface": "fixture",
+    "delivery_variant": "verified",
+    "evidence_status": "verified",
+    "measured_at": null,
+    "geometry": {
+      "status": "verified",
+      "coordinate_system": "normalized_top_left",
+      "viewport": { "status": "verified", "width": 720, "height": 1280, "pixel_density": 1, "output_width": 720, "output_height": 1280 },
+      "ui_regions": { "unknown": false, "regions": [{ "id": "bottom-ui", "kind": "ui", "rect": { "x": 0, "y": 0.875, "width": 1, "height": 0.125 }, "method": "synthetic_fixture", "confidence": "high" }] },
+      "safe_regions": { "unknown": false, "regions": [{ "id": "middle-safe", "kind": "safe", "rect": { "x": 0.1, "y": 0.125, "width": 0.8, "height": 0.75 }, "method": "synthetic_fixture", "confidence": "high" }] },
+      "method": "synthetic_fixture",
+      "confidence": "high"
+    },
+    "device_evidence": { "status": "verified", "device": "studio-fixture", "os": "synthetic", "app_version": "fixture", "app_build": "fixture", "locale": "und" },
+    "screenshot_evidence": { "status": "verified", "path": "fixture.svg", "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "format": "svg" },
+    "supersession": { "state": "active" },
+    "fallback": { "mode": "safe_identity_layout", "human_preview_required": false, "reason": "Synthetic contract geometry only." }
+  },
+  "unknown_profile": {
+    "version": "platform-safe-zone-profile/v1",
+    "profile_id": "studio-fixture-unknown-v1",
+    "platform": "fixture",
+    "surface": "fixture",
+    "delivery_variant": "unknown",
+    "evidence_status": "stale",
+    "measured_at": null,
+    "geometry": {
+      "status": "unknown",
+      "coordinate_system": "unknown",
+      "viewport": { "status": "unknown" },
+      "ui_regions": { "unknown": true, "regions": [] },
+      "safe_regions": { "unknown": true, "regions": [] },
+      "method": "unknown",
+      "confidence": "unknown"
+    },
+    "device_evidence": { "status": "stale" },
+    "screenshot_evidence": { "status": "stale" },
+    "supersession": { "state": "superseded", "superseded_by": "studio-fixture-verified-v1", "reason": "Fixture is stale." },
+    "fallback": { "mode": "human_platform_preview", "human_preview_required": true, "reason": "Human platform preview is required." }
+  },
+  "supported_operation": {
+    "caption_id": "SC_001",
+    "stable_root_id": "SC_001",
+    "anchor": "bottom_center",
+    "rect": { "x": 0.18, "y": 0.64, "width": 0.64, "height": 0.14 },
+    "style_ref": "sns-vertical-outline",
+    "reference_scale": 1.25,
+    "hierarchy_role": "speech",
+    "emphasis_ref": "bold",
+    "animation_ref": "semantic-reveal",
+    "effect_ref": "outline",
+    "fallback": "registered_fallback"
+  },
+  "resize_operation": {
+    "caption_id": "SC_001",
+    "stable_root_id": "SC_001",
+    "anchor": "bottom_center",
+    "rect": { "x": 0.13, "y": 0.62, "width": 0.74, "height": 0.16 },
+    "style_ref": "sns-vertical-outline",
+    "reference_scale": 1.75,
+    "hierarchy_role": "speech",
+    "fallback": "registered_fallback"
+  },
+  "unsupported_operation": {
+    "caption_id": "SC_001",
+    "stable_root_id": "SC_001",
+    "anchor": "bottom_center",
+    "rect": { "x": 0.18, "y": 0.64, "width": 0.64, "height": 0.14 },
+    "style_ref": "sns-vertical-outline",
+    "reference_scale": 1.25,
+    "hierarchy_role": "speaker",
+    "fallback": "nle_handoff"
+  },
+  "capabilities": {
+    "style_refs": ["sns-vertical-outline"],
+    "emphasis_refs": ["bold"],
+    "animation_refs": ["semantic-reveal"],
+    "effect_refs": ["outline"],
+    "hierarchy_roles": ["speech", "keyword"]
+  },
+  "parity": {
+    "studio_input_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "approval_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "visual_treatment_patch_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "typography_policy_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "platform_safe_zone_profile_id": "studio-fixture-verified-v1",
+    "platform_safe_zone_profile_path": "delivery_profiles/platform-safe-zone/fixture/studio-fixture-verified-v1.yaml",
+    "platform_safe_zone_profile_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "text_timing_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "capability_hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "canonical_receipt": {
+      "visual_input_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "approval_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "visual_treatment_patch_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "typography_policy_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "platform_safe_zone_profile_id": "studio-fixture-verified-v1",
+      "platform_safe_zone_profile_path": "delivery_profiles/platform-safe-zone/fixture/studio-fixture-verified-v1.yaml",
+      "platform_safe_zone_profile_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "text_timing_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "capability_hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "parity_matches": true
+    }
+  }
+}

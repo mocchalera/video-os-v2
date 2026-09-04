@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import type { TrackOutput } from "../compiler/types.js";
 import { normalizeOverlayClipContent } from "./normalize.js";
+import { isUnownedElement } from "../render/remotion/overlay-capability.js";
 import type {
   ContentRendererId,
   CreativeCompositeStage,
@@ -81,6 +82,22 @@ export function buildContentRenderPlan(timeline: TimelineForContentPlan): Conten
   for (const [trackIndex, track] of (timeline.tracks?.overlay ?? []).entries()) {
     for (const clip of track.clips ?? []) {
       const normalized = normalizeOverlayClipContent(clip);
+      // Fail closed before render starts: a canonical element that no
+      // production renderer owns (e.g. template-less raw auto-hinted kinds
+      // falling through to the ffmpeg default, which never draws content
+      // overlays) must surface as an explicit issue instead of a silent drop.
+      const ownership = normalized.element
+        ? isUnownedElement(normalized.element, normalized.renderer_owner)
+        : { unowned: false as const, field: "" };
+      if (ownership.unowned) {
+        issues.push({
+          clip_id: clip.clip_id,
+          message:
+            `element ${normalized.element?.element_id} is unowned via ${ownership.field}: ` +
+            `unsupported ContentElement route would be silently dropped`,
+        });
+        continue;
+      }
       if (normalized.renderer_owner !== null) {
         const recipe = normalized.element?.creative_recipe;
         const renderer = normalized.renderer_owner;

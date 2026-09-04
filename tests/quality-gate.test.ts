@@ -2,12 +2,126 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_QUALITY_GATE_THRESHOLDS,
   applyQualityGateToSelects,
+  mustHaveMatches,
 } from "../runtime/editorial/quality-gate.js";
 import type { Candidate, CreativeBrief, SelectsCandidates } from "../runtime/artifacts/types.js";
 import type { QualityGateSegment } from "../runtime/editorial/quality-gate.js";
 import type { VisualQualityMeasurements } from "../runtime/connectors/ffmpeg-motion.js";
 
 describe("quality gate", () => {
+  it("matches only the canonical hook, insight, and close requirements to grounded beat evidence", () => {
+    const hook = candidate("SEG_HOOK", {
+      story_role: "hook",
+      eligible_beats: ["b01_hook"],
+      evidence: ["Opening action verified from the analyzed segment."],
+    });
+    const insight = candidate("SEG_INSIGHT", {
+      story_role: "experience",
+      eligible_beats: ["b03_experience"],
+      motif_tags: ["insight"],
+      evidence: ["A complete observation is present in the source transcript."],
+    });
+    const close = candidate("SEG_CLOSE", {
+      story_role: "closing",
+      eligible_beats: ["b05_close"],
+      evidence: ["The analyzed source contains a resolved closing statement."],
+    });
+
+    expect(mustHaveMatches(hook, segment("SEG_HOOK"), ["one source-grounded hook"]))
+      .toEqual(["one source-grounded hook"]);
+    expect(mustHaveMatches(insight, segment("SEG_INSIGHT"), ["one evidence-backed insight"]))
+      .toEqual(["one evidence-backed insight"]);
+    expect(mustHaveMatches(close, segment("SEG_CLOSE"), ["one clear close"]))
+      .toEqual(["one clear close"]);
+    expect(mustHaveMatches(close, segment("SEG_CLOSE"), ["one unexplained surprise"]))
+      .toEqual([]);
+  });
+
+  it.each([
+    ["hook", "b01_hook", "A verified source annotation reads «hook».", "one source-grounded hook"],
+    ["experience", "b03_insight", "The source note records 「insight」.", "one evidence-backed insight"],
+    ["closing", "b04_close", "The source marker is (close).", "one clear close"],
+  ] as const)(
+    "matches canonical %s evidence when the source token is punctuation-delimited",
+    (storyRole, eligibleBeat, sourceEvidence, requirement) => {
+      const grounded = candidate(`SEG_PUNCTUATED_${storyRole}`, {
+        story_role: storyRole,
+        eligible_beats: [eligibleBeat],
+        why_it_matches: "",
+        evidence: [sourceEvidence],
+        motif_tags: [],
+      });
+      const groundedSegment = segment(grounded.segment_id, {
+        summary: "",
+        transcript_excerpt: "",
+        tags: [],
+      });
+
+      expect(mustHaveMatches(grounded, groundedSegment, [requirement])).toEqual([requirement]);
+    },
+  );
+
+  it.each([
+    ["hook", "b01_hook", "The source shows a hooked cable.", "one source-grounded hook"],
+    ["experience", "b03_insight", "The source shows an insightful color study.", "one evidence-backed insight"],
+    ["closing", "b05_close", "The source shows a closed storage box.", "one clear close"],
+  ] as const)(
+    "does not match canonical %s coverage from a keyword substring",
+    (storyRole, eligibleBeat, sourceEvidence, requirement) => {
+      const unrelated = candidate(`SEG_SUBSTRING_${storyRole}`, {
+        story_role: storyRole,
+        eligible_beats: [eligibleBeat],
+        why_it_matches: "",
+        evidence: [sourceEvidence],
+        motif_tags: [],
+      });
+      const unrelatedSegment = segment(unrelated.segment_id, {
+        summary: "",
+        transcript_excerpt: "",
+        tags: [],
+      });
+
+      expect(mustHaveMatches(unrelated, unrelatedSegment, [requirement])).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["hook", "b01_hook", "one source-grounded hook"],
+    ["experience", "b03_experience", "one evidence-backed insight"],
+    ["closing", "b05_close", "one clear close"],
+  ] as const)(
+    "does not satisfy %s coverage from role and beat without related source evidence",
+    (storyRole, eligibleBeat, requirement) => {
+      const sourceEmpty = candidate(`SEG_EMPTY_${storyRole}`, {
+        story_role: storyRole,
+        eligible_beats: [eligibleBeat],
+        why_it_matches: "",
+        evidence: [],
+        motif_tags: [],
+      });
+      const emptySegment = segment(sourceEmpty.segment_id, {
+        summary: "",
+        transcript_excerpt: "",
+        tags: [],
+      });
+      expect(mustHaveMatches(sourceEmpty, emptySegment, [requirement])).toEqual([]);
+
+      const unrelated = candidate(`SEG_UNRELATED_${storyRole}`, {
+        story_role: storyRole,
+        eligible_beats: [eligibleBeat],
+        why_it_matches: "A bicycle passes a plain wall.",
+        evidence: ["The source contains an ordinary outdoor transit shot."],
+        motif_tags: ["outdoor"],
+      });
+      const unrelatedSegment = segment(unrelated.segment_id, {
+        summary: "A bicycle passes a plain wall.",
+        transcript_excerpt: "The route continues beside the building.",
+        tags: ["outdoor", "transit"],
+      });
+      expect(mustHaveMatches(unrelated, unrelatedSegment, [requirement])).toEqual([]);
+    },
+  );
+
   it("marks audio-only visual quality not applicable without degrading it", () => {
     const result = applyQualityGateToSelects(selects([candidate("SEG_AUDIO", {
       media_kind: "audio",

@@ -341,6 +341,18 @@ private struct StudioTopBar: View {
                 .accessibilityLabel("標準プロファイル interview-highlight")
                 .accessibilityIdentifier("SpeechLedProductProfileBadge")
 
+            if let hookLock = model.timeline?.hookLock, hookLock.locked {
+                Label(hookLock.displayLabel, systemImage: "lock.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.orange.opacity(0.12), in: Capsule())
+                    .help(hookLock.detailLabel)
+                    .accessibilityLabel(hookLock.displayLabel)
+                    .accessibilityIdentifier("HookLockStatus")
+            }
+
             Spacer(minLength: 12)
 
             Button(action: onOpenCommandPalette) {
@@ -1697,7 +1709,7 @@ private struct StudioWorkspaceView: View {
 
             FeedbackStatusBar(
                 feedbackSession: model.feedbackSession,
-                statusMessage: model.roughCutCompileStatus,
+                statusMessage: model.feedbackSession.hookLockRejectionReason ?? model.roughCutCompileStatus,
                 canPromote: model.canPromoteLatestStudioPatch,
                 canUndo: !model.feedbackSession.patchHistory.isEmpty,
                 canOpenPreferenceMemory: model.selectedProject != nil,

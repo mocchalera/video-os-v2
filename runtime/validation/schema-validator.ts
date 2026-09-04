@@ -7,6 +7,7 @@
 
 import { parse as parseYaml } from "yaml";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { resolvePolicy } from "../policy-resolver.js";
@@ -14,6 +15,7 @@ import { buildSchemaVariant, finalizeViolations } from "./profiles.js";
 import {
   computeNormalizedJsonHash,
   validateAnalysisCoverageReport,
+  validateAnalysisCoverageFreshness,
   validateSourceMediaManifest,
 } from "../artifacts/p1-manifest-coverage.js";
 import {
@@ -23,6 +25,11 @@ import {
   validateContinuityGraph,
 } from "../artifacts/p3-continuity-graph.js";
 import { validateSourceLedger } from "../artifacts/source-ledger.js";
+import {
+  imageQcCompileGateReason,
+  validateImageQcReportIntegrity,
+} from "../artifacts/image-qc-report.js";
+import { validateBgmAnalysisContract } from "../media/bgm-analysis-contract.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -43,6 +50,7 @@ export type ValidationProfile = "standard" | "manual-render" | "lenient";
 
 export interface ValidateProjectOptions {
   profile?: ValidationProfile;
+  repoRoot?: string;
 }
 
 export interface ValidationResult {
@@ -106,6 +114,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "04_plan/framing_policy.json",
+    schemaFile: "framing-policy.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "04_plan/bgm_selection.json",
     schemaFile: "bgm-selection.schema.json",
     format: "json",
@@ -134,6 +149,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: ["gate3_fatal_issues"],
   },
   {
+    artifactPath: "06_review/optional-vlm-policy.json",
+    schemaFile: "optional-vlm-policy.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "06_review/review_patch.json",
     schemaFile: "review-patch.schema.json",
     format: "json",
@@ -148,6 +170,20 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "06_review/caption-edit-route.json",
+    schemaFile: "caption-edit-route.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "06_review/degraded-route-receipt.json",
+    schemaFile: "degraded-route-receipt.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "07_package/caption_review_patch.json",
     schemaFile: "caption-review-patch.schema.json",
     format: "json",
@@ -155,8 +191,64 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_package/caption_draft.json",
+    schemaFile: "caption-draft.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_approval.json",
+    schemaFile: "caption-approval.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_preview.json",
+    schemaFile: "authored-caption-preview.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_projection_receipt.json",
+    schemaFile: "authored-caption-projection.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "07_package/caption_review_preview.json",
     schemaFile: "caption-review-preview.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_visual_treatment_patch.json",
+    schemaFile: "caption-visual-treatment-patch.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_visual_treatment_input.json",
+    schemaFile: "caption-visual-treatment-input.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_visual_treatment_preapproval_input.json",
+    schemaFile: "caption-visual-treatment-input.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_visual_treatment_preapproval_receipt.json",
+    schemaFile: "caption-visual-treatment-preapproval-receipt.schema.json",
     format: "json",
     optional: true,
     runnerChecks: [],
@@ -302,6 +394,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: ["analysis_coverage_status"],
   },
   {
+    artifactPath: "03_analysis/bgm_analysis.json",
+    schemaFile: "bgm-analysis.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["bgm_analysis_integrity"],
+  },
+  {
     artifactPath: "03_analysis/audio_story_graph.json",
     schemaFile: "audio-story-graph.schema.json",
     format: "json",
@@ -314,6 +413,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     format: "json",
     optional: true,
     runnerChecks: ["continuity_graph_integrity"],
+  },
+  {
+    artifactPath: "03_analysis/image_qc_report.json",
+    schemaFile: "image-qc-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["image_qc_report_gate"],
   },
   {
     artifactPath: "03_analysis/marlin_events.json",
@@ -345,6 +451,11 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
   },
 ];
 
+const SUPPORTED_SOURCE_MAP_PATHS = [
+  "02_media/source_map.json",
+  "03_analysis/source_map.json",
+] as const;
+
 function safeParse(
   filePath: string,
   format: "yaml" | "json",
@@ -375,13 +486,201 @@ export function findRepoRoot(from: string): string {
   throw new Error("Could not find repo root (directory containing schemas/)");
 }
 
+/**
+ * The consuming project id for transcript binding: read from the canonical
+ * creative brief (project_id, falling back to project.id). Undefined when
+ * the brief is absent/malformed — repository validation then cannot bind
+ * project identity and only structural/semantic invariants apply.
+ */
+function readProjectIdFromBrief(absProject: string): string | undefined {
+  const briefPath = path.join(absProject, "01_intent", "creative_brief.yaml");
+  if (!fs.existsSync(briefPath)) return undefined;
+  try {
+    const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
+      project_id?: unknown;
+      project?: { id?: unknown };
+    } | null;
+    if (!brief || typeof brief !== "object") return undefined;
+    if (typeof brief.project_id === "string" && brief.project_id.length > 0) return brief.project_id;
+    if (typeof brief.project?.id === "string" && brief.project.id.length > 0) return brief.project.id;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Canonical transcript artifact versions currently supported by this
+ * repository, derived from actual writers and long-standing contracts:
+ * - "2.0.0": the canonical STT connector writer
+ *   (runtime/connectors/openai-stt.ts — the production transcript format).
+ * - "analysis-v1": the repository analysis generation shipped in project
+ *   fixtures (projects/sample, projects/demo).
+ * - "analysis-v2": the long-standing live-profile transcript contract
+ *   accepted since the W3 fix (tests/analysis-schemas.test.ts live-profile
+ *   fixtures — the repository-standard live transcript format).
+ * One central list: rhythm evidence admission, repository validation, and
+ * any future consumers must use THIS set, not local copies. A new version
+ * must be added here deliberately, with its writer/contract evidence.
+ */
+export const SUPPORTED_TRANSCRIPT_ARTIFACT_VERSIONS: readonly string[] = [
+  "2.0.0",
+  "analysis-v1",
+  "analysis-v2",
+];
+
+/**
+ * Central transcript semantic/path invariants shared by repository
+ * validation and rhythm evidence admission (Issue #35): transcript_ref and
+ * asset_id must match the canonical TR_<asset>.json filename/ref rules.
+ * Deterministic failure strings "<rule>:<message>".
+ */
+export function checkTranscriptSemanticInvariants(
+  doc: unknown,
+  fileName: string,
+  options: {
+    requireSupportedVersion?: boolean;
+    /** Consuming project id: the doc's project_id must match exactly. */
+    expectedProjectId?: string;
+  } = {},
+): string[] {
+  const failures: string[] = [];
+  const record = doc as Record<string, unknown> | null;
+  // Canonical filename invariant: never silently skipped. A transcript that
+  // does not use the exact TR_<asset>.json form is a deterministic failure
+  // (it can never be canonical music or general utterance evidence).
+  const filenameMatch = fileName.match(/^TR_(.+)\.json$/);
+  if (!filenameMatch) {
+    failures.push(`transcript_filename_canonical:transcript filename "${fileName}" does not use the canonical TR_<asset>.json form`);
+    return failures;
+  }
+  const transcriptRef = record?.transcript_ref as string | undefined;
+  const assetId = record?.asset_id as string | undefined;
+  const expectedAssetId = filenameMatch[1];
+  const expectedTranscriptRef = `TR_${expectedAssetId}`;
+  if (transcriptRef && transcriptRef !== expectedTranscriptRef) {
+    failures.push(`transcript_ref_matches_filename:transcript_ref "${transcriptRef}" does not match filename expectation "${expectedTranscriptRef}"`);
+  }
+  if (assetId && assetId !== expectedAssetId) {
+    failures.push(`asset_id_matches_filename:asset_id "${assetId}" does not match filename expectation "${expectedAssetId}"`);
+  }
+  if (options.requireSupportedVersion === true) {
+    const version = record?.artifact_version;
+    if (typeof version === "string" && !SUPPORTED_TRANSCRIPT_ARTIFACT_VERSIONS.includes(version)) {
+      failures.push(`transcript_artifact_version_unsupported:${version}`);
+    }
+  }
+  if (options.expectedProjectId !== undefined) {
+    const projectId = record?.project_id as string | undefined;
+    if (typeof projectId === "string" && projectId.length > 0 && projectId !== options.expectedProjectId) {
+      failures.push(`transcript_project_id_mismatch:transcript project_id "${projectId}" does not match consuming project "${options.expectedProjectId}"`);
+    }
+  }
+  return failures;
+}
+
+/** Canonical single-doc transcript schema + semantic check result. */
+export interface TranscriptSchemaCheck {
+  /** "ok": the authority ran (valid flag meaningful). "unavailable": the
+   * authority could not be constructed/used — evidence must be degraded. */
+  status: "ok" | "unavailable";
+  valid: boolean;
+  /** Deterministic failure strings ("transcript_schema_invalid:…",
+   * "transcript_ref_matches_filename:…", "asset_id_matches_filename:…",
+   * "transcript_artifact_version_unsupported:…",
+   * "transcript_schema_authority_unavailable:…"). */
+  failures: string[];
+}
+
+type TranscriptValidateFn = {
+  (data: unknown): boolean;
+  errors?: Array<{ instancePath: string; message?: string }> | null;
+};
+const transcriptValidatorCache = new Map<string, { validate: TranscriptValidateFn }>();
+
+/**
+ * Validate one parsed transcript document against the CANONICAL
+ * schemas/transcript.schema.json — the exact authority used by repository
+ * validation (project_id, artifact_version, transcript_ref, asset_id and the
+ * structural item/word requirements) plus the repository semantic/path
+ * invariants. Rhythm evidence binding must use this authority instead of a
+ * hand-written subset (Issue #35).
+ *
+ * The COMPLETE construction/use boundary is caught: missing/unreadable/
+ * malformed schema files, Ajv compile or ref-resolution failures, and
+ * discovery failures return status "unavailable" with deterministic
+ * "transcript_schema_authority_unavailable:<detail>" failures — they never
+ * escape as ENOENT or crash the canonical compile. The cache is keyed per
+ * repo root, so an authority from one root is never silently reused for
+ * another, and failed constructions are never cached as successes.
+ */
+export function normalizeAuthorityDetail(detail: string, roots: Array<string | undefined>): string {
+  let normalized = detail;
+  for (const root of roots) {
+    if (root && root.length > 0) normalized = normalized.split(root).join("<repoRoot>");
+  }
+  normalized = normalized.split(process.cwd()).join("<cwd>");
+  normalized = normalized.split(os.tmpdir()).join("<tmp>");
+  return normalized;
+}
+
+export function validateTranscriptDoc(
+  doc: unknown,
+  options: {
+    repoRoot?: string;
+    fileName?: string;
+    requireSupportedVersion?: boolean;
+    expectedProjectId?: string;
+  } = {},
+): TranscriptSchemaCheck {
+  try {
+    const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findRepoRoot(path.resolve());
+    let cached = transcriptValidatorCache.get(repoRoot);
+    if (!cached) {
+      const schemasDir = path.join(repoRoot, "schemas");
+      const ajv = new Ajv2020({ allErrors: true, strict: false });
+      addFormats(ajv);
+      const commonPath = path.join(schemasDir, "analysis-common.schema.json");
+      if (fs.existsSync(commonPath)) {
+        ajv.addSchema(JSON.parse(fs.readFileSync(commonPath, "utf-8")));
+      }
+      const schemaPath = path.join(schemasDir, "transcript.schema.json");
+      const validate = ajv.compile(
+        buildSchemaVariant("transcript.schema.json", JSON.parse(fs.readFileSync(schemaPath, "utf-8")), "standard"),
+      );
+      cached = { validate };
+      transcriptValidatorCache.set(repoRoot, cached);
+    }
+    const valid = cached.validate(doc) === true;
+    const failures = !valid && cached.validate.errors
+      ? cached.validate.errors.map((err) => `transcript_schema_invalid:${err.instancePath || "/"} ${err.message ?? "invalid"}`)
+      : [];
+    if (options.fileName !== undefined) {
+      failures.push(...checkTranscriptSemanticInvariants(doc, options.fileName, {
+        requireSupportedVersion: options.requireSupportedVersion,
+        expectedProjectId: options.expectedProjectId,
+      }));
+    }
+    return { status: "ok", valid: valid && failures.length === 0, failures };
+  } catch (error) {
+    const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    // Deterministic provenance: no absolute machine-specific paths, no stacks.
+    const detail = normalizeAuthorityDetail(raw, [options.repoRoot ? path.resolve(options.repoRoot) : undefined]);
+    return {
+      status: "unavailable",
+      valid: false,
+      failures: [`transcript_schema_authority_unavailable:${detail}`],
+    };
+  }
+}
+
 export function validateProject(
   projectPath: string,
   options: ValidateProjectOptions = {},
 ): ValidationResult {
   const profile = options.profile ?? "standard";
   const absProject = path.resolve(projectPath);
-  const repoRoot = findRepoRoot(absProject);
+  const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findRepoRoot(absProject);
   const schemasDir = path.join(repoRoot, "schemas");
 
   const ajv = new Ajv2020({ allErrors: true, strict: false });
@@ -407,6 +706,12 @@ export function validateProject(
     const schemaPath = path.join(schemasDir, schemaFile);
     const schemaParsed = safeParse(schemaPath, "json", violations, schemaFile);
     if (!schemaParsed.ok) return null;
+    if (schemaFile === "review-report.schema.json") {
+      const wholeCutSchemaPath = path.join(schemasDir, "whole-cut-semantic-review.schema.json");
+      const wholeCutSchemaParsed = safeParse(wholeCutSchemaPath, "json", violations, "whole-cut-semantic-review.schema.json");
+      if (!wholeCutSchemaParsed.ok) return null;
+      ajv.addSchema(wholeCutSchemaParsed.data as object);
+    }
     const validator = ajv.compile(
       buildSchemaVariant(schemaFile, schemaParsed.data as object, profile),
     );
@@ -502,13 +807,19 @@ export function validateProject(
           runSourceManifestFingerprintCheck(parsed.data, entry.artifactPath, violations);
           break;
         case "analysis_coverage_status":
-          runAnalysisCoverageStatusCheck(parsed.data, entry.artifactPath, violations);
+          runAnalysisCoverageStatusCheck(parsed.data, absProject, entry.artifactPath, violations);
+          break;
+        case "bgm_analysis_integrity":
+          runBgmAnalysisIntegrityCheck(parsed.data, entry.artifactPath, violations);
           break;
         case "audio_story_graph_integrity":
           runAudioStoryGraphIntegrityCheck(parsed.data, absProject, entry.artifactPath, violations);
           break;
         case "continuity_graph_integrity":
           runContinuityGraphIntegrityCheck(parsed.data, absProject, entry.artifactPath, violations);
+          break;
+        case "image_qc_report_gate":
+          runImageQcReportGateCheck(parsed.data, absProject, entry.artifactPath, violations);
           break;
         case "source_ledger_invariant":
           runSourceLedgerInvariantCheck(parsed.data, entry.artifactPath, violations);
@@ -563,29 +874,34 @@ export function validateProject(
 
   const transcriptsDir = path.join(absProject, "03_analysis/transcripts");
   if (fs.existsSync(transcriptsDir)) {
-    const validate = getValidator("transcript.schema.json");
-    if (validate) {
-      for (const file of fs.readdirSync(transcriptsDir)) {
-        if (!file.startsWith("TR_") || !file.endsWith(".json")) continue;
-        const relPath = `03_analysis/transcripts/${file}`;
-        const filePath = path.join(transcriptsDir, file);
-        const parsed = safeParse(filePath, "json", violations, relPath);
-        if (!parsed.ok) continue;
+    // ONE central transcript authority (Issue #35): the same JSON Schema +
+    // semantic/path invariants + supported-version + consuming-project
+    // binding that rhythm admission uses. Every .json file is checked —
+    // non-canonical filenames are reported, never silently skipped.
+    const expectedProjectId = readProjectIdFromBrief(absProject);
+    for (const file of fs.readdirSync(transcriptsDir)) {
+      if (!file.endsWith(".json")) continue;
+      const relPath = `03_analysis/transcripts/${file}`;
+      const filePath = path.join(transcriptsDir, file);
+      const parsed = safeParse(filePath, "json", violations, relPath);
+      if (!parsed.ok) continue;
 
-        const valid = validate(parsed.data);
-        artifactsChecked += 1;
-        if (!valid && validate.errors) {
-          for (const err of validate.errors) {
-            violations.push({
-              artifact: relPath,
-              rule: "schema",
-              message: `${err.instancePath || "/"} ${err.message}`,
-              details: err,
-            });
-          }
+      const check = validateTranscriptDoc(parsed.data, {
+        repoRoot,
+        fileName: file,
+        requireSupportedVersion: true,
+        expectedProjectId,
+      });
+      artifactsChecked += 1;
+      if (check.status === "unavailable" || !check.valid) {
+        for (const failure of check.failures) {
+          const separator = failure.indexOf(":");
+          violations.push({
+            artifact: relPath,
+            rule: separator > 0 ? failure.slice(0, separator) : "transcript_schema_invalid",
+            message: separator > 0 ? failure.slice(separator + 1) : failure,
+          });
         }
-
-        runTranscriptPathInvariants(parsed.data, file, relPath, violations);
       }
     }
   }
@@ -657,7 +973,7 @@ export function validateProjects(
   options: ValidateProjectOptions = {},
 ): ValidationBatchResult {
   const profile = options.profile ?? "standard";
-  const results = projectPaths.map((projectPath) => validateProject(projectPath, { profile }));
+  const results = projectPaths.map((projectPath) => validateProject(projectPath, { ...options, profile }));
 
   return {
     profile,
@@ -712,12 +1028,52 @@ function runReferentialIntegrity(
   const astItems = assets.items;
   if (!Array.isArray(segItems) || !Array.isArray(astItems)) return;
 
-  const segmentIds = new Set(segItems.map((item) => (item as Record<string, unknown>).segment_id as string));
+  const segmentAssets = new Map(
+    segItems.map((item) => {
+      const segment = item as Record<string, unknown>;
+      return [segment.segment_id as string, segment.asset_id as string] as const;
+    }),
+  );
+  const segmentIds = new Set(segmentAssets.keys());
   const assetIds = new Set(astItems.map((item) => (item as Record<string, unknown>).asset_id as string));
+  const sourceMapAssetIds = readSourceMapAssetIds(absProject);
+  const sourceMapExists = SUPPORTED_SOURCE_MAP_PATHS.some((relPath) =>
+    fs.existsSync(path.join(absProject, relPath))
+  );
   const doc = data as Record<string, unknown>;
   const candidates = doc?.candidates;
   if (!Array.isArray(candidates)) return;
 
+  for (const [segmentId, assetId] of segmentAssets) {
+    if (!assetIds.has(assetId)) {
+      violations.push({
+        artifact: "03_analysis/segments.json",
+        rule: "segment_asset_id_exists",
+        message: `Segment "${segmentId}" references asset_id "${assetId}" not found in assets.json`,
+      });
+    }
+    if (sourceMapExists && !sourceMapAssetIds.has(assetId)) {
+      violations.push({
+        artifact: "03_analysis/segments.json",
+        rule: "segment_asset_id_in_source_map",
+        message: `Segment "${segmentId}" references asset_id "${assetId}" not found in source_map.json`,
+      });
+    }
+  }
+
+  if (sourceMapExists) {
+    for (const assetId of assetIds) {
+      if (!sourceMapAssetIds.has(assetId)) {
+        violations.push({
+          artifact: "03_analysis/assets.json",
+          rule: "asset_id_in_source_map",
+          message: `Asset "${assetId}" is not present in source_map.json`,
+        });
+      }
+    }
+  }
+
+  const seenCandidateIds = new Set<string>();
   for (const item of candidates) {
     const candidate = item as Record<string, unknown>;
     if (!segmentIds.has(candidate.segment_id as string)) {
@@ -733,6 +1089,74 @@ function runReferentialIntegrity(
         rule: "asset_id_exists",
         message: `Candidate references asset_id "${candidate.asset_id}" not found in assets.json`,
       });
+    }
+    const segmentAssetId = segmentAssets.get(candidate.segment_id as string);
+    if (segmentAssetId && candidate.asset_id !== segmentAssetId) {
+      violations.push({
+        artifact: "04_plan/selects_candidates.yaml",
+        rule: "candidate_segment_asset_match",
+        message: `Candidate ${candidate.candidate_id ?? candidate.segment_id} asset_id "${candidate.asset_id}" does not match segment asset_id "${segmentAssetId}"`,
+      });
+    }
+    const candidateId = candidate.candidate_id;
+    if (typeof candidateId === "string") {
+      if (seenCandidateIds.has(candidateId)) {
+        violations.push({
+          artifact: "04_plan/selects_candidates.yaml",
+          rule: "candidate_id_unique",
+          message: `Duplicate candidate_id "${candidateId}"`,
+        });
+      }
+      seenCandidateIds.add(candidateId);
+    }
+  }
+
+  const blueprintPath = path.join(absProject, "04_plan/edit_blueprint.yaml");
+  if (!fs.existsSync(blueprintPath)) return;
+  const blueprintParsed = safeParse(blueprintPath, "yaml", [], "04_plan/edit_blueprint.yaml");
+  if (!blueprintParsed.ok) return;
+  const beats = (blueprintParsed.data as { beats?: Array<Record<string, unknown>> }).beats;
+  if (!Array.isArray(beats)) return;
+  const candidateByRef = new Map<string, Record<string, unknown>>();
+  for (const item of candidates) {
+    const candidate = item as Record<string, unknown>;
+    for (const ref of [candidate.candidate_id, candidate.segment_id]) {
+      if (typeof ref === "string" && !candidateByRef.has(ref)) candidateByRef.set(ref, candidate);
+    }
+  }
+  for (const beat of beats) {
+    const beatId = beat.id;
+    const plan = beat.candidate_plan as Record<string, unknown> | undefined;
+    const refs = [
+      plan?.primary_candidate_ref,
+      ...(Array.isArray(plan?.fallback_candidate_refs) ? plan.fallback_candidate_refs : []),
+    ];
+    for (const ref of refs) {
+      if (typeof ref !== "string") continue;
+      const candidate = candidateByRef.get(ref);
+      if (!candidate) {
+        violations.push({
+          artifact: "04_plan/edit_blueprint.yaml",
+          rule: "blueprint_candidate_ref_exists",
+          message: `Beat "${beatId}" references candidate "${ref}" not found in selects_candidates.yaml`,
+        });
+        continue;
+      }
+      if (candidate.role === "reject") {
+        violations.push({
+          artifact: "04_plan/edit_blueprint.yaml",
+          rule: "blueprint_candidate_ref_non_reject",
+          message: `Beat "${beatId}" references rejected candidate "${ref}"`,
+        });
+      }
+      const eligibleBeats = candidate.eligible_beats;
+      if (Array.isArray(eligibleBeats) && !eligibleBeats.includes(beatId)) {
+        violations.push({
+          artifact: "04_plan/edit_blueprint.yaml",
+          rule: "blueprint_candidate_ref_eligible",
+          message: `Beat "${beatId}" references candidate "${ref}" whose eligible_beats do not include the beat`,
+        });
+      }
     }
   }
 }
@@ -897,6 +1321,10 @@ function runTimelineSemanticChecks(
   const clipRefs = collectTimelineClips(timeline);
   const seenClipIds = new Set<string>();
   const sourceMapAssetIds = readSourceMapAssetIds(absProject);
+  const sourceMapExists = SUPPORTED_SOURCE_MAP_PATHS.some((relPath) =>
+    fs.existsSync(path.join(absProject, relPath))
+  );
+  const segmentAssets = readSegmentAssetMap(absProject);
   let inferredDurationFrames = 0;
 
   for (const { trackType, trackId, clip } of clipRefs) {
@@ -919,8 +1347,30 @@ function runTimelineSemanticChecks(
       clip.role === "title" &&
       typeof clip.segment_id === "string" &&
       clip.segment_id.startsWith("TXT_");
+    const segmentId = clip.segment_id;
+    const isManualBgm =
+      trackType === "audio" &&
+      clip.role === "bgm" &&
+      typeof segmentId === "string" &&
+      segmentId.startsWith("manual:");
+    if (!isAuthoredOverlay && !isManualBgm && typeof segmentId === "string") {
+      const segmentAssetId = segmentAssets.get(segmentId);
+      if (!segmentAssetId) {
+        violations.push({
+          artifact: relPath,
+          rule: "timeline_segment_id_exists",
+          message: `Track ${trackType}/${trackId} clip ${clipId}: segment_id "${segmentId}" is not present in segments.json`,
+        });
+      } else if (typeof assetId === "string" && assetId !== segmentAssetId) {
+        violations.push({
+          artifact: relPath,
+          rule: "timeline_segment_asset_match",
+          message: `Track ${trackType}/${trackId} clip ${clipId}: asset_id "${assetId}" does not match segment asset_id "${segmentAssetId}"`,
+        });
+      }
+    }
     if (
-      sourceMapAssetIds.size > 0 &&
+      sourceMapExists &&
       typeof assetId === "string" &&
       !isAuthoredOverlay &&
       !sourceMapAssetIds.has(assetId)
@@ -1019,7 +1469,7 @@ function runTimelineSemanticChecks(
 
 function readSourceMapAssetIds(absProject: string): Set<string> {
   const assetIds = new Set<string>();
-  for (const relPath of ["02_media/source_map.json", "03_analysis/source_map.json"]) {
+  for (const relPath of SUPPORTED_SOURCE_MAP_PATHS) {
     const sourceMapPath = path.join(absProject, relPath);
     if (!fs.existsSync(sourceMapPath)) continue;
     const parsed = safeParse(sourceMapPath, "json", [], relPath);
@@ -1033,6 +1483,21 @@ function readSourceMapAssetIds(absProject: string): Set<string> {
     }
   }
   return assetIds;
+}
+
+function readSegmentAssetMap(absProject: string): Map<string, string> {
+  const segmentsPath = path.join(absProject, "03_analysis/segments.json");
+  if (!fs.existsSync(segmentsPath)) return new Map();
+  const parsed = safeParse(segmentsPath, "json", [], "03_analysis/segments.json");
+  if (!parsed.ok) return new Map();
+  const items = (parsed.data as Record<string, unknown>).items;
+  if (!Array.isArray(items)) return new Map();
+  return new Map(items.flatMap((item) => {
+    const segment = item as Record<string, unknown>;
+    return typeof segment.segment_id === "string" && typeof segment.asset_id === "string"
+      ? [[segment.segment_id, segment.asset_id] as const]
+      : [];
+  }));
 }
 
 function runEditorialPipelineStatusBlockers(
@@ -1129,38 +1594,6 @@ function runSegmentSrcTimeCheck(
   }
 }
 
-function runTranscriptPathInvariants(
-  data: unknown,
-  filename: string,
-  relPath: string,
-  violations: Violation[],
-): void {
-  const doc = data as Record<string, unknown>;
-  const transcriptRef = doc?.transcript_ref as string | undefined;
-  const assetId = doc?.asset_id as string | undefined;
-  const filenameMatch = filename.match(/^TR_(.+)\.json$/);
-  if (!filenameMatch) return;
-
-  const expectedAssetId = filenameMatch[1];
-  const expectedTranscriptRef = `TR_${expectedAssetId}`;
-
-  if (transcriptRef && transcriptRef !== expectedTranscriptRef) {
-    violations.push({
-      artifact: relPath,
-      rule: "transcript_ref_matches_filename",
-      message: `transcript_ref "${transcriptRef}" does not match filename expectation "${expectedTranscriptRef}"`,
-    });
-  }
-
-  if (assetId && assetId !== expectedAssetId) {
-    violations.push({
-      artifact: relPath,
-      rule: "asset_id_matches_filename",
-      message: `asset_id "${assetId}" does not match filename expectation "${expectedAssetId}"`,
-    });
-  }
-}
-
 function runSourceManifestFingerprintCheck(
   data: unknown,
   artifactPath: string,
@@ -1178,6 +1611,7 @@ function runSourceManifestFingerprintCheck(
 
 function runAnalysisCoverageStatusCheck(
   data: unknown,
+  absProject: string,
   artifactPath: string,
   violations: Violation[],
 ): void {
@@ -1186,6 +1620,29 @@ function runAnalysisCoverageStatusCheck(
     violations.push({
       artifact: artifactPath,
       rule: "analysis_coverage_status",
+      message,
+    });
+  }
+
+  const freshness = validateAnalysisCoverageFreshness(absProject);
+  for (const message of freshness.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "analysis_coverage_freshness",
+      message,
+    });
+  }
+}
+
+function runBgmAnalysisIntegrityCheck(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  for (const message of validateBgmAnalysisContract(data)) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "bgm_analysis_integrity",
       message,
     });
   }
@@ -1249,6 +1706,44 @@ function runContinuityGraphIntegrityCheck(
       artifact: artifactPath,
       rule: "continuity_graph_integrity",
       message,
+    });
+  }
+}
+
+function runImageQcReportGateCheck(
+  data: unknown,
+  absProject: string,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const integrity = validateImageQcReportIntegrity(data, {
+    projectDir: absProject,
+    verifier: "canonical",
+  });
+  for (const message of integrity.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "image_qc_report_integrity",
+      message,
+    });
+  }
+
+  const report = data as { assets?: Array<{ asset_id?: unknown; status?: unknown }> };
+  for (const asset of report.assets ?? []) {
+    if (asset.status !== "rejected") continue;
+    const assetId = typeof asset.asset_id === "string" ? asset.asset_id : "unknown";
+    violations.push({
+      artifact: artifactPath,
+      rule: "compile_gate",
+      message: `image_qc_report: asset ${assetId} rejected by the image QC gate and cannot be compiled`,
+    });
+  }
+  const gateReason = imageQcCompileGateReason(data as Parameters<typeof imageQcCompileGateReason>[0]);
+  if (gateReason && !(report.assets ?? []).some((asset) => asset.status === "rejected")) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "compile_gate",
+      message: `image_qc_report: ${gateReason}`,
     });
   }
 }

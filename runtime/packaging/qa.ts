@@ -7,7 +7,15 @@
  * completeness.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 import type { AudioMixReport } from "../audio/mixer.js";
+import {
+  audioDeliveryProfileContentHash,
+  loadAudioDeliveryProfile,
+} from "../audio/delivery-profile.js";
 import type { MusicCuesDoc } from "../audio/music-cues.js";
 import type { SfxCuesDoc } from "../audio/sfx-cues.js";
 import { equivalentFrameRates } from "../../editor/shared/rational-timebase.js";
@@ -23,6 +31,25 @@ import {
   validateFinalCaptionInvariants,
 } from "../caption/final-invariants.js";
 import type { CaptionDraftEntry } from "../caption/editorial.js";
+import {
+  buildLoudnormPass1Args,
+  parseLoudnormOutput,
+  type LoudnormMeasurement,
+} from "../audio/mastering.js";
+import {
+  hashAudioRenderPlan,
+  hashFile,
+  type AudioRenderPlan,
+} from "../audio/render-plan.js";
+import {
+  hashMusicMasterMvpPolicy,
+  buildMusicMasterMvpPass1Args,
+  buildMusicMasterMvpPass1Filter,
+  buildMusicMasterMvpPass2Filter,
+  buildMusicMasterMvpToneFilterChain,
+  MUSIC_MASTER_MVP_POLICY,
+  type MusicMasterMvpMeasurement,
+} from "../audio/music-master-mvp.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -30,6 +57,13 @@ export interface QaCheckResult {
   name: string;
   passed: boolean;
   details: string;
+}
+
+export interface ExpectedAudioDeliveryProfileRef {
+  ref?: string;
+  version?: string;
+  source_hash?: string;
+  profile_hash?: string;
 }
 
 export type ResolutionCheckStatus = "passed" | "failed" | "skipped" | "blocked";
@@ -451,20 +485,35 @@ export function checkLoudnessTarget(
   truePeakDbtp: number,
 ): QaCheckResult {
   const errors: string[] = [];
+  if (!Number.isFinite(integratedLufs)) {
+    errors.push("Integrated LUFS evidence is unavailable");
+  }
+  if (!Number.isFinite(truePeakDbtp)) {
+    errors.push("True peak dBTP evidence is unavailable");
+  }
+  if (errors.length > 0) {
+    return {
+      name: "loudness_target_valid",
+      passed: false,
+      details: errors.join("; "),
+    };
+  }
+  const measuredIntegrated = integratedLufs;
+  const measuredTruePeak = truePeakDbtp;
 
-  if (integratedLufs < -17.0) {
+  if (measuredIntegrated < -17.0) {
     errors.push(
-      `Integrated LUFS ${integratedLufs.toFixed(1)} below -17.0`,
+      `Integrated LUFS ${measuredIntegrated.toFixed(1)} below -17.0`,
     );
   }
-  if (integratedLufs > -15.0) {
+  if (measuredIntegrated > -15.0) {
     errors.push(
-      `Integrated LUFS ${integratedLufs.toFixed(1)} above -15.0`,
+      `Integrated LUFS ${measuredIntegrated.toFixed(1)} above -15.0`,
     );
   }
-  if (truePeakDbtp > -1.5) {
+  if (measuredTruePeak > -1.5) {
     errors.push(
-      `True peak ${truePeakDbtp.toFixed(1)} dBTP exceeds -1.5 dBTP`,
+      `True peak ${measuredTruePeak.toFixed(1)} dBTP exceeds -1.5 dBTP`,
     );
   }
 
@@ -473,12 +522,104 @@ export function checkLoudnessTarget(
     passed: errors.length === 0,
     details:
       errors.length === 0
-        ? `Loudness OK: ${integratedLufs.toFixed(1)} LUFS, ${truePeakDbtp.toFixed(1)} dBTP`
+        ? `Loudness OK: ${measuredIntegrated.toFixed(1)} LUFS, ${measuredTruePeak.toFixed(1)} dBTP`
         : errors.join("; "),
   };
 }
 
+export function checkLoudnessTargetForAudioPolicy(
+  preserveAudioLevel: boolean,
+  integratedLufs: number,
+  truePeakDbtp: number,
+): QaCheckResult {
+  return preserveAudioLevel
+    ? {
+        name: "loudness_target_valid",
+        passed: true,
+        details: "not_applicable: approved preserve audio level is explicitly required",
+      }
+    : checkLoudnessTarget(integratedLufs, truePeakDbtp);
+}
+
 // ── Audio Mix Policy ──────────────────────────────────────────────
+
+function checkAudioDeliveryProfileEvidence(
+  report: AudioMixReport,
+  expectedRef: ExpectedAudioDeliveryProfileRef | string,
+  profileRootDir?: string,
+): string[] {
+  const errors: string[] = [];
+  const expected = typeof expectedRef === "string" ? { ref: expectedRef } : expectedRef;
+  const reported = report.audio_delivery_profile;
+  if (!reported) return ["shared plan profile reference is missing from audio-mix-report"];
+  const refPath = expected.ref
+    ? path.isAbsolute(expected.ref)
+      ? expected.ref
+      : path.resolve(profileRootDir ?? process.cwd(), expected.ref)
+    : reported.path;
+  let loaded: ReturnType<typeof loadAudioDeliveryProfile>;
+  try {
+    loaded = loadAudioDeliveryProfile(refPath);
+  } catch (error) {
+    errors.push(`audio delivery profile cannot be loaded: ${error instanceof Error ? error.message : String(error)}`);
+    return errors;
+  }
+  const expectedFields: Array<[string, unknown, unknown]> = [
+    ["profile path", loaded.path, path.resolve(reported.path)],
+    ["profile_id", loaded.profile.profile_id, reported.profile_id],
+    ["profile_version", loaded.profile.profile_version, reported.profile_version],
+    ["platform", loaded.profile.platform, reported.platform],
+    ["surface", loaded.profile.surface, reported.surface],
+    ["release_scope", loaded.profile.release_scope, reported.release_scope],
+    ["delivery_variant", loaded.profile.delivery_variant, reported.delivery_variant],
+    ["source_hash", loaded.hash, reported.source_hash],
+    ["profile_hash", audioDeliveryProfileContentHash(loaded.profile), reported.profile_hash],
+    ["content_hash", loaded.hash, reported.content_hash],
+  ];
+  for (const [label, expectedValue, actualValue] of expectedFields) {
+    if (expectedValue !== actualValue) errors.push(`audio delivery profile ${label} expected=${String(expectedValue)} actual=${String(actualValue)}`);
+  }
+  if (expected.version && expected.version !== loaded.profile.profile_version) {
+    errors.push(`audio delivery profile version reference expected=${expected.version} actual=${loaded.profile.profile_version}`);
+  }
+  if (expected.source_hash && expected.source_hash !== loaded.hash) {
+    errors.push(`audio delivery profile source_hash reference expected=${expected.source_hash} actual=${loaded.hash}`);
+  }
+  if (expected.profile_hash && expected.profile_hash !== audioDeliveryProfileContentHash(loaded.profile)) {
+    errors.push(`audio delivery profile profile_hash reference expected=${expected.profile_hash} actual=${audioDeliveryProfileContentHash(loaded.profile)}`);
+  }
+  if (loaded.profile.status !== "verified") {
+    errors.push(`audio delivery profile status=${loaded.profile.status}; human HOLD remains required`);
+  }
+  if (reported.selection_status !== "verified" || reported.freshness !== "current") {
+    errors.push(`audio delivery profile selection is ${reported.selection_status}/${reported.freshness}; human HOLD remains required`);
+  }
+
+  const encoded = report.encoded_result;
+  if (!encoded) {
+    errors.push("encoded-result audio evidence is required for profile-only package QA");
+    return errors;
+  }
+  if (encoded.status !== "verified") errors.push(`encoded-result status=${encoded.status}; package QA is on HOLD`);
+  if (encoded.loudness.status !== "measured"
+    || encoded.loudness.integrated_lufs === null
+    || encoded.loudness.true_peak_dbtp === null) {
+    errors.push("encoded-result integrated loudness and true peak evidence are unavailable; package QA is on HOLD");
+  }
+  if (!encoded.container.format_name
+    || !encoded.audio_stream.codec_name
+    || encoded.audio_stream.sample_rate_hz === null
+    || encoded.audio_stream.channels === null) {
+    errors.push("encoded-result container/codec/sample-rate/channel evidence is incomplete");
+  }
+  if (encoded.duration_and_sync.status === "unavailable") {
+    errors.push("encoded-result duration/sync evidence is unavailable");
+  }
+  if (reported.human_preview_required && encoded.human_audition.status !== "accepted") {
+    errors.push("profile human platform audition is not accepted");
+  }
+  return errors;
+}
 
 /**
  * Validate that engine-render audio used the production mixing contract.
@@ -491,6 +632,8 @@ export function checkAudioMixPolicy(
   requireDialogueFirst = false,
   expectedMusicCues?: MusicCuesDoc | null,
   expectedSfxCues?: SfxCuesDoc | null,
+  expectedAudioProfileRef?: ExpectedAudioDeliveryProfileRef | string | null,
+  profileRootDir?: string,
 ): QaCheckResult {
   const errors: string[] = [];
   if (!report) {
@@ -500,9 +643,14 @@ export function checkAudioMixPolicy(
       details: "audio-mix-report.json is missing or unreadable",
     };
   }
+  if (report.sfx_hold) {
+    errors.push(`formal SFX is on HOLD: ${report.sfx_hold.reason}`);
+  }
 
+  const requireProfile = Boolean(expectedAudioProfileRef);
   const requireSharedPlan = expectedMusicCues?.version === "2.0.0"
-    || expectedSfxCues?.version === "sfx-cues/v1";
+    || expectedSfxCues?.version === "sfx-cues/v1"
+    || requireProfile;
   if (requireSharedPlan && report.version !== "audio-mix-report/v2") {
     errors.push(`version expected=audio-mix-report/v2 actual=${String(report.version)}`);
   } else if (
@@ -516,14 +664,33 @@ export function checkAudioMixPolicy(
     errors.push(`has_bgm expected=${expectedHasBgm} actual=${report.has_bgm}`);
   }
   const originalPassthrough = report.strategy === "original_passthrough_v1";
+  const preservingMusicMaster = report.music_master?.audio_decision === "preserve";
+  const independentMusicMaster = report.strategy === "shared_audio_render_plan_v1"
+    && report.music_master !== undefined;
   if (originalPassthrough && report.final_mastering?.applied !== false) {
     errors.push("original passthrough must record final_mastering.applied=false");
   }
-  if (!originalPassthrough && report.final_mastering?.loudness_target_lufs !== -16) {
+  if (!originalPassthrough && !preservingMusicMaster && report.final_mastering?.loudness_target_lufs !== -16) {
     errors.push("final loudness target must be -16 LUFS");
   }
-  if (!originalPassthrough && report.final_mastering?.true_peak_target_dbtp !== -1.5) {
+  if (!originalPassthrough && !preservingMusicMaster && report.final_mastering?.true_peak_target_dbtp !== -1.5) {
     errors.push("final true-peak target must be -1.5 dBTP");
+  }
+  if (requireSharedPlan && report.strategy === "shared_audio_render_plan_v1") {
+    if (!preservingMusicMaster
+      && (report.mastering_count !== 1 || report.final_mastering?.applied !== true || report.final_mastering.stage !== "after_mix")) {
+      errors.push("shared plan report must record exactly one after_mix mastering pass");
+    }
+  }
+  if (preservingMusicMaster && (
+    report.mastering_count !== 0
+    || report.final_mastering?.applied !== false
+    || report.final_mastering.stage !== "not_applied"
+  )) {
+    errors.push("music_master preserve report must record zero mastering passes and not_applied");
+  }
+  if (requireProfile) {
+    errors.push(...checkAudioDeliveryProfileEvidence(report, expectedAudioProfileRef!, profileRootDir));
   }
 
   if (expectedHasBgm) {
@@ -620,8 +787,10 @@ export function checkAudioMixPolicy(
   } else if (
     report.strategy !== "dialogue_only_mastering_v1"
     && !originalPassthrough
+    && !independentMusicMaster
     && !(expectedSfxCues?.version === "sfx-cues/v1"
       && report.strategy === "shared_audio_render_plan_v1")
+    && !(requireProfile && report.strategy === "shared_audio_render_plan_v1")
   ) {
     errors.push(`strategy expected=dialogue_only_mastering_v1 actual=${report.strategy}`);
   }
@@ -643,10 +812,612 @@ export function checkAudioMixPolicy(
   };
 }
 
+/**
+ * M2 package gate for the independent full-song source. The render executor
+ * owns media production; this gate proves that package QA did not silently
+ * replace the plan, source, processing graph, or final mux receipt.
+ */
+export function checkMusicMasterAudioPlan(
+  plan: AudioRenderPlan | undefined,
+  report: AudioMixReport | null | undefined,
+  options: {
+    projectDir?: string;
+    finalMixPath?: string;
+    masteredMp3Path?: string;
+    finalVideoPath?: string;
+    /** Skip live media remeasurement for projection-only callers. */
+    verifyBoundMedia?: boolean;
+  } = {},
+): QaCheckResult {
+  const errors: string[] = [];
+  if (!plan || plan.strategy !== "music_master" || !plan.music_master) {
+    errors.push("music_master package requires a canonical music_master AudioRenderPlan");
+  }
+  if (!report) {
+    errors.push("music_master package requires an audio-mix-report receipt");
+  }
+  if (errors.length > 0) return musicMasterCheckResult(errors);
+
+  const expected = plan!.music_master!;
+  if (report!.version !== "audio-mix-report/v2"
+    || report!.strategy !== "shared_audio_render_plan_v1") {
+    errors.push("music_master package receipt must be audio-mix-report/v2 shared_audio_render_plan_v1");
+  }
+  if (report!.project_id !== plan!.project_id) {
+    errors.push(`music_master receipt project mismatch expected=${plan!.project_id} actual=${String(report!.project_id)}`);
+  }
+  if (report!.plan_hash !== hashAudioRenderPlan(plan!)) {
+    errors.push(`music_master receipt plan_hash mismatch expected=${hashAudioRenderPlan(plan!)} actual=${String(report!.plan_hash)}`);
+  }
+  const receipt = report!.music_master;
+  if (!receipt) {
+    errors.push("music_master package receipt is missing the music_master source receipt");
+  } else {
+    let boundSourceMeasurement: LoudnormMeasurement | null = null;
+    let boundFinalMixMeasurement: LoudnormMeasurement | null = null;
+    let boundFinalVideoMeasurement: LoudnormMeasurement | null = null;
+    for (const [label, expectedValue, actualValue] of [
+      ["source", expected.source, receipt.source],
+      ["audio_decision", expected.audio_decision, receipt.audio_decision],
+      ["input_audio_hash", expected.input_audio_hash, receipt.input_audio_hash],
+      ["processing_graph", expected.processing_graph, receipt.processing_graph],
+      ["codec", expected.codec, receipt.codec],
+    ] as Array<[string, unknown, unknown]>) {
+      if (stableJson(expectedValue) !== stableJson(actualValue)) {
+        errors.push(`music_master ${label} identity mismatch`);
+      }
+    }
+    if (receipt.source.source_content_hash !== expected.source.source_content_hash
+      || receipt.output_audio_hash !== report!.output?.content_hash) {
+      errors.push("music_master input/output audio hash is not bound to the canonical plan/report");
+    }
+    if (report!.input_hashes?.music_master?.asset_id !== expected.source.asset_id
+      || report!.input_hashes.music_master.content_hash !== expected.source.source_content_hash
+      || report!.input_hashes.music_master.size_bytes !== expected.source.source_size_bytes) {
+      errors.push("music_master input_hashes source identity mismatch");
+    }
+    if (!report!.output) {
+      errors.push("music_master package receipt output identity is missing");
+    }
+    if (expected.audio_decision === "preserve"
+      && (report!.mastering_count !== 0 || report!.final_mastering.applied !== false
+        || report!.final_mastering.stage !== "not_applied"
+        || receipt.processing_graph.operations.includes("shared_final_mastering"))) {
+      errors.push("music_master preserve cannot claim mastering or a mastering processing graph");
+    }
+    if (expected.audio_decision === "mastering"
+      && (report!.mastering_count !== 1 || report!.final_mastering.applied !== true
+        || report!.final_mastering.stage !== "after_mix")) {
+      errors.push("music_master mastering must record exactly one after_mix pass");
+    }
+    if (expected.audio_decision === "mastering") {
+      const mastering = receipt.mastering;
+      if (!mastering) {
+        errors.push("music_master mastering receipt is missing the fixed Issue #38 execution evidence");
+      } else {
+        if (mastering.plan_hash !== hashAudioRenderPlan(plan!)) {
+          errors.push("music_master mastering receipt plan_hash is stale or substituted");
+        }
+        if (mastering.policy_hash !== expected.policy_hash
+          || !expected.mastering_policy
+          || hashMusicMasterMvpPolicy(expected.mastering_policy) !== hashMusicMasterMvpPolicy()) {
+          errors.push("music_master mastering receipt policy hash is not bound to the fixed Issue #38 policy");
+        }
+        appendMvpMeasurementIntegrity(errors, "mastering pass1", mastering.pass1);
+        appendMvpMeasurementIntegrity(errors, "mastering pass2", mastering.pass2);
+        appendMvpMeasurementIntegrity(errors, "mastering MP3", mastering.mp3);
+        if (isFiniteMvpMeasurement(mastering.pass1)) {
+          const expectedGraph = expectedMusicMasterMvpGraph(mastering.pass1.raw);
+          if (stableJson(mastering.execution_graph) !== stableJson(expectedGraph)) {
+            errors.push("music_master mastering execution graph is stale, substituted, or non-canonical");
+          }
+        }
+        if (isFiniteMvpMeasurement(mastering.pass2)
+          && (!receipt.measurements.output
+            || !isFiniteLoudnormMeasurement(receipt.measurements.output)
+            || stableJson(mastering.pass2.raw) !== stableJson(receipt.measurements.output))) {
+          errors.push("music_master mastering pass2 measurement is not the recorded final WAV measurement");
+        }
+        const wavEvidence = mastering.deliverables.wav24;
+        if (wavEvidence.path !== expectedPlanArtifact(plan!, "final_mix")) {
+          errors.push("music_master mastering WAV path is not the canonical final_mix artifact");
+        }
+        if (wavEvidence.content_hash !== report!.output?.content_hash) {
+          errors.push("music_master mastering WAV hash is not bound to the report output hash");
+        }
+        const mp3Path = options.masteredMp3Path
+          ?? (options.finalMixPath
+            ? path.join(path.dirname(options.finalMixPath), expectedPlanArtifact(plan!, "mastered_mp3"))
+            : undefined);
+        if (wavEvidence.bit_depth !== 24 || wavEvidence.codec !== "pcm_s24le"
+          || wavEvidence.sample_rate_hz !== 48_000 || wavEvidence.channels !== 2) {
+          errors.push("music_master mastering WAV evidence is not a 24-bit 48k stereo PCM deliverable");
+        }
+        if (mastering.deliverables.mp3_320.path !== expectedPlanArtifact(plan!, "mastered_mp3")
+          || mastering.deliverables.mp3_320.codec !== "mp3"
+          || mastering.deliverables.mp3_320.bit_rate_bps !== 320_000
+          || mastering.deliverables.mp3_320.sample_rate_hz !== 48_000
+          || mastering.deliverables.mp3_320.channels !== 2) {
+          errors.push("music_master mastering MP3 evidence is not the canonical 320kbps 48k stereo deliverable");
+        }
+        if (!isWithinMusicMasterMvpTarget(mastering.pass2, MUSIC_MASTER_MVP_POLICY)
+          || !isWithinMusicMasterMvpTarget(mastering.mp3, MUSIC_MASTER_MVP_POLICY)) {
+          errors.push("music_master mastering WAV/MP3 output is outside -13.3 LUFS +/-0.5 or true peak <= -1.0 dBTP");
+        }
+        if (options.verifyBoundMedia !== false) {
+          const sourcePath = resolveMusicMasterSourcePath(options.projectDir, expected.source.source_ref);
+          if (!sourcePath || !fs.existsSync(sourcePath)) {
+            errors.push("HOLD: Issue #38 pass1 source cannot be rebound for independent verification");
+          } else {
+            const boundPass1 = remeasureMusicMasterMvpPass1(sourcePath, expected.source.source_range_us);
+            if (!boundPass1) {
+              errors.push("HOLD: Issue #38 pass1 measurement could not be independently reproduced");
+            } else {
+              appendMeasurementMismatch(errors, "music_master mastering pass1", boundPass1, mastering.pass1.raw);
+            }
+          }
+          if (!options.finalMixPath || !fs.existsSync(options.finalMixPath)) {
+            errors.push("HOLD: Issue #38 mastered WAV cannot be rebound");
+          } else {
+            if (hashFile(options.finalMixPath) !== wavEvidence.content_hash) {
+              errors.push("music_master mastering WAV bytes do not match the receipt hash");
+            }
+            const wavProbe = probeMusicMasterMvpAudio(options.finalMixPath);
+            if (!wavProbe || wavProbe.codec !== "pcm_s24le" || wavProbe.sample_rate_hz !== 48_000
+              || wavProbe.channels !== 2 || wavProbe.bit_depth !== 24) {
+              errors.push("music_master mastering WAV ffprobe evidence is missing or mismatched");
+            }
+            const boundPass2 = remeasureBoundAudio(options.finalMixPath, plan!.final_mastering);
+            if (!boundPass2) {
+              errors.push("HOLD: Issue #38 mastered WAV loudness could not be independently remeasured");
+            } else {
+              appendMeasurementMismatch(errors, "music_master mastering pass2", boundPass2, mastering.pass2.raw);
+            }
+          }
+          if (!mp3Path || !fs.existsSync(mp3Path)) {
+            errors.push("HOLD: Issue #38 320kbps MP3 deliverable is missing");
+          } else {
+            const mp3Evidence = mastering.deliverables.mp3_320;
+            if (hashFile(mp3Path) !== mp3Evidence.content_hash) {
+              errors.push("music_master mastering MP3 bytes do not match the receipt hash");
+            }
+            const mp3Probe = probeMusicMasterMvpAudio(mp3Path);
+            if (!mp3Probe || mp3Probe.codec !== "mp3" || mp3Probe.sample_rate_hz !== 48_000
+              || mp3Probe.channels !== 2 || mp3Probe.bit_rate_bps !== 320_000) {
+              errors.push("music_master mastering MP3 ffprobe evidence is missing or mismatched");
+            }
+            const boundMp3 = remeasureBoundAudio(mp3Path, plan!.final_mastering);
+            if (!boundMp3) {
+              errors.push("HOLD: Issue #38 320kbps MP3 loudness could not be independently remeasured");
+            } else {
+              appendMeasurementMismatch(errors, "music_master mastering MP3", boundMp3, mastering.mp3.raw);
+            }
+          }
+        }
+      }
+    }
+    if (receipt.measurements.status !== "measured") {
+      errors.push(`HOLD: music_master source measurement status=${receipt.measurements.status}; no tolerance claim was made`);
+    } else {
+      const measured = receipt.measurements;
+      if (stableJson(measured.tolerance) !== stableJson(expected.measurement_tolerance)) {
+        errors.push("music_master source measurement tolerance does not exactly match the canonical plan");
+      }
+      if (!measured.input || !measured.output) {
+        errors.push("music_master measured receipt must contain input and output loudness evidence");
+      } else if (!isFiniteLoudnormMeasurement(measured.input)
+        || !isFiniteLoudnormMeasurement(measured.output)) {
+        errors.push("music_master source measurement raw values must all be finite");
+      } else {
+        const derived = deriveLoudnormDelta(measured.input, measured.output, 3);
+        if (!derived || !sameDelta(measured.delta, derived)) {
+          errors.push("music_master source measurement delta does not derive from raw input/output");
+        }
+
+        if (options.verifyBoundMedia !== false) {
+          const sourcePath = resolveMusicMasterSourcePath(options.projectDir, expected.source.source_ref);
+          if (!sourcePath || !fs.existsSync(sourcePath)) {
+            errors.push("HOLD: canonical music_master source could not be bound for loudness remeasurement");
+          } else if (!options.finalMixPath || !fs.existsSync(options.finalMixPath)) {
+            errors.push("HOLD: music_master final mix could not be bound for loudness remeasurement");
+          } else {
+            boundSourceMeasurement = remeasureBoundAudio(sourcePath, plan!.final_mastering);
+            boundFinalMixMeasurement = remeasureBoundAudio(options.finalMixPath, plan!.final_mastering);
+            if (!boundSourceMeasurement || !boundFinalMixMeasurement) {
+              errors.push("HOLD: bound music_master audio loudness analyzer is unavailable; package is not ready");
+            } else {
+              appendMeasurementMismatch(errors, "music_master source input", boundSourceMeasurement, measured.input);
+              appendMeasurementMismatch(errors, "music_master source output", boundFinalMixMeasurement, measured.output);
+            }
+          }
+        }
+      }
+      if (expected.audio_decision === "preserve") {
+        const sourceTolerance = expected.measurement_tolerance;
+        for (const label of [
+          "integrated_lufs_db",
+          "lra_lu",
+          "true_peak_dbtp",
+        ] as const) {
+          const delta = measured.delta[label];
+          if (delta === null || !Number.isFinite(delta)
+            || Math.abs(delta) > sourceTolerance[label]) {
+            errors.push(`music_master source measurement ${label} exceeds tolerance or is unavailable`);
+          }
+        }
+      }
+    }
+    const finalMux = receipt.final_mux;
+    if (!finalMux) {
+      errors.push("music_master package receipt is missing actual final mux evidence");
+    } else {
+      if (finalMux.operation !== "reencode" && finalMux.operation !== "stream_copy") {
+        errors.push("music_master final mux operation is not canonical");
+      }
+      if (finalMux.operation !== "reencode") {
+        errors.push("music_master public final mux must record the actual AAC reencode");
+      }
+      if (!finalMux.output_container_hash || !/^sha256:[a-f0-9]{64}$/.test(finalMux.output_container_hash)) {
+        errors.push("music_master final mux container hash is missing");
+      }
+      if (!finalMux.output_audio_hash || !/^sha256:[a-f0-9]{64}$/.test(finalMux.output_audio_hash)) {
+        errors.push("music_master final mux audio hash is missing");
+      }
+      if (!finalMux.measurements || finalMux.measurements.status !== "measured") {
+        errors.push(`HOLD: music_master final mux measurement status=${finalMux.measurements?.status ?? "missing"}`);
+      } else {
+        if (stableJson(finalMux.measurements.tolerance) !== stableJson(expected.measurement_tolerance)) {
+          errors.push("music_master final mux measurement tolerance does not exactly match the canonical plan");
+        }
+        const encoded = report!.encoded_result;
+        const encodedRaw = encoded?.loudness.raw;
+        if (encoded?.loudness.status !== "measured" || !encodedRaw
+          || !isFiniteLoudnormMeasurement(encodedRaw)) {
+          errors.push("music_master final mux raw encoded measurement is missing or non-finite");
+        } else {
+          if (options.finalVideoPath && fs.existsSync(options.finalVideoPath)) {
+            boundFinalVideoMeasurement = remeasureBoundAudio(options.finalVideoPath, plan!.final_mastering);
+            if (!boundFinalVideoMeasurement) {
+              errors.push("HOLD: bound final video loudness analyzer is unavailable; package is not ready");
+          } else {
+            appendMeasurementMismatch(errors, "music_master final video", boundFinalVideoMeasurement, encodedRaw);
+          }
+          if (expected.audio_decision === "mastering") {
+            const integrated = Number(encodedRaw.input_i);
+            const truePeak = Number(encodedRaw.input_tp);
+            if (!Number.isFinite(integrated) || !Number.isFinite(truePeak)
+              || Math.abs(integrated - MUSIC_MASTER_MVP_POLICY.loudnorm.target_lufs)
+                > MUSIC_MASTER_MVP_POLICY.loudnorm.loudness_tolerance_lufs
+              || truePeak > MUSIC_MASTER_MVP_POLICY.loudnorm.acceptance_true_peak_dbtp) {
+              errors.push("music_master final mux is outside the fixed Issue #38 loudness acceptance target");
+            }
+          }
+          } else if (options.verifyBoundMedia !== false) {
+            errors.push("HOLD: final video is required for bound loudness remeasurement");
+          }
+          const muxInput = boundSourceMeasurement ?? receipt.measurements.input;
+          const muxOutput = boundFinalVideoMeasurement ?? encodedRaw;
+          const derivedMuxDelta = muxInput && muxOutput
+            && isFiniteLoudnormMeasurement(muxInput)
+            && isFiniteLoudnormMeasurement(muxOutput)
+            ? deriveLoudnormDelta(muxInput, muxOutput)
+            : null;
+          if (!derivedMuxDelta || !sameDelta(finalMux.measurements.delta, derivedMuxDelta, 0.000001)) {
+            errors.push("music_master final mux measurement delta does not derive from bound raw input/output");
+          }
+        }
+        if (expected.audio_decision === "preserve") {
+          for (const label of [
+            "integrated_lufs_db",
+            "lra_lu",
+            "true_peak_dbtp",
+          ] as const) {
+            const delta = finalMux.measurements.delta[label];
+            if (delta === null || !Number.isFinite(delta)
+              || Math.abs(delta) > expected.measurement_tolerance[label]) {
+              errors.push(`music_master final mux ${label} exceeds tolerance`);
+            }
+          }
+        }
+      }
+      if (!report!.encoded_result) {
+        errors.push("music_master final mux is missing encoded output evidence");
+      } else {
+        if (finalMux.codec !== report!.encoded_result.audio_stream.codec_name) {
+          errors.push("music_master final mux codec does not match encoded output evidence");
+        }
+        if (finalMux.output_container_hash !== report!.encoded_result.content_hash) {
+          errors.push("music_master final mux container hash does not match encoded output evidence");
+        }
+      }
+    }
+  }
+
+  if (options.finalMixPath) {
+    if (!fs.existsSync(options.finalMixPath)) {
+      errors.push(`music_master final mix is missing: ${path.basename(options.finalMixPath)}`);
+    } else if (report!.output && hashFile(options.finalMixPath) !== report!.output.content_hash) {
+      errors.push("music_master final mix bytes do not match receipt output hash");
+    }
+  }
+  if (options.finalVideoPath && receipt?.final_mux?.output_container_hash) {
+    if (!fs.existsSync(options.finalVideoPath)) {
+      errors.push(`music_master final video is missing: ${path.basename(options.finalVideoPath)}`);
+    } else if (hashFile(options.finalVideoPath) !== receipt.final_mux.output_container_hash) {
+      errors.push("music_master final mux container hash does not match final video bytes");
+    }
+    if (receipt.final_mux.output_audio_hash) {
+      const decodedAudioHash = hashDecodedAudioStream(options.finalVideoPath);
+      if (decodedAudioHash === null) {
+        errors.push("HOLD: music_master final mux audio stream could not be decoded for hash verification");
+      } else if (decodedAudioHash !== receipt.final_mux.output_audio_hash) {
+        errors.push("music_master final mux audio stream hash does not match final video bytes");
+      }
+    }
+  }
+
+  return musicMasterCheckResult(errors);
+}
+
+function musicMasterCheckResult(errors: string[]): QaCheckResult {
+  return {
+    name: "music_master_audio_contract_valid",
+    passed: errors.length === 0,
+    details: errors.length === 0
+      ? "canonical music_master plan, source/output hashes, preserve/mastering decision, measurements, and final mux receipt are bound"
+      : errors.join("; "),
+  };
+}
+
+const LOUDNORM_MEASUREMENT_FIELDS = [
+  "input_i",
+  "input_tp",
+  "input_lra",
+  "input_thresh",
+  "target_offset",
+] as const;
+
+type MusicMasterDelta = {
+  integrated_lufs_db: number | null;
+  lra_lu: number | null;
+  true_peak_dbtp: number | null;
+};
+
+function isFiniteLoudnormMeasurement(
+  value: LoudnormMeasurement | null | undefined,
+): value is LoudnormMeasurement {
+  return Boolean(value) && LOUDNORM_MEASUREMENT_FIELDS.every((field) =>
+    Number.isFinite(Number(value![field]))
+  );
+}
+
+function deriveLoudnormDelta(
+  input: LoudnormMeasurement,
+  output: LoudnormMeasurement,
+  precision?: number,
+): MusicMasterDelta | null {
+  if (!isFiniteLoudnormMeasurement(input) || !isFiniteLoudnormMeasurement(output)) return null;
+  const subtract = (field: "input_i" | "input_lra" | "input_tp") => {
+    const delta = Number(output[field]) - Number(input[field]);
+    return precision === undefined ? delta : Number(delta.toFixed(precision));
+  };
+  return {
+    integrated_lufs_db: subtract("input_i"),
+    lra_lu: subtract("input_lra"),
+    true_peak_dbtp: subtract("input_tp"),
+  };
+}
+
+function sameDelta(
+  actual: MusicMasterDelta,
+  expected: MusicMasterDelta,
+  epsilon = 0,
+): boolean {
+  return [
+    [actual.integrated_lufs_db, expected.integrated_lufs_db],
+    [actual.lra_lu, expected.lra_lu],
+    [actual.true_peak_dbtp, expected.true_peak_dbtp],
+  ].every(([actualValue, expectedValue]) =>
+    actualValue !== null && expectedValue !== null
+      && Number.isFinite(actualValue)
+      && Number.isFinite(expectedValue)
+      && Math.abs(actualValue - expectedValue) <= epsilon
+  );
+}
+
+function appendMeasurementMismatch(
+  errors: string[],
+  label: string,
+  actual: LoudnormMeasurement,
+  claimed: LoudnormMeasurement,
+): void {
+  if (!isFiniteLoudnormMeasurement(actual) || !isFiniteLoudnormMeasurement(claimed)
+    || LOUDNORM_MEASUREMENT_FIELDS.some((field) =>
+      Math.abs(Number(actual[field]) - Number(claimed[field])) > 0.1
+    )) {
+    errors.push(`${label} loudness remeasurement does not match the receipt`);
+  }
+}
+
+function resolveMusicMasterSourcePath(projectDir: string | undefined, sourceRef: string): string | null {
+  if (!projectDir) return null;
+  const normalized = sourceRef.replace(/\\/g, "/");
+  if (path.isAbsolute(sourceRef) || normalized.startsWith("/")
+    || /^[A-Za-z]:\//.test(normalized) || normalized.split("/").includes("..")) {
+    return null;
+  }
+  const root = path.resolve(projectDir);
+  const resolved = path.resolve(root, sourceRef);
+  return resolved.startsWith(`${root}${path.sep}`) ? resolved : null;
+}
+
+function remeasureBoundAudio(
+  filePath: string,
+  policy: AudioRenderPlan["final_mastering"],
+): LoudnormMeasurement | null {
+  try {
+    const result = spawnSync("ffmpeg", buildLoudnormPass1Args(filePath, policy), {
+      encoding: "utf8",
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (result.error || (result.status !== 0 && !/"input_i"\s*:/.test(result.stderr ?? ""))) {
+      return null;
+    }
+    return parseLoudnormOutput(result.stderr ?? "");
+  } catch {
+    return null;
+  }
+}
+
+function isFiniteMvpMeasurement(
+  value: MusicMasterMvpMeasurement | null | undefined,
+): value is MusicMasterMvpMeasurement {
+  if (!value) {
+    return false;
+  }
+  return isFiniteLoudnormMeasurement(value.raw)
+    && [value.integrated_lufs, value.lra_lu, value.true_peak_dbtp].every(Number.isFinite)
+    && Math.abs(value.integrated_lufs - Number(value.raw.input_i)) <= 0.000001
+    && Math.abs(value.lra_lu - Number(value.raw.input_lra)) <= 0.000001
+    && Math.abs(value.true_peak_dbtp - Number(value.raw.input_tp)) <= 0.000001;
+}
+
+function appendMvpMeasurementIntegrity(
+  errors: string[],
+  label: string,
+  value: MusicMasterMvpMeasurement | null | undefined,
+): void {
+  if (!isFiniteMvpMeasurement(value)) {
+    errors.push(`music_master ${label} measurement is missing, substituted, or non-finite`);
+  }
+}
+
+function expectedPlanArtifact(
+  plan: AudioRenderPlan,
+  key: "final_mix" | "mastered_mp3",
+): string {
+  const value = plan.expected_artifacts[key];
+  return typeof value === "string" ? value : "__missing__";
+}
+
+function isWithinMusicMasterMvpTarget(
+  measurement: MusicMasterMvpMeasurement,
+  policy: typeof MUSIC_MASTER_MVP_POLICY,
+): boolean {
+  return isFiniteMvpMeasurement(measurement)
+    && Math.abs(measurement.integrated_lufs - policy.loudnorm.target_lufs)
+      <= policy.loudnorm.loudness_tolerance_lufs
+    && measurement.true_peak_dbtp <= policy.loudnorm.acceptance_true_peak_dbtp;
+}
+
+function remeasureMusicMasterMvpPass1(
+  sourcePath: string,
+  sourceRangeUs: { in_us: number; out_us: number },
+): LoudnormMeasurement | null {
+  try {
+    const result = spawnSync("ffmpeg", buildMusicMasterMvpPass1Args(
+      sourcePath,
+      sourceRangeUs,
+      MUSIC_MASTER_MVP_POLICY,
+    ), { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+    if (result.error || (result.status !== 0 && !/"input_i"\s*:/.test(result.stderr ?? ""))) {
+      return null;
+    }
+    return parseLoudnormOutput(result.stderr ?? "");
+  } catch {
+    return null;
+  }
+}
+
+function probeMusicMasterMvpAudio(filePath: string): {
+  codec: string | null;
+  sample_rate_hz: number | null;
+  channels: number | null;
+  bit_depth: number | null;
+  bit_rate_bps: number | null;
+} | null {
+  try {
+    const result = spawnSync("ffprobe", [
+      "-v", "error",
+      "-select_streams", "a:0",
+      "-show_entries", "stream=codec_name,sample_rate,channels,bits_per_sample,bits_per_raw_sample,bit_rate",
+      "-of", "json",
+      filePath,
+    ], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+    if (result.error || result.status !== 0) return null;
+    const stream = (JSON.parse(result.stdout ?? "{}").streams ?? [])[0] as Record<string, unknown> | undefined;
+    if (!stream) return null;
+    const finite = (value: unknown): number | null => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    return {
+      codec: typeof stream.codec_name === "string" ? stream.codec_name : null,
+      sample_rate_hz: finite(stream.sample_rate),
+      channels: finite(stream.channels),
+      bit_depth: finite(stream.bits_per_raw_sample ?? stream.bits_per_sample),
+      bit_rate_bps: finite(stream.bit_rate),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function expectedMusicMasterMvpGraph(pass1: LoudnormMeasurement) {
+  return {
+    version: "music-master-mvp-graph/v1",
+    stages: ["cleanup", "presence_air", "spatial_glue", "loudnorm_pass1", "loudnorm_pass2", "wav24", "mp3_320"],
+    tone_filter_chain: buildMusicMasterMvpToneFilterChain(MUSIC_MASTER_MVP_POLICY),
+    pass1_filter: buildMusicMasterMvpPass1Filter(MUSIC_MASTER_MVP_POLICY),
+    pass2_filter: buildMusicMasterMvpPass2Filter(pass1, MUSIC_MASTER_MVP_POLICY),
+    wav_codec: { codec: "pcm_s24le", bit_depth: 24, sample_rate_hz: 48_000, channels: 2 },
+    mp3_codec: { codec: "mp3", encoder: "libmp3lame", bit_rate_bps: 320_000, sample_rate_hz: 48_000, channels: 2 },
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right, "en"))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hashDecodedAudioStream(inputPath: string): string | null {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-audio-hash-"));
+  const rawPath = path.join(tempDir, "audio.pcm");
+  try {
+    execFileSync("ffmpeg", [
+      "-v", "error",
+      "-y",
+      "-i", inputPath,
+      "-map", "0:a:0",
+      "-f", "s16le",
+      "-ar", "48000",
+      "-ac", "2",
+      rawPath,
+    ], { stdio: "ignore" });
+    return hashFile(rawPath);
+  } catch {
+    return null;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 export function checkSfxMixPolicy(
   report: AudioMixReport | null | undefined,
   expectedSfxCues?: SfxCuesDoc | null,
 ): QaCheckResult {
+  if (report?.sfx_hold) {
+    return {
+      name: "sfx_mix_policy_valid",
+      passed: false,
+      details: `HOLD: formal SFX cannot pass packaging QA: ${report.sfx_hold.reason}`,
+    };
+  }
   if (!expectedSfxCues) {
     return {
       name: "sfx_mix_policy_valid",
@@ -712,6 +1483,47 @@ export function checkSfxMixPolicy(
         ["provenance_ref", cue.asset_pin.provenance_ref, actual.pins.provenance_ref],
       ] as Array<[string, unknown, unknown]>) {
         if (expected !== value) {
+          errors.push(`${cue.cue_id}.${label} expected=${String(expected)} actual=${String(value)}`);
+        }
+      }
+      if (
+        actual.pins.rights_status !== undefined
+        && actual.pins.rights_status !== "confirmed"
+        && actual.pins.rights_status !== "cleared"
+      ) {
+        errors.push(`${cue.cue_id} rights status is not selectable: ${actual.pins.rights_status}`);
+      }
+      if (
+        actual.pins.provenance_status !== undefined
+        && actual.pins.provenance_status !== "verified"
+      ) {
+        errors.push(`${cue.cue_id} provenance status is not verified: ${actual.pins.provenance_status}`);
+      }
+      if (
+        actual.pins.review_status !== undefined
+        && actual.pins.review_status !== "approved"
+      ) {
+        errors.push(`${cue.cue_id} review status is not approved: ${actual.pins.review_status}`);
+      }
+      if (
+        actual.pins.rights_expires_at
+        && Date.parse(actual.pins.rights_expires_at) <= Date.now()
+      ) {
+        errors.push(`${cue.cue_id} rights evidence expiry is in the past`);
+      }
+      for (const [label, expected, value] of [
+        ["asset_path", cue.asset_pin.asset_path, actual.pins.asset_path],
+        ["rights_status", cue.asset_pin.rights_status, actual.pins.rights_status],
+        ["provenance_status", cue.asset_pin.provenance_status, actual.pins.provenance_status],
+        ["review_status", cue.asset_pin.review_status, actual.pins.review_status],
+        ["rights_expires_at", cue.asset_pin.rights_expires_at, actual.pins.rights_expires_at],
+        ["permitted_derivatives", cue.asset_pin.permitted_derivatives, actual.pins.permitted_derivatives],
+      ] as Array<[string, unknown, unknown]>) {
+        if (expected === undefined) continue;
+        const matches = Array.isArray(expected)
+          ? JSON.stringify(expected) === JSON.stringify(value)
+          : expected === value;
+        if (!matches) {
           errors.push(`${cue.cue_id}.${label} expected=${String(expected)} actual=${String(value)}`);
         }
       }
@@ -994,6 +1806,7 @@ export function checkPackageCompleteness(
   captionPolicy: { source: string; delivery_mode: string },
   existingArtifacts: Set<string>,
   requireAudio = true,
+  requireMusicMasterMp3 = false,
 ): QaCheckResult {
   const required: string[] = [];
   const missing: string[] = [];
@@ -1011,6 +1824,7 @@ export function checkPackageCompleteness(
       required.push("audio_mix_report");
     }
   }
+  if (requireMusicMasterMp3) required.push("mastered_mp3");
 
   // Caption artifacts based on policy
   if (captionPolicy.source !== "none") {

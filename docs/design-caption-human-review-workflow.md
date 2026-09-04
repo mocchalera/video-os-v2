@@ -386,7 +386,17 @@ npx tsx scripts/caption-review.ts init --project <dir> --reviewer <name>
 npx tsx scripts/caption-review.ts apply --project <dir> --patch <json>
 npx tsx scripts/caption-review.ts validate --project <dir>
 npx tsx scripts/caption-review.ts approve --project <dir> --reviewer <name>
+npx tsx scripts/caption-review.ts visual-init --project <dir> --reviewer <name> --typography-policy <file>
+npx tsx scripts/caption-review.ts visual-status --project <dir> --typography-policy <file>
+npx tsx scripts/caption-review.ts visual-apply --project <dir> --reviewer <name> --typography-policy <file>
+npx tsx scripts/caption-review.ts visual-undo --project <dir> --reviewer <name> --typography-policy <file>
+npx tsx scripts/caption-review.ts visual-approve --project <dir> --reviewer <name> --typography-policy <file>
 ```
+
+Visual treatment commands operate on the separate hash-bound patch stream. `visual-approve`
+requires the existing human caption approval by the same reviewer; use the optional
+`--safe-zone-profile` and accessibility flags to bind the selected context. They never edit
+caption text or timing.
 
 `queue` v2はReview Coreが算出した`approval_readiness`（blocker code/messageを全件）、`safe_bulk_review`、`font_contract`、整合する`current_approval`を返す。長行・密度のlayout warnは一括確認対象にできるが、block/flagged、固有名詞、数値、否定、低timing確度は除外する。一括確認はdraft hashと全caption text hashを必須とし、staleなら0件更新、成功時は1操作としてundoする。
 

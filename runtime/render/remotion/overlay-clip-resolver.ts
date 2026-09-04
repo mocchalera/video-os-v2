@@ -1,11 +1,24 @@
 import type { ClipOutput } from "../../compiler/types.js";
+import type { ContentElementV1 } from "../../content/types.js";
 import { normalizeOverlayClipContent } from "../../content/normalize.js";
 import {
   getOverlayText,
   type OverlayPresetProps,
 } from "./styles/overlay-presets.js";
 
+export interface ResolvedRemotionOverlayLayout {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  rotationDeg: number;
+  opacity: number;
+  safeArea: boolean;
+  zIndex: number;
+}
+
 export interface ResolvedRemotionOverlayClip {
+  animationIn?: { preset: string; duration_frames?: number; delay_frames?: number };
   presetId: string;
   text: string;
   actionText?: string;
@@ -13,6 +26,8 @@ export interface ResolvedRemotionOverlayClip {
   writingMode?: OverlayPresetProps["writing_mode"];
   anchor?: string;
   safeArea?: OverlayPresetProps["safe_area"];
+  scale?: number;
+  layout?: ResolvedRemotionOverlayLayout;
 }
 
 type OverlayMetadata = {
@@ -61,6 +76,19 @@ function contentAnchor(anchor: string): string {
   return anchor.replaceAll("_", "-");
 }
 
+function elementLayout(layout: ContentElementV1["layout"]): ResolvedRemotionOverlayLayout {
+  return {
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
+    rotationDeg: layout.rotation_deg,
+    opacity: layout.opacity,
+    safeArea: layout.safe_area,
+    zIndex: layout.z_index,
+  };
+}
+
 /**
  * Resolve the declarative overlay dialect understood by the production
  * Remotion renderer. This deliberately maps only registered templates and
@@ -74,11 +102,16 @@ export function resolveRemotionOverlayClip(
 
   if (normalized.element) {
     const templateRef = normalized.element.template_ref;
+    const scale = normalized.element.layout.scale;
+    const animationIn = normalized.element.animation?.in;
     if (templateRef === "vos:content.title-card/v1") {
       return {
         presetId: "vos:overlay.title-card",
         text: String(normalized.element.props.title ?? ""),
         anchor: contentAnchor(normalized.element.layout.anchor),
+        scale,
+        animationIn,
+        layout: elementLayout(normalized.element.layout),
       };
     }
     if (templateRef === "vos:content.hook-title/v1") {
@@ -86,6 +119,9 @@ export function resolveRemotionOverlayClip(
         presetId: "vos:overlay.hook-title",
         text: String(normalized.element.props.title ?? ""),
         anchor: contentAnchor(normalized.element.layout.anchor),
+        scale,
+        animationIn,
+        layout: elementLayout(normalized.element.layout),
       };
     }
     if (templateRef === "vos:content.cta-card/v1") {
@@ -97,6 +133,9 @@ export function resolveRemotionOverlayClip(
           ? normalized.element.props.brand
           : undefined,
         anchor: contentAnchor(normalized.element.layout.anchor),
+        scale,
+        animationIn,
+        layout: elementLayout(normalized.element.layout),
       };
     }
     if (templateRef === "vos:content.emphasis-word/v1") {
@@ -104,6 +143,9 @@ export function resolveRemotionOverlayClip(
         presetId: "vos:overlay.emphasis-word",
         text: String(normalized.element.props.text ?? ""),
         anchor: contentAnchor(normalized.element.layout.anchor),
+        scale,
+        animationIn,
+        layout: elementLayout(normalized.element.layout),
       };
     }
     if (templateRef === "vos:content.section-label/v1") {
@@ -111,6 +153,9 @@ export function resolveRemotionOverlayClip(
         presetId: "vos:overlay.chapter-kicker",
         text: String(normalized.element.props.title ?? ""),
         anchor: contentAnchor(normalized.element.layout.anchor),
+        scale,
+        animationIn,
+        layout: elementLayout(normalized.element.layout),
       };
     }
     if (templateRef === "vos:content.lower-third/v1") {
@@ -122,6 +167,9 @@ export function resolveRemotionOverlayClip(
         presetId: "vos:overlay.lower-third",
         text: role ? `${name}\n${role}` : name,
         anchor: contentAnchor(normalized.element.layout.anchor),
+        scale,
+        animationIn,
+        layout: elementLayout(normalized.element.layout),
       };
     }
     return null;

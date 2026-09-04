@@ -15,6 +15,8 @@
  */
 
 import type { SpeechCaption, CaptionSource, CaptionRevealRole } from "./segmenter.js";
+import { captionLineage, migrateCaptionLineage } from "./identity.js";
+import type { CaptionTimingMetadata } from "./projection.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,14 +52,7 @@ export interface EditorialMetadata {
   status: "clean" | "edited" | "degraded";
 }
 
-export interface TimingMetadata {
-  source: "word_remap" | "clip_item_remap";
-  confidence: number;
-  sourceWordRefs?: Array<{ word: string; start_us: number; end_us: number }>;
-  triggeredFallback: boolean;
-  timelineInFrame: number;
-  timelineDurationFrames: number;
-}
+export type TimingMetadata = CaptionTimingMetadata;
 
 export interface RevealTimingMetadata {
   anchor_id: string;
@@ -87,6 +82,12 @@ export interface CaptionDraftEntry {
   source: "transcript" | "authored";
   styling_class: string;
   metrics: { cps: number; dwell_ms: number };
+  /** Stable authored-lyrics identity when the caption source is authored. */
+  line_id?: string;
+  cue_id?: string;
+  root_id?: string;
+  parent_ids?: string[];
+  lineage_hash?: string;
   editorial?: EditorialMetadata;
   /** Word-level timing remap metadata */
   timing?: TimingMetadata;
@@ -103,6 +104,32 @@ export interface CaptionDraft {
   text_overlays: CaptionSource["text_overlays"];
   draft_status: "ready_for_human_approval" | "needs_operator_fix";
   degraded_count: number;
+  /** Present only for the Issue #41 authored-lyrics route. */
+  text_authority?: import("./authored-lyrics.js").AuthoredTextAuthority;
+  /** Present only for the Issue #41 authored-lyrics route. */
+  timing_authority?: import("./authored-lyrics.js").AuthoredTimingAuthority;
+  migration?: { from_version: string; to_version: string; migrated_caption_count: number };
+}
+
+/** Fill v2 identity fields on a legacy draft without changing its timing/text. */
+export function migrateCaptionDraft(draft: CaptionDraft): CaptionDraft {
+  let migratedCaptionCount = 0;
+  const speech_captions = draft.speech_captions.map((entry) => {
+    const lineage = migrateCaptionLineage(entry);
+    if (!entry.root_id || !entry.parent_ids || !entry.lineage_hash) migratedCaptionCount += 1;
+    return { ...entry, ...lineage };
+  });
+  return migratedCaptionCount === 0
+    ? { ...draft, speech_captions }
+    : {
+        ...draft,
+        speech_captions,
+        migration: {
+          from_version: draft.version,
+          to_version: "caption-draft/v2",
+          migrated_caption_count: migratedCaptionCount,
+        },
+      };
 }
 
 export interface EditorialReport {
@@ -293,6 +320,18 @@ export async function runEditorial(
       draftEntries.push({
         ...caption,
         text: edit.editedText,
+        ...captionLineage({
+          caption_id: caption.caption_id,
+          root_id: caption.root_id ?? caption.caption_id,
+          parent_ids: caption.parent_ids,
+          asset_id: caption.asset_id,
+          segment_id: caption.segment_id,
+          transcript_item_ids: caption.transcript_item_ids,
+          text: edit.editedText,
+          timeline_in_frame: caption.timeline_in_frame,
+          timeline_duration_frames: caption.timeline_duration_frames,
+          operation: "text_edit",
+        }),
         editorial: {
           sourceText: caption.text,
           operations: edit.operations,

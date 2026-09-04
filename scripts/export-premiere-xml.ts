@@ -50,11 +50,23 @@ import {
   type PremiereEffectBakeIndex,
 } from "../runtime/handoff/premiere-effect-bake.js";
 import { PremierePreflightProcessBroker } from "../runtime/handoff/premiere-preflight-process-broker.js";
+import {
+  resolvePremiereExportIdentity,
+  validatePremiereExportIdentity,
+  type PremiereExportIdentity,
+} from "../runtime/handoff/premiere-export-identity.js";
+import { resolveProjectRenderRoute } from "../runtime/render/route-resolver.js";
 
 const require = createRequire(import.meta.url);
 type Validate = ((value: unknown) => boolean) & { errors?: unknown };
 const Ajv2020 = require("ajv/dist/2020") as new (options: Record<string, unknown>) => { compile(schema: object): Validate };
 const addFormats = require("ajv-formats") as (ajv: InstanceType<typeof Ajv2020>) => void;
+
+function ajvForSchema(schema: object): Validate {
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  addFormats(ajv);
+  return ajv.compile(schema);
+}
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -367,12 +379,14 @@ function releaseExportClaim(claim: ExportClaimContext, successful: boolean, rele
 
 function publishExportGeneration(args: {
   projectPath: string; projectId: string; baseTimelineSha256: string; roundtripId: string;
-  generationId: string; xml: Buffer; receipt: object; bakeIndex: PremiereEffectBakeIndex; claim: ExportClaimContext;
-}): { generation_dir: string; xml_path: string; receipt_path: string; bake_index_path: string; ready_path: string; current_path: string } {
+  generationId: string; xml: Buffer; receipt: object; exportIdentity: PremiereExportIdentity; bakeIndex: PremiereEffectBakeIndex; claim: ExportClaimContext;
+}): { generation_dir: string; xml_path: string; receipt_path: string; export_identity_path: string; bake_index_path: string; ready_path: string; current_path: string } {
   const root = args.claim.root, claimId = args.claim.id, invocation = args.claim.invocationId;
   const staging = path.join(root, "staging", invocation);
   const generation = path.join(root, "generations", args.generationId.slice(7));
-  const xmlName = `${args.projectId}_premiere.xml`, receiptName = `${args.projectId}_premiere.roundtrip.json`;
+  const xmlName = `${args.projectId}_premiere.xml`, receiptName = `${args.projectId}_premiere.roundtrip.json`, exportIdentityName = `${args.projectId}_premiere.export-identity.json`;
+  const exportIdentityRaw = Buffer.from(`${JSON.stringify(args.exportIdentity, null, 2)}\n`);
+  const exportIdentitySha256 = sha256Prefixed(exportIdentityRaw);
   try {
     ensureExportDirectoryTree(root, path.dirname(generation));
     let reusedGenerationIdentity: { dev: number; ino: number } | undefined;
@@ -382,25 +396,27 @@ function publishExportGeneration(args: {
       writeFsync(path.join(staging, xmlName), args.xml);
       writeFsync(path.join(staging, receiptName), `${JSON.stringify(args.receipt, null, 2)}\n`);
       writeFsync(path.join(staging, "bake-index.json"), `${JSON.stringify(args.bakeIndex, null, 2)}\n`);
+      writeFsync(path.join(staging, exportIdentityName), exportIdentityRaw);
       fsyncDir(staging); fs.renameSync(staging, generation); fsyncDir(path.dirname(generation)); assertExportDirectoryIdentity(path.dirname(generation), generationsIdentity);
     } else {
       reusedGenerationIdentity = exportDirectoryIdentity(generation);
-      const expected = [[xmlName, sha256Prefixed(args.xml)], [receiptName, sha256Prefixed(`${JSON.stringify(args.receipt, null, 2)}\n`)], ["bake-index.json", sha256Prefixed(`${JSON.stringify(args.bakeIndex, null, 2)}\n`)]] as const;
+      const expected = [[xmlName, sha256Prefixed(args.xml)], [receiptName, sha256Prefixed(`${JSON.stringify(args.receipt, null, 2)}\n`)], ["bake-index.json", sha256Prefixed(`${JSON.stringify(args.bakeIndex, null, 2)}\n`)], [exportIdentityName, exportIdentitySha256]] as const;
       for (const [name, hash] of expected) { const file = path.join(generation, name), stat = fs.lstatSync(file); if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || sha256Prefixed(fs.readFileSync(file)) !== hash) throw new Error("premiere_export_generation_conflict"); }
     }
-    const ready = { version: "premiere-export-ready/v1", project_id: args.projectId, base_timeline_sha256: args.baseTimelineSha256, roundtrip_id: args.roundtripId, export_generation_id: args.generationId, xml: { path: path.relative(args.projectPath, path.join(generation, xmlName)).split(path.sep).join("/"), sha256: sha256Prefixed(args.xml) }, receipt: { path: path.relative(args.projectPath, path.join(generation, receiptName)).split(path.sep).join("/"), sha256: sha256Prefixed(fs.readFileSync(path.join(generation, receiptName))) }, bake_index: { path: path.relative(args.projectPath, path.join(generation, "bake-index.json")).split(path.sep).join("/"), sha256: sha256Prefixed(fs.readFileSync(path.join(generation, "bake-index.json"))) }, hardware_verified: false };
+    const ready = { version: "premiere-export-ready/v1", project_id: args.projectId, base_timeline_sha256: args.baseTimelineSha256, roundtrip_id: args.roundtripId, export_generation_id: args.generationId, xml: { path: path.relative(args.projectPath, path.join(generation, xmlName)).split(path.sep).join("/"), sha256: sha256Prefixed(args.xml) }, receipt: { path: path.relative(args.projectPath, path.join(generation, receiptName)).split(path.sep).join("/"), sha256: sha256Prefixed(fs.readFileSync(path.join(generation, receiptName))) }, bake_index: { path: path.relative(args.projectPath, path.join(generation, "bake-index.json")).split(path.sep).join("/"), sha256: sha256Prefixed(fs.readFileSync(path.join(generation, "bake-index.json"))) }, export_identity: { path: path.relative(args.projectPath, path.join(generation, exportIdentityName)).split(path.sep).join("/"), sha256: sha256Prefixed(fs.readFileSync(path.join(generation, exportIdentityName))), identity_hash: args.exportIdentity.export_identity_hash }, hardware_verified: false };
     const readyPath = path.join(generation, "READY.json");
     if (fs.existsSync(readyPath)) { const readyStat = fs.lstatSync(readyPath); if (!readyStat.isFile() || readyStat.isSymbolicLink() || readyStat.nlink !== 1) throw new Error("premiere_export_generation_conflict: READY is not regular nlink=1"); const existingReady = JSON.parse(fs.readFileSync(readyPath, "utf8")); if (JSON.stringify(existingReady) !== JSON.stringify(ready)) throw new Error("premiere_export_generation_conflict"); }
     else { const generationIdentity = exportDirectoryIdentity(generation); writeFsync(readyPath, `${JSON.stringify(ready, null, 2)}\n`); assertExportDirectoryIdentity(generation, generationIdentity); }
-    if (fs.readdirSync(generation).sort().join("|") !== ["READY.json", "bake-index.json", receiptName, xmlName].sort().join("|")) throw new Error("premiere_export_generation_conflict: generation contents are not exact");
+    if (fs.readdirSync(generation).sort().join("|") !== ["READY.json", "bake-index.json", exportIdentityName, receiptName, xmlName].sort().join("|")) throw new Error("premiere_export_generation_conflict: generation contents are not exact");
     if (reusedGenerationIdentity) assertExportDirectoryIdentity(generation, reusedGenerationIdentity);
     fsyncDir(generation);
-    const current = { version: "premiere-export-current/v1", project_id: args.projectId, base_timeline_sha256: args.baseTimelineSha256, roundtrip_id: args.roundtripId, export_generation_id: args.generationId, ready_path: path.relative(args.projectPath, readyPath).split(path.sep).join("/"), ready_sha256: sha256Prefixed(fs.readFileSync(readyPath)), xml: ready.xml, receipt: ready.receipt, bake_index: ready.bake_index, published_at: new Date().toISOString() };
+    const current = { version: "premiere-export-current/v1", project_id: args.projectId, base_timeline_sha256: args.baseTimelineSha256, roundtrip_id: args.roundtripId, export_generation_id: args.generationId, ready_path: path.relative(args.projectPath, readyPath).split(path.sep).join("/"), ready_sha256: sha256Prefixed(fs.readFileSync(readyPath)), xml: ready.xml, receipt: ready.receipt, bake_index: ready.bake_index, export_identity: ready.export_identity, published_at: new Date().toISOString() };
     const rootIdentity = exportDirectoryIdentity(root), currentTemp = path.join(root, `CURRENT.json.tmp.${invocation}`); writeFsync(currentTemp, `${JSON.stringify(current, null, 2)}\n`); if (reusedGenerationIdentity) assertExportDirectoryIdentity(generation, reusedGenerationIdentity); fs.renameSync(currentTemp, path.join(root, "CURRENT.json")); fsyncDir(root); assertExportDirectoryIdentity(root, rootIdentity);
     const output = path.join(args.projectPath, "09_output"); ensureExportDirectoryTree(args.projectPath, output);
-    for (const [name, source] of [[xmlName, path.join(generation, xmlName)], [receiptName, path.join(generation, receiptName)]] as const) { const outputIdentity = exportDirectoryIdentity(output), temp = path.join(output, `${name}.tmp.${invocation}`); writeFsync(temp, fs.readFileSync(source)); fs.renameSync(temp, path.join(output, name)); fsyncDir(output); assertExportDirectoryIdentity(output, outputIdentity); }
+    for (const [name, source] of [[xmlName, path.join(generation, xmlName)], [receiptName, path.join(generation, receiptName)], [exportIdentityName, path.join(generation, exportIdentityName)]] as const) { const outputIdentity = exportDirectoryIdentity(output), temp = path.join(output, `${name}.tmp.${invocation}`); writeFsync(temp, fs.readFileSync(source)); fs.renameSync(temp, path.join(output, name)); fsyncDir(output); assertExportDirectoryIdentity(output, outputIdentity); }
+    const exportIdentityPath = path.join(output, exportIdentityName);
     releaseExportClaim(args.claim, true, { version: "premiere-export-claim-release/v1", claim_id: claimId, current_sha256: sha256Prefixed(fs.readFileSync(path.join(root, "CURRENT.json"))), compatibility_xml_sha256: sha256Prefixed(fs.readFileSync(path.join(output, xmlName))), compatibility_receipt_sha256: sha256Prefixed(fs.readFileSync(path.join(output, receiptName))), released_at: new Date().toISOString() });
-    return { generation_dir: generation, xml_path: path.join(generation, xmlName), receipt_path: path.join(generation, receiptName), bake_index_path: path.join(generation, "bake-index.json"), ready_path: readyPath, current_path: path.join(root, "CURRENT.json") };
+    return { generation_dir: generation, xml_path: path.join(generation, xmlName), receipt_path: path.join(generation, receiptName), export_identity_path: exportIdentityPath, bake_index_path: path.join(generation, "bake-index.json"), ready_path: readyPath, current_path: path.join(root, "CURRENT.json") };
   } catch (error) {
     if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
     throw error;
@@ -535,11 +551,32 @@ async function main(): Promise<void> {
     // Resolve text overlays
     const textOverlays = resolveTextOverlays(timeline, titlesPath, autoTitles);
 
+    const routeDecision = resolveProjectRenderRoute(projectPath, "auto");
+    const sourceMapDoc = loadSourceMap(projectPath, sourceMapPath);
+
     // Export
     const prepared = bakeRequired.length ? preparePremiereEffectBakes({ projectPath, timeline, rawTimeline: lockedRawTimeline, sourceMapPath }) : { representations: new Map(), index: { version: "premiere-effect-bake-index/v1" as const, project_id: timeline.project_id, base_timeline_sha256: baseTimelineSha256, entries: [] }, cache_results: [] };
     const maps = createBakedClipMaps(timeline, prepared.representations);
     const bakeIndexRaw = Buffer.from(`${JSON.stringify(prepared.index, null, 2)}\n`);
     const roundtripId = maps.length ? derivePremiereRoundtripIdV2(timeline.project_id, baseTimelineSha256, sha256Prefixed(bakeIndexRaw), maps) : derivePremiereRoundtripId(timeline.project_id, baseTimelineSha256);
+    const exportIdentity = resolvePremiereExportIdentity({
+      projectDir: projectPath,
+      projectId: timeline.project_id,
+      timelinePath,
+      sourceMapPath,
+      sourceMap,
+      sourceMapDoc,
+      routeDecision,
+      bakedClipIds: maps.map((map) => map.clip_id),
+      visualEffectIssues: classifications
+        .filter((entry) => entry.status === "blocked")
+        .map((entry) => ({ clip_id: entry.clip_id, status: entry.status, reason: entry.detail ?? entry.reason ?? "unsupported visual treatment" })),
+    });
+    const identityValidation = validatePremiereExportIdentity(exportIdentity);
+    if (!identityValidation.valid) throw new Error(`premiere_export_identity_invalid: ${identityValidation.errors.join("; ")}`);
+    const identitySchema = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, "..", "schemas/premiere-export-identity.schema.json"), "utf8")) as object;
+    const validateIdentity = ajvForSchema(identitySchema);
+    if (!validateIdentity(exportIdentity)) throw new Error(`premiere_export_identity_schema_invalid: ${JSON.stringify(validateIdentity.errors ?? [])}`);
     const xml = timelineToFcp7Xml(timeline, {
       sourceMap,
       textOverlays,
@@ -547,15 +584,16 @@ async function main(): Promise<void> {
       assetDisplayNameMap: displayNameMap.size > 0 ? displayNameMap : undefined,
       projectId: timeline.project_id,
       roundtripId,
+      exportIdentityHash: exportIdentity.export_identity_hash,
       videoRepresentations: prepared.representations,
     });
     const rawXml = Buffer.from(xml, "utf-8");
     const generationId = derivePremiereExportGenerationId(timeline.project_id, baseTimelineSha256, roundtripId, sha256Prefixed(rawXml), sha256Prefixed(bakeIndexRaw));
     const generationBase = `09_output/premiere-exports/generations/${generationId.slice(7)}`;
     const receipt = maps.length ? createPremiereRoundtripReceiptV2({ projectId: timeline.project_id, rawTimeline, rawExportedXml: rawXml, exportedXmlPath: `${generationBase}/${path.basename(outputPath)}`, bakeIndex: prepared.index, bakeIndexPath: `${generationBase}/bake-index.json`, bakedClipMaps: maps }) : createPremiereRoundtripReceipt(timeline.project_id, rawTimeline, path.basename(outputPath), rawXml);
-    const published = publishExportGeneration({ projectPath, projectId: timeline.project_id, baseTimelineSha256, roundtripId, generationId, xml: rawXml, receipt, bakeIndex: prepared.index, claim: liveClaim });
+    const published = publishExportGeneration({ projectPath, projectId: timeline.project_id, baseTimelineSha256, roundtripId, generationId, xml: rawXml, receipt, exportIdentity, bakeIndex: prepared.index, claim: liveClaim });
     liveClaim = undefined;
-    const result = { mode: "export", exported: true, project_id: timeline.project_id, roundtrip_id: roundtripId, export_generation_id: generationId, hardware_verified: false, generation: published, cache_results: prepared.cache_results };
+    const result = { mode: "export", exported: true, project_id: timeline.project_id, roundtrip_id: roundtripId, export_generation_id: generationId, export_identity_hash: exportIdentity.export_identity_hash, hardware_verified: false, generation: published, cache_results: prepared.cache_results };
     if (jsonOutput) console.log(JSON.stringify(result)); else { console.log(`Exported: ${published.xml_path}`); console.log(`Receipt: ${published.receipt_path}`); }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

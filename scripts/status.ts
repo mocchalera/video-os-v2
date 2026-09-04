@@ -42,12 +42,24 @@ export function formatStatusResult(projectDir: string, result: StatusResult): st
   const staleArtifacts = result.staleArtifacts && result.staleArtifacts.length > 0
     ? result.staleArtifacts.join(", ")
     : "none";
+  const optionalVlm = result.optionalVlmPolicy
+    ? `Optional VLM: ${result.optionalVlmPolicy.status}${result.optionalVlmPolicy.closeable ? " (closeable)" : ""}`
+    : undefined;
+  const authoredLyrics = result.authoredLyrics?.detected
+    ? `Authored lyrics: ${result.authoredLyrics.status} (approval=${result.authoredLyrics.approval_status ?? "missing"}, unmatched=${result.authoredLyrics.unmatched_line_ids.length}, low_confidence=${result.authoredLyrics.low_confidence_line_ids.length})`
+    : undefined;
+  const captionDiff = result.authoredLyrics?.diff
+    ? `Caption preview: 07_package/caption_preview.json (projected=${result.authoredLyrics.projected_timeline_hash ?? "pending"}, next=${result.authoredLyrics.next_command})`
+    : undefined;
 
   return [
     `[status] Project: ${path.resolve(projectDir)}`,
     `State: ${result.currentState}`,
     `Gates: analysis=${result.gates.analysis_gate}, planning=${result.gates.planning_gate}, compile=${result.gates.compile_gate}`,
     `Stale artifacts: ${staleArtifacts}`,
+    ...(optionalVlm ? [optionalVlm] : []),
+    ...(authoredLyrics ? [authoredLyrics] : []),
+    ...(captionDiff ? [captionDiff] : []),
     `Next: ${result.nextCommand} (${result.nextCommandReason ?? "no reason provided"})`,
   ].join("\n");
 }

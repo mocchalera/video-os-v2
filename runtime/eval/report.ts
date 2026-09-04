@@ -27,6 +27,7 @@ export interface ComposeReportInput {
   stages: EvalStageScores;
   llmJudge?: LlmJudgeReport | null;
   minScore?: number | null;
+  timelineIdentity?: EvalReport["timeline_identity"];
 }
 
 export function composeEvalReport(input: ComposeReportInput): EvalReport {
@@ -56,6 +57,7 @@ export function composeEvalReport(input: ComposeReportInput): EvalReport {
     candidate_project: input.candidateProject,
     evaluated_at: input.evaluatedAt,
     golden_approved_by: input.goldenApprovedBy,
+    ...(input.timelineIdentity ? { timeline_identity: input.timelineIdentity } : {}),
     stages: input.stages,
     llm_judge: input.llmJudge ?? null,
     overall_score: overallScore,
@@ -84,6 +86,9 @@ export function renderMarkdownReport(report: EvalReport): string {
   lines.push(`- Golden: ${report.golden_project} (approved by: ${report.golden_approved_by ?? "unknown"})`);
   lines.push(`- Candidate: ${report.candidate_project}`);
   lines.push(`- Evaluated at: ${report.evaluated_at}`);
+  if (report.timeline_identity) {
+    lines.push(`- Candidate cut identity: ${report.timeline_identity.candidate_cut_identity} (${report.timeline_identity.candidate_review_mode})`);
+  }
   lines.push("");
   const verdict =
     report.pass === null ? "" : report.pass ? " — PASS" : " — **FAIL**";
@@ -122,7 +127,10 @@ export function renderMarkdownReport(report: EvalReport): string {
     lines.push(`| metric | value |`);
     lines.push(`| --- | --- |`);
     lines.push(`| beats (golden / candidate) | ${blueprint.golden_beat_count} / ${blueprint.candidate_beat_count} |`);
+    lines.push(`| beat ID agreement | ${pct(blueprint.beat_id_agreement)} |`);
     lines.push(`| story role agreement | ${pct(blueprint.story_role_agreement)} |`);
+    lines.push(`| emotional valence agreement | ${pct(blueprint.emotional_valence_agreement)} |`);
+    lines.push(`| evidence-required agreement | ${pct(blueprint.evidence_required_agreement)} |`);
     lines.push(`| duration share score | ${pct(blueprint.duration_share_score)} |`);
     lines.push(`| pacing agreement | ${pct(blueprint.pacing_agreement)} |`);
     lines.push(`| music agreement | ${pct(blueprint.music_agreement)} |`);

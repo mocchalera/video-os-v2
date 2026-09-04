@@ -1,5 +1,6 @@
 import type { CaptionDraftEntry, RevealTimingMetadata } from "./editorial.js";
 import type { CaptionRevealAnchor, CaptionSemanticTimingPolicy } from "./segmenter.js";
+import { projectSourceRange, type TimelineOffsetMap } from "../compiler/timeline-offset-engine.js";
 
 export interface RevealTranscriptItem {
   item_id: string;
@@ -49,6 +50,8 @@ export interface CaptionTimingReport {
   gap_tail_hold_count?: number;
   unresolved_count: number;
   issues: CaptionTimingIssue[];
+  offset_map_fingerprint?: string;
+  dialogue_authority?: "A1" | "legacy-role";
 }
 
 export interface ApplyCaptionSemanticTimingInput {
@@ -57,6 +60,7 @@ export interface ApplyCaptionSemanticTimingInput {
   transcriptItems: Map<string, RevealTranscriptItem>;
   clips: RevealClipContext[];
   fps: number;
+  offsetMap?: TimelineOffsetMap;
 }
 
 export interface ApplyCaptionSemanticTimingResult {
@@ -90,7 +94,17 @@ function mapSourceUsToTimelineFrame(
   entry: CaptionDraftEntry,
   clips: RevealClipContext[],
   fps: number,
+  offsetMap?: TimelineOffsetMap,
 ): number | undefined {
+  if (offsetMap) {
+    const projected = projectSourceRange(offsetMap, {
+      asset_id: entry.asset_id,
+      segment_id: entry.segment_id,
+      source_start_us: sourceUs,
+      source_end_us: sourceUs + 1,
+    });
+    if (projected.status === "exact" && projected.segments.length > 0) return projected.timeline_in_frame;
+  }
   const matching = clips.find((clip) =>
     clip.asset_id === entry.asset_id
     && clip.segment_id === entry.segment_id
@@ -110,18 +124,19 @@ function earliestReferencedFrame(
   transcriptItems: Map<string, RevealTranscriptItem>,
   clips: RevealClipContext[],
   fps: number,
+  offsetMap?: TimelineOffsetMap,
 ): number | undefined {
   const wordFrames = entry.timing?.sourceWordRefs
-    ?.map((word) => mapSourceUsToTimelineFrame(word.start_us, entry, clips, fps))
+    ?.map((word) => mapSourceUsToTimelineFrame(word.start_us, entry, clips, fps, offsetMap))
     .filter((frame): frame is number => frame !== undefined);
   if (wordFrames && wordFrames.length > 0) return Math.min(...wordFrames);
   const frames = entry.transcript_item_ids
     .map((id) => transcriptItems.get(id))
     .filter((item): item is RevealTranscriptItem => Boolean(item))
-    .map((item) => mapSourceUsToTimelineFrame(item.start_us, entry, clips, fps))
+    .map((item) => mapSourceUsToTimelineFrame(item.start_us, entry, clips, fps, offsetMap))
     .filter((frame): frame is number => frame !== undefined);
   if (frames.length > 0) return Math.min(...frames);
-  if (entry.timing?.source === "clip_item_remap") {
+  if (entry.timing?.source === "clip_item_remap" || entry.timing?.source === "offset_map_fallback") {
     return entry.timing.timelineInFrame;
   }
   return undefined;
@@ -132,18 +147,19 @@ function latestReferencedFrame(
   transcriptItems: Map<string, RevealTranscriptItem>,
   clips: RevealClipContext[],
   fps: number,
+  offsetMap?: TimelineOffsetMap,
 ): number | undefined {
   const wordFrames = entry.timing?.sourceWordRefs
-    ?.map((word) => mapSourceUsToTimelineFrame(word.end_us, entry, clips, fps))
+    ?.map((word) => mapSourceUsToTimelineFrame(word.end_us, entry, clips, fps, offsetMap))
     .filter((frame): frame is number => frame !== undefined);
   if (wordFrames && wordFrames.length > 0) return Math.max(...wordFrames);
   const frames = entry.transcript_item_ids
     .map((id) => transcriptItems.get(id))
     .filter((item): item is RevealTranscriptItem => Boolean(item))
-    .map((item) => mapSourceUsToTimelineFrame(item.end_us, entry, clips, fps))
+    .map((item) => mapSourceUsToTimelineFrame(item.end_us, entry, clips, fps, offsetMap))
     .filter((frame): frame is number => frame !== undefined);
   if (frames.length > 0) return Math.max(...frames);
-  if (entry.timing?.source === "clip_item_remap") {
+  if (entry.timing?.source === "clip_item_remap" || entry.timing?.source === "offset_map_fallback") {
     return entry.timing.timelineInFrame + entry.timing.timelineDurationFrames;
   }
   return undefined;
@@ -181,13 +197,14 @@ function resolveAnchorFrame(
   transcriptItems: Map<string, RevealTranscriptItem>,
   clips: RevealClipContext[],
   fps: number,
+  offsetMap?: TimelineOffsetMap,
 ): { frame?: number; source?: RevealTimingMetadata["source"] } {
   if (anchor.timeline_frame !== undefined) {
     return { frame: anchor.timeline_frame, source: "explicit_timeline_frame" };
   }
   if (anchor.source_start_us !== undefined) {
     return {
-      frame: mapSourceUsToTimelineFrame(anchor.source_start_us, entry, clips, fps),
+      frame: mapSourceUsToTimelineFrame(anchor.source_start_us, entry, clips, fps, offsetMap),
       source: "explicit_source_time",
     };
   }
@@ -202,7 +219,7 @@ function resolveAnchorFrame(
       const wordStartUs = findWordStartUs(item.words, anchor.anchor_text);
       if (wordStartUs !== undefined) {
         return {
-          frame: mapSourceUsToTimelineFrame(wordStartUs, entry, clips, fps),
+          frame: mapSourceUsToTimelineFrame(wordStartUs, entry, clips, fps, offsetMap),
           source: "word_timing",
         };
       }
@@ -212,7 +229,7 @@ function resolveAnchorFrame(
     // Never interpolate a later punchline from character count: that recreates spoilers.
     if (normalizeToken(item.text).startsWith(normalizeToken(anchor.anchor_text))) {
       return {
-        frame: mapSourceUsToTimelineFrame(item.start_us, entry, clips, fps),
+        frame: mapSourceUsToTimelineFrame(item.start_us, entry, clips, fps, offsetMap),
         source: "transcript_item_onset",
       };
     }
@@ -282,7 +299,7 @@ export function applyCaptionSemanticTiming(
 ): ApplyCaptionSemanticTimingResult {
   const policy = input.policy ?? { mode: "off" as const };
   const report: CaptionTimingReport = {
-    version: "caption-timing-report/v2",
+    version: input.offsetMap ? "caption-timing-report/v2" : "caption-timing-report/v1",
     mode: policy.mode,
     checked_caption_count: input.captions.length,
     protected_caption_count: 0,
@@ -294,6 +311,8 @@ export function applyCaptionSemanticTiming(
     gap_tail_hold_count: 0,
     unresolved_count: 0,
     issues: [],
+    offset_map_fingerprint: input.offsetMap?.fingerprint,
+    dialogue_authority: input.offsetMap?.dialogue_authority,
   };
   if (policy.mode === "off") {
     return { captions: input.captions, report };
@@ -311,8 +330,8 @@ export function applyCaptionSemanticTiming(
     .map(cloneCaption)
     .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame || a.caption_id.localeCompare(b.caption_id))
     .map((entry) => {
-    const speechFrame = earliestReferencedFrame(entry, input.transcriptItems, input.clips, input.fps);
-    const speechEnd = latestReferencedFrame(entry, input.transcriptItems, input.clips, input.fps);
+    const speechFrame = earliestReferencedFrame(entry, input.transcriptItems, input.clips, input.fps, input.offsetMap);
+    const speechEnd = latestReferencedFrame(entry, input.transcriptItems, input.clips, input.fps, input.offsetMap);
     if (speechFrame === undefined) {
       if (speechEnd !== undefined) previousSpeechEnd = speechEnd;
       return entry;
@@ -395,7 +414,7 @@ export function applyCaptionSemanticTiming(
 
     const entry = matches[0];
     const audioFirstFrames = Math.max(0, anchor.audio_first_frames ?? defaultAudioFirstFrames);
-    const resolved = resolveAnchorFrame(anchor, entry, input.transcriptItems, input.clips, input.fps);
+    const resolved = resolveAnchorFrame(anchor, entry, input.transcriptItems, input.clips, input.fps, input.offsetMap);
     if (resolved.frame === undefined || !resolved.source) {
       report.unresolved_count += 1;
       report.issues.push({

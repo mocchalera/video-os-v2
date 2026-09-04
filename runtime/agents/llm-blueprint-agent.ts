@@ -18,7 +18,10 @@ import type {
   DurationPolicy,
   EditBlueprint,
   EditorialSummary,
+  NarrativeMode,
   Role,
+  SelectStoryRole,
+  SelectsCandidates,
   StoryArc,
   StoryArcStrategy,
   StillImageCandidateIntent,
@@ -27,6 +30,7 @@ import type {
   TrackLayout,
 } from "../compiler/types.js";
 import { resolveStillDurationPolicy, sanitizeStillBackground } from "../artifacts/still-image-policy.js";
+import { sanitizeStillCameraMotionIntent } from "../render/camera-motion.js";
 import { resolveProfileAndPolicy } from "../editorial/policy-resolver.js";
 import type {
   BlueprintAgent,
@@ -41,6 +45,10 @@ import {
   auditShortFormRetention,
   shortFormRetentionPromptLines,
 } from "../editorial/short-form-retention.js";
+import {
+  narrativeArcForMode,
+  type NarrativeArcDefinition,
+} from "../editorial/arc-registry.js";
 
 // Cockpit/repo-side editorial blueprinting should prefer Claude/Codex
 // subscription agents. Gemini flash-lite remains the headless CLI fallback.
@@ -57,6 +65,7 @@ const VALID_STORY_ARC_STRATEGIES = new Set<StoryArcStrategy>([
   "release_after_peak",
 ]);
 const VALID_DURATION_MODES = new Set<DurationMode>(["strict", "guide"]);
+const VALID_NARRATIVE_MODES = new Set<NarrativeMode>(["personal_challenge", "day_log"]);
 const VALID_DURATION_SOURCES = new Set<DurationPolicy["source"]>([
   "explicit_brief",
   "profile_default",
@@ -215,6 +224,150 @@ function clamp01(value: unknown): number | undefined {
   return n;
 }
 
+function clampSignedUnit(value: unknown): number | undefined {
+  const n = numberValue(value);
+  if (n === undefined) return undefined;
+  if (n < -1) return -1;
+  if (n > 1) return 1;
+  return n;
+}
+
+function selectedNarrativeArc(briefContent: unknown): NarrativeArcDefinition | undefined {
+  const brief = recordValue(briefContent);
+  const mode = enumValue(brief?.narrative_mode, VALID_NARRATIVE_MODES);
+  if (!mode) return undefined;
+  const editorial = recordValue(brief?.editorial);
+  if (stringValue(editorial?.hook_priority) === "credibility_first") {
+    throw new Error(
+      `creative_brief narrative_mode="${mode}" conflicts with editorial.hook_priority="credibility_first"`,
+    );
+  }
+  return narrativeArcForMode(mode);
+}
+
+function arcStoryRoleForCandidate(role: SelectStoryRole | undefined): Beat["story_role"] | undefined {
+  if (role === "hook" || role === "setup" || role === "experience" || role === "closing") return role;
+  if (role === "payoff" || role === "reaction") return "closing";
+  return undefined;
+}
+
+/**
+ * Project candidate eligibility onto the registered explicit narrative arc.
+ * Provider-authored legacy beat IDs are never retained as canonical refs.
+ */
+export function normalizeNarrativeArcCandidateEligibility(
+  briefContent: unknown,
+  selects: SelectsCandidates,
+): SelectsCandidates {
+  const arc = selectedNarrativeArc(briefContent);
+  for (const candidate of selects.candidates) {
+    if (candidate.role === "reject") {
+      candidate.eligible_beats = [];
+    }
+  }
+  if (!arc) return selects;
+
+  for (const candidate of selects.candidates) {
+    if (candidate.role === "reject") continue;
+    const candidateRole: Role = candidate.role;
+    const storyRole = arcStoryRoleForCandidate(candidate.story_role);
+    const roleAndStory = arc.beats.filter((beat) =>
+      beat.required_roles.includes(candidateRole) && (!storyRole || beat.story_role === storyRole)
+    );
+    const sameRole = arc.beats.filter((beat) => beat.required_roles.includes(candidateRole));
+    const sameStory = storyRole ? arc.beats.filter((beat) => beat.story_role === storyRole) : [];
+    const eligible = roleAndStory.length > 0
+      ? roleAndStory
+      : sameRole.length > 0
+        ? sameRole
+        : sameStory;
+    candidate.eligible_beats = eligible.map((beat) => beat.id);
+  }
+  return selects;
+}
+
+function apportionedArcDurations(arc: NarrativeArcDefinition, totalFrames: number): number[] {
+  const exact = arc.beats.map((beat) => beat.ratio * totalFrames);
+  const durations = exact.map((frames) => Math.max(1, Math.floor(frames)));
+  let remaining = totalFrames - durations.reduce((sum, frames) => sum + frames, 0);
+  const order = exact
+    .map((frames, index) => ({ index, fraction: frames - Math.floor(frames) }))
+    .sort((left, right) => right.fraction - left.fraction || left.index - right.index);
+  for (let cursor = 0; remaining > 0; cursor += 1, remaining -= 1) {
+    durations[order[cursor % order.length].index] += 1;
+  }
+  return durations;
+}
+
+/** Normalize a generated blueprint to the explicit registered arc and approved candidate IDs. */
+export function normalizeNarrativeArcBlueprint(
+  briefContent: unknown,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+): EditBlueprint {
+  const arc = selectedNarrativeArc(briefContent);
+  if (!arc) return blueprint;
+
+  const byId = new Map(blueprint.beats.map((beat) => [beat.id, beat]));
+  const candidateIndex = buildCandidateIndex(selects);
+  const candidates = candidateIndex.candidates;
+  const totalFrames = Math.max(
+    arc.beats.length,
+    blueprint.beats.reduce((sum, beat) => sum + beat.target_duration_frames, 0),
+  );
+  const durations = apportionedArcDurations(arc, totalFrames);
+
+  blueprint.beats = arc.beats.map((arcBeat, index) => {
+    const seed = byId.get(arcBeat.id) ?? blueprint.beats[index];
+    const eligible = candidates.filter((candidate) =>
+      candidate.eligible_beats.includes(arcBeat.id) && arcBeat.required_roles.includes(candidate.role)
+    );
+    const refs = eligible.map((candidate) => candidate.candidate_ref);
+    const existingRefs = [
+      seed?.candidate_plan?.primary_candidate_ref,
+      ...(seed?.candidate_plan?.fallback_candidate_refs ?? []),
+    ]
+      .filter((ref): ref is string => typeof ref === "string")
+      .map((ref) => candidateIndex.canonicalByAlias.get(ref) ?? ref)
+      .filter((ref) => refs.includes(ref));
+    const plannedRefs = uniqueStrings([...existingRefs, ...refs]);
+    return {
+      ...(seed ?? {}),
+      id: arcBeat.id,
+      label: seed?.label ?? arcBeat.id,
+      purpose: seed?.purpose ?? `Fulfill the registered ${arcBeat.id} story beat from approved evidence.`,
+      target_duration_frames: durations[index],
+      required_roles: [...arcBeat.required_roles],
+      story_role: arcBeat.story_role,
+      emotional_valence: arcBeat.valence,
+      evidence_required: arcBeat.evidence_required ?? false,
+      ...(plannedRefs[0]
+        ? {
+          candidate_plan: {
+            primary_candidate_ref: plannedRefs[0],
+            fallback_candidate_refs: plannedRefs.slice(1, 4),
+          },
+        }
+        : { candidate_plan: undefined }),
+    };
+  });
+  if (!arc.beats.some((beat) => beat.id === blueprint.music_policy.entry_beat)) {
+    blueprint.music_policy.entry_beat = arc.beats[0].id;
+  }
+  return blueprint;
+}
+
+function narrativeArcPromptLines(arc: NarrativeArcDefinition | undefined): string[] {
+  if (!arc) return [];
+  return [
+    `narrative_mode=${arc.narrative_mode} is explicit. Use the registered "${arc.id}" arc below instead of a credibility-first or generic structure.`,
+    "Keep the arc beat ids and order. Scale target_duration_frames from ratio to the requested runtime; do not copy fixed seconds.",
+    "Map each arc beat's valence to emotional_valence and preserve evidence_required. Tempo is pacing guidance, not an extra blueprint field.",
+    "If required evidence is absent from the approved candidates, do not invent it; leave the claim unsupported and surface the shortage through the existing blocker/degraded workflow.",
+    JSON.stringify(arc, null, 2),
+  ];
+}
+
 function compactBriefForPrompt(briefContent: unknown, projectId: string): Record<string, unknown> {
   const brief = recordValue(briefContent) ?? {};
   const project = recordValue(brief.project) ?? {};
@@ -235,6 +388,7 @@ function compactBriefForPrompt(briefContent: unknown, projectId: string): Record
       primary: stringValue(message.primary),
       secondary: stringArray(message.secondary),
     },
+    narrative_mode: enumValue(brief.narrative_mode, VALID_NARRATIVE_MODES),
     must_have: stringArray(brief.must_have),
     emotion_curve: stringArray(brief.emotion_curve),
     editorial: {
@@ -288,6 +442,8 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
   const middleFrames = Math.round(totalFrames * 0.7);
   const closingFrames = Math.round(totalFrames * 0.12);
   const retentionLines = shortFormRetentionPromptLines(input.briefContent);
+  const narrativeArc = selectedNarrativeArc(input.briefContent);
+  const arcLines = narrativeArcPromptLines(narrativeArc);
   const sourceMedia = readSourceMediaSummary(input.selectsContent);
   const pureAudio = sourceMedia?.mode === "audio_only";
 
@@ -406,7 +562,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
       "candidate_planにはaudio-only candidate_refを通常どおり配置し、dialogue/nat sound/ambientのsemantic roleと発話の意味的完結性を優先してください。",
     ] : []),
     "各 beat は story_arc と対応させ、candidate_plan.primary_candidate_ref は必ず下の selects の candidate_ref から選んでください。",
-    "primary candidate が media_kind=image の場合だけ candidate_plan.still_image で hold_duration_sec/min_hold_sec/max_hold_sec を秒単位で提案できます。motion_mode=static のみ実行可能で subtle_ken_burns は EYE-070C2B pending、background は black/white/transparent または厳密hex色のみです。path/URL/functionは禁止です。",
+    "primary candidate が media_kind=image の場合だけ candidate_plan.still_image で hold_duration_sec/min_hold_sec/max_hold_sec を秒単位で提案できます。motion_mode=static のみ実行可能で subtle_ken_burns は EYE-070C2B pending、background は black/white/transparent または厳密hex色のみです。path/URL/functionは禁止です。実行可能なカメラワークは still_image.camera_motion で preset（push_in / pull_out / horizontal_tracking / tilt_down / diagonal_drift / pan_zoom）と任意の easing（smoothstep|linear）・intensity（0.02..0.6）を提案できます。fit_mode は contain / cover / full_bleed から選びます。",
     "beat.id と beat.label は構造用です。画面へ出す章題が必要な場合は viewer_label に視聴者が物語として読める言葉を書き、HOOK / LEVEL 1 / PAYOFF / ENDING のような編集者向け語彙をそのまま表示しないでください。",
     "未知の候補や存在しない candidate_ref を作らないでください。迷う場合は fallback_candidate_refs に別の既存 candidate_ref を置いてください。",
     "dialogue 候補は、質問テロップに頼らず主語または指示対象が選択範囲内で回収でき、話者が結論まで言い切っているものだけを採用してください。",
@@ -426,6 +582,8 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
     "Use accelerando for building energy, ritardando for emotional resolution.",
     "Use dissolve between different locations, hard_cut within the same scene.",
     "",
+    ...arcLines,
+    ...(arcLines.length > 0 ? [""] : []),
     ...retentionLines,
     ...(retentionLines.length > 0 ? [""] : []),
     "## Creative brief",
@@ -635,11 +793,36 @@ function sanitizeCandidatePlan(value: unknown, index: CandidateIndex): Candidate
   const stillImage = primaryCandidate?.media_kind === "image"
     ? sanitizeStillCandidateIntent(raw.still_image)
     : undefined;
+  const freezeFrameHold = primaryCandidate?.media_kind === "video"
+    ? sanitizeFreezeFrameHoldIntent(raw.freeze_frame_hold, primaryCandidate)
+    : undefined;
 
   return {
     primary_candidate_ref: primary,
     fallback_candidate_refs: rankedRefs.filter((ref) => ref !== primary),
     ...(stillImage ? { still_image: stillImage } : {}),
+    ...(freezeFrameHold ? { freeze_frame_hold: freezeFrameHold } : {}),
+  };
+}
+
+function sanitizeFreezeFrameHoldIntent(
+  value: unknown,
+  candidate: CandidateIndex["candidates"][number],
+): CandidatePlan["freeze_frame_hold"] | undefined {
+  const raw = recordValue(value);
+  if (!raw) return undefined;
+  const sourceTimeUs = nonNegativeInteger(raw.source_time_us);
+  if (
+    sourceTimeUs === undefined ||
+    typeof candidate.src_in_us !== "number" ||
+    typeof candidate.src_out_us !== "number" ||
+    sourceTimeUs < candidate.src_in_us ||
+    sourceTimeUs >= candidate.src_out_us
+  ) return undefined;
+  const holdFrames = positiveInteger(raw.hold_frames);
+  return {
+    source_time_us: sourceTimeUs,
+    ...(holdFrames !== undefined ? { hold_frames: holdFrames } : {}),
   };
 }
 
@@ -652,7 +835,16 @@ function sanitizeStillCandidateIntent(value: unknown): StillImageCandidateIntent
     if (duration !== undefined) out[key] = duration;
   }
   if (raw.motion_mode === "static" || raw.motion_mode === "subtle_ken_burns") out.motion_mode = raw.motion_mode;
-  if (raw.fit_mode === "contain" || raw.fit_mode === "cover") out.fit_mode = raw.fit_mode;
+  // Camera motion is carried deterministically; malformed model authoring is
+  // dropped at this boundary (artifact schemas still enforce the contract).
+  try {
+    const cameraMotion = sanitizeStillCameraMotionIntent(raw.camera_motion);
+    if (cameraMotion) out.camera_motion = cameraMotion;
+  } catch {
+    // lenient at the model boundary
+  }
+  if (raw.composition === "fit" || raw.composition === "vertical_blur_backdrop") out.composition = raw.composition;
+  if (raw.fit_mode === "contain" || raw.fit_mode === "cover" || raw.fit_mode === "full_bleed") out.fit_mode = raw.fit_mode;
   const background = sanitizeStillBackground(raw.background);
   if (background) out.background = background;
   return Object.keys(out).length > 0 ? out : undefined;
@@ -774,6 +966,10 @@ function sanitizeBeat(
   if (notes) beat.notes = notes;
   const storyRole = enumValue(raw.story_role, VALID_STORY_ROLES);
   if (storyRole) beat.story_role = storyRole;
+  const emotionalValence = clampSignedUnit(raw.emotional_valence);
+  if (emotionalValence !== undefined) beat.emotional_valence = emotionalValence;
+  const evidenceRequired = booleanValue(raw.evidence_required);
+  if (evidenceRequired !== undefined) beat.evidence_required = evidenceRequired;
   const craft = sanitizeCraftDirective(raw.craft);
   if (craft) beat.craft = craft;
   const skillHints = stringArray(raw.skill_hints);
@@ -1277,7 +1473,11 @@ function deterministicBlueprint(
     });
     retained.still_duration_policy = resolveStillDurationPolicy(ctx.briefContent as CreativeBrief, resolution.profileDefaults, 24, 1);
   }
-  return retained;
+  const normalizedSelects = normalizeNarrativeArcCandidateEligibility(
+    ctx.briefContent,
+    JSON.parse(JSON.stringify(ctx.selectsContent)) as SelectsCandidates,
+  );
+  return normalizeNarrativeArcBlueprint(ctx.briefContent, normalizedSelects, retained);
 }
 
 export function applySourceMediaContract(

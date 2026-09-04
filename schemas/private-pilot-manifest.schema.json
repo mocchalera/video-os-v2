@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "private-pilot-manifest.schema.json",
+  "title": "Video OS private pilot manifest",
+  "description": "A read-only index of the four independent private-pilot gate receipts. It has no aggregate readiness claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "pilot_id",
+    "project_id",
+    "created_at",
+    "receipts",
+    "provenance",
+    "public_promotion"
+  ],
+  "properties": {
+    "version": { "const": "private-pilot-manifest/v1" },
+    "pilot_id": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "receipts": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/receiptRef" }
+    },
+    "provenance": { "$ref": "#/$defs/manifestProvenance" },
+    "public_promotion": { "const": "out_of_scope" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "receiptRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "path", "sha256"],
+      "properties": {
+        "gate": {
+          "enum": ["agent_qa", "human_visual_audio", "nle_handoff", "platform_preview"]
+        },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "manifestProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "method", "synthetic_fixture", "inputs"],
+      "properties": {
+        "producer": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "synthetic_fixture": { "type": "boolean" },
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/artifactRef" }
+        }
+      }
+    }
+  }
+}

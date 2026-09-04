@@ -1,0 +1,71 @@
+# PROVISIONAL: every ratio, valence, and tempo value below is an initial
+# hypothesis from one reviewed short. Calibrate it with real retention data
+# before treating any threshold or proportion as stable policy.
+id: personal-challenge-comeback
+narrative_mode: personal_challenge
+status: provisional
+beats:
+  # Stop the first swipe with the strongest truthful declaration available.
+  - id: hook_declaration
+    ratio: 0.02
+    story_role: hook
+    required_roles: [dialogue]
+    tempo: burst
+    valence: 0.9
+    evidence_required: false
+
+  # Establish why this person's challenge contains a meaningful gap.
+  - id: identity_gap
+    ratio: 0.04
+    story_role: hook
+    required_roles: [dialogue]
+    tempo: medium
+    valence: 0.5
+    evidence_required: false
+
+  # Make the speaker relatable through a source-grounded setback or plateau.
+  - id: past_struggle
+    ratio: 0.13
+    story_role: setup
+    required_roles: [dialogue]
+    tempo: medium
+    valence: -0.3
+    evidence_required: false
+
+  # Turn the struggle upward with a concrete learning or changed practice.
+  - id: breakthrough
+    ratio: 0.16
+    story_role: experience
+    required_roles: [hero]
+    tempo: slow
+    valence: 0.7
+    evidence_required: false
+
+  # Place the emotional trough in the middle retention zone. Escalation claims
+  # must be backed by real evidence stills or archive material; never fabricate it.
+  - id: crisis_cluster
+    ratio: 0.22
+    story_role: experience
+    required_roles: [hero]
+    tempo: staccato
+    valence: -0.8
+    evidence_required: true
+
+  # Recover through an explicit philosophy and a concrete, checkable goal.
+  # This beat may contain the arc's longest intentional hold.
+  - id: philosophy_goal
+    ratio: 0.24
+    story_role: experience
+    required_roles: [dialogue]
+    tempo: slow_hold
+    valence: 0.8
+    evidence_required: false
+
+  # Descend from certainty to honest vulnerability, then invite participation.
+  - id: vulnerability_cta
+    ratio: 0.19
+    story_role: closing
+    required_roles: [dialogue]
+    tempo: medium
+    valence: 0.4
+    evidence_required: false

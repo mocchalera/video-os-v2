@@ -2,7 +2,12 @@ import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { applySourceMediaContract, buildCandidateIndex, createLlmBlueprintAgent } from "../runtime/agents/llm-blueprint-agent.js";
+import {
+  applySourceMediaContract,
+  buildCandidateIndex,
+  buildLlmBlueprintPrompt,
+  createLlmBlueprintAgent,
+} from "../runtime/agents/llm-blueprint-agent.js";
 import type { EditBlueprint } from "../runtime/artifacts/types.js";
 import type { LlmCompleter } from "../runtime/agents/llm-triage-agent.js";
 import type { BlueprintAgentContext } from "../runtime/commands/blueprint.js";
@@ -123,6 +128,8 @@ function validBlueprintResponse(overrides: Record<string, unknown> = {}): string
         required_roles: ["hero"],
         preferred_roles: ["support"],
         story_role: "hook",
+        emotional_valence: -0.8,
+        evidence_required: true,
         candidate_plan: {
           primary_candidate_ref: "cand_hook",
           fallback_candidate_refs: ["cand_close", "cand_missing"],
@@ -274,6 +281,8 @@ describe("createLlmBlueprintAgent", () => {
       beat_sync: true,
       hold_duration_bias: 0.9,
     });
+    expect(result.blueprint.beats[0].emotional_valence).toBe(-0.8);
+    expect(result.blueprint.beats[0].evidence_required).toBe(true);
     expect((result.blueprint as Record<string, unknown>).extra_top_level).toBeUndefined();
     expect((result.blueprint.beats[0] as unknown as Record<string, unknown>).extra_beat_field).toBeUndefined();
     expect(prompt).toContain("Show the first ride without over-explaining it.");
@@ -301,6 +310,42 @@ describe("createLlmBlueprintAgent", () => {
     expect(validate(result.blueprint), JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
 
+  it("selects the registered proportional arc only for an explicit narrative_mode", () => {
+    const personalBrief = { ...briefContent(), narrative_mode: "personal_challenge" };
+    const dayLogBrief = { ...briefContent(), narrative_mode: "day_log" };
+    const personalPrompt = buildLlmBlueprintPrompt({
+      ...context(),
+      briefContent: personalBrief,
+    });
+    const dayLogPrompt = buildLlmBlueprintPrompt({
+      ...context(),
+      briefContent: dayLogBrief,
+    });
+    const legacyPrompt = buildLlmBlueprintPrompt(context());
+
+    expect(personalPrompt).toContain('"id": "personal-challenge-comeback"');
+    expect(personalPrompt).toContain('"id": "crisis_cluster"');
+    expect(personalPrompt).toContain('"ratio": 0.22');
+    expect(dayLogPrompt).toContain('"id": "vlog-day-log"');
+    expect(dayLogPrompt).toContain('"id": "setup_purpose"');
+    expect(dayLogPrompt).toContain('"ratio": 0.3175');
+    expect(legacyPrompt).not.toContain('"id": "personal-challenge-comeback"');
+    expect(legacyPrompt).not.toContain('"id": "vlog-day-log"');
+  });
+
+  it("rejects an explicit creator arc combined with credibility-first planning", () => {
+    const brief = briefContent();
+    brief.narrative_mode = "day_log";
+    brief.editorial = {
+      ...(brief.editorial as Record<string, unknown>),
+      hook_priority: "credibility_first",
+    };
+
+    expect(() => buildLlmBlueprintPrompt({ ...context(), briefContent: brief })).toThrow(
+      /narrative_mode="day_log" conflicts with editorial\.hook_priority="credibility_first"/,
+    );
+  });
+
   it("records decision_runtime when using the default editorial connector", async () => {
     const agent = createLlmBlueprintAgent({
       editorialLlm: {
@@ -323,6 +368,19 @@ describe("createLlmBlueprintAgent", () => {
     expect(result.blueprint.decision_runtime?.attempted_runtimes?.[0]).toMatchObject({
       runtime: "codex_exec",
       status: "success",
+    });
+  });
+
+  it("records deterministic fallback authorship on the public blueprint path", async () => {
+    const result = await createLlmBlueprintAgent({
+      editorialLlm: { runtime: "deterministic", env: {} },
+    }).run(context());
+
+    expect(result.blueprint.decision_runtime).toEqual({
+      runtime: "deterministic",
+      role: "blueprint-llm",
+      author: "deterministic_fallback",
+      attempted_runtimes: [{ runtime: "deterministic", status: "success" }],
     });
   });
 
@@ -350,6 +408,36 @@ describe("createLlmBlueprintAgent", () => {
     expect(result.blueprint.beats[0].candidate_plan).toEqual({
       primary_candidate_ref: "cand_close",
       fallback_candidate_refs: [],
+    });
+  });
+
+  it("preserves beat-scoped freeze authorship at source frame zero for video", async () => {
+    const selects = selectsContent();
+    const first = (selects.candidates as Array<Record<string, unknown>>)[0];
+    first.src_in_us = 0;
+    first.media_kind = "video";
+    first.source_capabilities = { has_video: true, has_audio: true };
+    const agent = createLlmBlueprintAgent({
+      llm: async () => validBlueprintResponse({
+        beats: [{
+          id: "b01",
+          label: "apex",
+          target_duration_frames: 120,
+          required_roles: ["hero"],
+          candidate_plan: {
+            primary_candidate_ref: "cand_hook",
+            fallback_candidate_refs: [],
+            freeze_frame_hold: { source_time_us: 0, hold_frames: 33 },
+          },
+        }],
+      }),
+    });
+
+    const result = await agent.run(context({ selectsContent: selects }));
+
+    expect(result.blueprint.beats[0].candidate_plan?.freeze_frame_hold).toEqual({
+      source_time_us: 0,
+      hold_frames: 33,
     });
   });
 

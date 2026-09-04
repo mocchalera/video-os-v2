@@ -1,0 +1,26 @@
+version: "1"
+project_id: day3-equivalent-fixture
+created_at: "2026-08-31T00:00:00Z"
+project:
+  title: DAY3 equivalent review
+  strategy: intro restore with grounded cutaways
+message:
+  primary: Restore the intro and add three cutaways around two hook titles.
+audience:
+  primary: social review audience
+emotion_curve:
+  - orient
+  - open
+  - resolve
+must_have:
+  - intro restore
+  - three cutaways
+  - two hook titles
+must_avoid:
+  - silent timeline synthesis
+  - caption text mutation
+autonomy:
+  may_decide: []
+  must_ask: []
+resolved_assumptions:
+  - synthetic fixture uses one short source clip for deterministic media coverage

@@ -39,7 +39,7 @@
         "min_score_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
         "transition_type": {
           "type": "string",
-          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black", "film_crossfade", "light_leak_flash", "dreamy_focus_blur"]
         },
         "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
         "below_threshold": { "type": "boolean" },

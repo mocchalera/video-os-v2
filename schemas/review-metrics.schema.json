@@ -213,6 +213,7 @@
             "rhythm.beat_duration_deviation",
             "rhythm.max_shot_length",
             "rhythm.cadence_distribution",
+            "rhythm.lyric_mv_composite_cadence",
             "story.required_roles",
             "story.chronology",
             "story.dialogue_completeness",

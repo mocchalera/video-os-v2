@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { compile } from "../compiler/index.js";
+import { runCanonicalCompile } from "../compiler/index.js";
 import {
   loadBlueprint,
   loadSelects,
@@ -26,6 +26,8 @@ import { runLlmJudge } from "./llm-judge.js";
 import type { LlmJudgeReport } from "./types.js";
 import { composeEvalReport } from "./report.js";
 import type { EvalReport, EvalStageScores } from "./types.js";
+import { resolveReviewCutIdentity } from "../review/edit-identity.js";
+import { computeArtifactSha256 } from "../review/edit-identity.js";
 
 export { discoverGoldenProjects } from "./golden-registry.js";
 export { composeEvalReport, renderMarkdownReport } from "./report.js";
@@ -34,6 +36,31 @@ export { evaluateBlueprintAgreement } from "./blueprint-agreement.js";
 export { evaluateTimelineAgreement } from "./timeline-agreement.js";
 export { analyzeSelectionCoverage } from "./selection-coverage.js";
 export type { SelectionCoverageReport } from "./selection-coverage.js";
+export { evaluateAssemblyLoss, ASSEMBLY_LOSS_EVALUATOR_VERSION } from "./assembly-loss.js";
+export type {
+  AssemblyLossInput,
+  AssemblyLossReport,
+  AssemblyLossTranscript,
+  CausalEdgeRef,
+  HumanStructuralReference,
+} from "./assembly-loss.js";
+export {
+  ASSEMBLY_LOSS_HOLD_NOTE,
+  ASSEMBLY_LOSS_REPORT_KIND,
+  assertAssemblyLossReportIdentity,
+  assemblyLossBasename,
+  buildAssemblyLossProjectReport,
+  loadProjectInputs,
+  renderAssemblyLossMarkdown,
+  reportVerdict,
+  runAssemblyLossCli,
+  writeAssemblyLossOutputs,
+} from "./assembly-loss-project.js";
+export type {
+  AssemblyLossProjectReport,
+  AssemblyLossSourceArtifact,
+  LoadedProjectInputs,
+} from "./assembly-loss-project.js";
 export * from "./types.js";
 
 const ARTIFACT_PATHS = {
@@ -147,6 +174,9 @@ export async function evaluateCandidateAgainstGolden(
   }
 
   const now = options.now ?? (() => new Date());
+  const candidateIdentity = candidateTimeline
+    ? resolveReviewCutIdentity({ projectDir: candidateDir, timelinePath: artifactPath(candidateDir, "timeline") })
+    : null;
   return composeEvalReport({
     mode: "compare",
     goldenProject: path.basename(path.resolve(goldenDir)),
@@ -156,6 +186,11 @@ export async function evaluateCandidateAgainstGolden(
     stages,
     llmJudge,
     minScore: options.minScore ?? null,
+    ...(candidateIdentity && goldenTimeline ? { timelineIdentity: {
+      golden_cut_identity: computeArtifactSha256(artifactPath(goldenDir, "timeline")),
+      candidate_cut_identity: candidateIdentity.cut_identity,
+      candidate_review_mode: candidateIdentity.mode,
+    } } : {}),
   });
 }
 
@@ -198,7 +233,7 @@ export async function selfEvaluateGolden(
     path.dirname(new URL(import.meta.url).pathname),
     "../..",
   );
-  compile({
+  await runCanonicalCompile({
     projectPath: workdir,
     repoRoot,
     createdAt: goldenTimeline.created_at,
@@ -229,6 +264,11 @@ export async function selfEvaluateGolden(
     stages,
     llmJudge,
     minScore: options.minScore ?? null,
+    timelineIdentity: {
+      golden_cut_identity: computeArtifactSha256(goldenTimelinePath),
+      candidate_cut_identity: computeArtifactSha256(artifactPath(workdir, "timeline")),
+      candidate_review_mode: "legacy_canonical",
+    },
   });
   return { report, workdir };
 }

@@ -7,6 +7,7 @@ import type { AssetSttResult } from "../connectors/openai-stt.js";
 import { discoverRequestedSources } from "../media/source-discovery.js";
 import type { ConsumerImpact } from "../media/media-kind-registry.js";
 import { buildSourceLedger, type SourceLedger } from "./source-ledger.js";
+import { hasTemporalVideo } from "./source-media-capabilities.js";
 import { atomicWriteJson } from "../pipeline/stages/_util.js";
 
 export interface RunnerValidationResult {
@@ -198,6 +199,31 @@ export function validateAnalysisCoverageReport(data: unknown): RunnerValidationR
   return { valid: violations.length === 0, violations };
 }
 
+export function validateAnalysisCoverageFreshness(projectDir: string): RunnerValidationResult {
+  const manifestPath = path.join(projectDir, "02_media/source_media_manifest.json");
+  const coveragePath = path.join(projectDir, "03_analysis/analysis_coverage_report.json");
+  if (!fs.existsSync(manifestPath) || !fs.existsSync(coveragePath)) {
+    return { valid: false, violations: ["source manifest and analysis coverage report are required"] };
+  }
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as SourceMediaManifest;
+    const coverage = JSON.parse(fs.readFileSync(coveragePath, "utf-8")) as AnalysisCoverageReport;
+    const excludedFields = manifest.provenance?.hash_policy?.excluded_fields ?? [];
+    const currentHash = computeNormalizedJsonHash(manifest, excludedFields);
+    if (coverage.source_media_manifest_hash !== currentHash) {
+      return {
+        valid: false,
+        violations: [
+          `source_media_manifest_hash ${String(coverage.source_media_manifest_hash)} does not match current manifest ${currentHash}`,
+        ],
+      };
+    }
+    return { valid: true, violations: [] };
+  } catch (error) {
+    return { valid: false, violations: [error instanceof Error ? error.message : String(error)] };
+  }
+}
+
 export interface BuildManifestOptions {
   projectDir: string;
   projectId: string;
@@ -282,6 +308,7 @@ export interface BuildCoverageOptions {
   analysis?: {
     assets: AssetItem[];
     segments: SegmentItem[];
+    segmentsSchemaValid?: boolean;
     sttAttempted: boolean;
     sttSkipReason?: string;
     sttResults?: Map<string, AssetSttResult>;
@@ -298,7 +325,13 @@ export interface BuildCoverageOptions {
     };
     vlm: StageAssetResults;
     peaks: StageAssetResults;
-    bgm: StageAssetResults & { requestedAssetIds: string[]; requestedCount: number; unmatchedRequestedCount: number };
+    bgm: StageAssetResults & {
+      requestedAssetIds: string[];
+      requestedCount: number;
+      unmatchedRequestedCount: number;
+      bindingFailures?: string[];
+      artifactHash?: string | null;
+    };
   };
 }
 
@@ -448,10 +481,12 @@ function buildAnalysisLanes(analysis: BuildCoverageOptions["analysis"]): LaneSta
       artifact_hash: null,
     }));
   }
-  const visualAssets = analysis.assets.filter((asset) => asset.media_kind === "image" || !!asset.video_stream);
-  const temporalVideoAssets = analysis.assets.filter((asset) => asset.media_kind !== "image" && !!asset.video_stream);
+  const visualAssets = analysis.assets.filter((asset) => asset.media_kind === "image" || hasTemporalVideo(asset));
+  const temporalVideoAssets = analysis.assets.filter((asset) => asset.media_kind !== "image" && hasTemporalVideo(asset));
   const audioAssets = analysis.assets.filter((asset) => !!asset.audio_stream);
-  const segmentAssetIds = new Set(analysis.segments.map((segment) => segment.asset_id));
+  const segmentAssetIds = analysis.segmentsSchemaValid === false
+    ? new Set<string>()
+    : new Set(analysis.segments.map((segment) => segment.asset_id));
   const segmentsReady = analysis.assets.filter((asset) => segmentAssetIds.has(asset.asset_id)).map((asset) => asset.asset_id);
   const sttReady = audioAssets.filter((asset) => analysis.sttResults?.get(asset.asset_id)?.success || asset.has_transcript).map((asset) => asset.asset_id);
   const sttFailed = audioAssets.filter((asset) => analysis.sttResults?.has(asset.asset_id) && !analysis.sttResults.get(asset.asset_id)?.success);
@@ -481,7 +516,11 @@ function buildAnalysisLanes(analysis: BuildCoverageOptions["analysis"]): LaneSta
       lane_id: "segments",
       status: segmentsReady.length === analysis.assets.length && analysis.assets.length > 0 ? "ready" : segmentsReady.length > 0 ? "partial" : "failed",
       required: true,
-      reason: segmentsReady.length === analysis.assets.length ? null : "one or more ready assets have no deterministic segments",
+      reason: analysis.segmentsSchemaValid === false
+        ? "canonical segments artifact failed schema validation"
+        : segmentsReady.length === analysis.assets.length
+          ? null
+          : "one or more ready assets have no deterministic segments",
       consumer_impact: segmentsReady.length === analysis.assets.length ? "none" : "planning_block",
       asset_ids: segmentsReady,
       artifact_hash: null,
@@ -513,11 +552,11 @@ function buildAnalysisLanes(analysis: BuildCoverageOptions["analysis"]): LaneSta
     {
       lane_id: "bgm_analysis",
       status: analysis.bgm.requestedCount === 0 || !analysis.bgm.attempted ? "skipped" : analysis.bgm.readyAssetIds.length === analysis.bgm.requestedCount ? "ready" : analysis.bgm.readyAssetIds.length > 0 ? "partial" : "failed",
-      required: false,
-      reason: analysis.bgm.requestedCount === 0 ? "no_explicit_bgm_role_input" : !analysis.bgm.attempted ? "bgm analysis skipped by request" : analysis.bgm.unmatchedRequestedCount > 0 ? "one or more explicit BGM requests did not match the current source set" : analysis.bgm.failedAssetIds.length > 0 ? "one or more explicit BGM analyses failed" : null,
-      consumer_impact: analysis.bgm.failedAssetIds.length > 0 || analysis.bgm.unmatchedRequestedCount > 0 ? "planning_warn" : "none",
+      required: analysis.bgm.requestedCount > 0 && analysis.bgm.attempted,
+      reason: analysis.bgm.requestedCount === 0 ? "no_explicit_bgm_role_input" : !analysis.bgm.attempted ? "bgm analysis skipped by request" : analysis.bgm.unmatchedRequestedCount > 0 ? "one or more explicit BGM requests did not match the current source set" : (analysis.bgm.bindingFailures?.length ?? 0) > 0 ? "explicit BGM role binding failed closed" : analysis.bgm.failedAssetIds.length > 0 ? "one or more explicit BGM analyses failed" : null,
+      consumer_impact: analysis.bgm.failedAssetIds.length > 0 || analysis.bgm.unmatchedRequestedCount > 0 || (analysis.bgm.bindingFailures?.length ?? 0) > 0 ? "planning_block" : "none",
       asset_ids: analysis.bgm.readyAssetIds,
-      artifact_hash: null,
+      artifact_hash: analysis.bgm.artifactHash ?? null,
     },
     {
       lane_id: "audio_story_graph",
@@ -543,6 +582,9 @@ function lanesForAsset(
   lanes: LaneStatus[],
   analysis: BuildCoverageOptions["analysis"],
 ): LaneStatus[] {
+  const analysisAsset = analysis?.assets.find((asset) => asset.asset_id === item.asset_id);
+  const audioOnly = item.media_kind === "audio"
+    || Boolean(analysisAsset?.audio_stream && !hasTemporalVideo(analysisAsset));
   return lanes.map((lane) => {
     if (!analysis) return lane;
     if (lane.lane_id === "source_manifest") {
@@ -554,7 +596,7 @@ function lanesForAsset(
         asset_ids: [item.asset_id],
       };
     }
-    if (item.media_kind === "audio" && ["contact_sheets", "filmstrips", "visual_quality", "vlm_tags", "vlm_peaks"].includes(lane.lane_id)) {
+    if (audioOnly && ["contact_sheets", "filmstrips", "visual_quality", "vlm_tags", "vlm_peaks"].includes(lane.lane_id)) {
       return { ...lane, status: "skipped", reason: "not_applicable_no_video_stream", consumer_impact: "none", asset_ids: [] };
     }
     if (item.media_kind === "image" && ["filmstrips", "vlm_peaks", "stt", "diarization", "audio_events", "bgm_analysis", "audio_story_graph", "sync_quality"].includes(lane.lane_id)) {
@@ -590,8 +632,8 @@ function derivativeStageResults(videoAssets: AssetItem[], readyAssetIds: string[
 function stageFailedForAsset(laneId: string, assetId: string, analysis: NonNullable<BuildCoverageOptions["analysis"]>): boolean {
   const asset = analysis.assets.find((item) => item.asset_id === assetId);
   if (laneId === "segments") return !analysis.segments.some((segment) => segment.asset_id === assetId);
-  if (laneId === "contact_sheets") return Boolean(asset?.video_stream) && (asset?.contact_sheet_ids.length ?? 0) === 0;
-  if (laneId === "filmstrips") return Boolean(asset?.video_stream) && !analysis.segments.some((segment) => segment.asset_id === assetId && !!segment.filmstrip_path);
+  if (laneId === "contact_sheets") return Boolean(asset && hasTemporalVideo(asset)) && (asset?.contact_sheet_ids.length ?? 0) === 0;
+  if (laneId === "filmstrips") return Boolean(asset && hasTemporalVideo(asset)) && !analysis.segments.some((segment) => segment.asset_id === assetId && !!segment.filmstrip_path);
   if (laneId === "visual_quality") return !analysis.segments.some((segment) => segment.asset_id === assetId && !!segment.visual_quality_measurements);
   if (laneId === "vlm_tags") return analysis.vlm.failedAssetIds.includes(assetId);
   if (laneId === "vlm_peaks") return analysis.peaks.failedAssetIds.includes(assetId);

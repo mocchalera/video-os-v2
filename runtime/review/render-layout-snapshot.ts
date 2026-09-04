@@ -43,6 +43,8 @@ export interface LayoutTimeline {
 export interface BuildRenderLayoutSnapshotOptions {
   inspectCaptionFontContractImpl?: typeof inspectCaptionFontContract;
   findMissingFontGlyphsImpl?: typeof findMissingFontGlyphs;
+  generationBinding?: RenderLayoutSnapshot["binding"];
+  captionRoles?: Record<string, "baseline" | "emphasis" | "title">;
 }
 
 /**
@@ -78,6 +80,7 @@ export function buildRenderLayoutSnapshot(
     return {
       layer_id: caption.caption_id,
       semantic_role: "speech_caption",
+      caption_role: options.captionRoles?.[caption.caption_id] ?? "baseline",
       source: "ffmpeg-libass",
       start_frame: caption.timeline_in_frame,
       end_frame:
@@ -156,6 +159,9 @@ export function buildRenderLayoutSnapshot(
 
   return {
     version: RENDER_LAYOUT_SNAPSHOT_VERSION,
+    ...(options.generationBinding
+      ? { binding: structuredClone(options.generationBinding) }
+      : {}),
     frame: {
       ...frame,
       total_frames: totalFrames,

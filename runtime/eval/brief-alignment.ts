@@ -11,9 +11,14 @@ import {
   loadBlueprint,
   loadCreativeBrief,
   loadSelects,
+  loadTimeline,
 } from "../artifacts/loaders.js";
 import { clamp01 } from "./matching.js";
 import type { SelectionCoverageSegment } from "./selection-coverage.js";
+import {
+  assertDeferredProductionDirectivesSatisfied,
+  productionDirectiveTarget,
+} from "./selection-coverage.js";
 import {
   scoreBlueprintEmotionCurve,
   scoreBlueprintIntentMessage,
@@ -34,6 +39,7 @@ import {
 import {
   AXIS_WEIGHTS,
   BRIEF_ALIGNMENT_AXES,
+  DEGRADED_CONFIDENCE_CEILING,
   STAGE_WEIGHTS,
   type AxisScore,
   type BriefAlignmentAxis,
@@ -64,6 +70,10 @@ function fallbackAxis(score: number, evidence: string[], gaps: string[]): AxisSc
     judge_source: "deterministic",
     evidence,
     gaps,
+    // Deterministic heuristics are measurements, not model judgment, but they
+    // are not full evidence-grounded evaluation: mark the basis degraded so it
+    // can never be presented as a high-confidence measured claim.
+    confidence_basis: "degraded",
   };
 }
 
@@ -229,11 +239,24 @@ function mergeJudge(
   base: Record<BriefAlignmentAxis, AxisScore>,
   judge: BriefAlignmentJudgeReport | null,
 ): Record<BriefAlignmentAxis, AxisScore> {
-  if (!judge) return base;
   const merged = { ...base };
+  if (judge) {
+    for (const axis of BRIEF_ALIGNMENT_AXES) {
+      if (judge.axes[axis].confidence > base[axis].confidence) {
+        merged[axis] = judge.axes[axis];
+      }
+    }
+  }
+  // Issue #32 M0 truth contract: deterministic scoring and any other basis
+  // without an explicit measured provenance is degraded and must never claim
+  // confidence above the degraded ceiling (provider absence rule).
   for (const axis of BRIEF_ALIGNMENT_AXES) {
-    if (judge.axes[axis].confidence > base[axis].confidence) {
-      merged[axis] = judge.axes[axis];
+    if (!merged[axis].confidence_basis) {
+      merged[axis] = {
+        ...merged[axis],
+        confidence: Math.min(merged[axis].confidence, DEGRADED_CONFIDENCE_CEILING),
+        confidence_basis: "degraded",
+      };
     }
   }
   return merged;
@@ -405,6 +428,13 @@ export async function evaluateBriefAlignment(
     if (fs.existsSync(blueprintPath)) {
       const rawBlueprint = fs.readFileSync(blueprintPath, "utf-8");
       const blueprint = loadBlueprint(blueprintPath);
+      const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+      const hasDeferredDirective = Array.isArray(brief.must_have) &&
+        brief.must_have.some((item) => productionDirectiveTarget(String(item)) !== undefined);
+      const timeline = hasDeferredDirective && fs.existsSync(timelinePath)
+        ? loadTimeline(timelinePath)
+        : undefined;
+      assertDeferredProductionDirectivesSatisfied(brief, blueprint, timeline);
       const evaluated = await evaluateBlueprintStage(brief, blueprint, rawBlueprint, options);
       stages.blueprint = evaluated.result;
       notes.push(...evaluated.notes);

@@ -16,6 +16,19 @@
     "approval_sha256": { "$ref": "#/$defs/hash" },
     "timeline_sha256": { "$ref": "#/$defs/hash" },
     "font_manifest_sha256": { "$ref": "#/$defs/hash" },
+    "caption_visual_treatment": {
+      "type": "object",
+      "required": ["resolved_input_hash", "approval_hash", "visual_treatment_patch_hash", "typography_policy_hash", "text_timing_hash", "capability_hash"],
+      "properties": {
+        "resolved_input_hash": { "$ref": "#/$defs/hash" },
+        "approval_hash": { "$ref": "#/$defs/hash" },
+        "visual_treatment_patch_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "typography_policy_hash": { "$ref": "#/$defs/hash" },
+        "text_timing_hash": { "$ref": "#/$defs/hash" },
+        "capability_hash": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
     "created_at": { "type": "string", "format": "date-time" }
   },
   "allOf": [{
